@@ -82,7 +82,6 @@ Changelog:addChangelog('[December, 16 2024]')
 Changelog:addChangelog('- Update Level to 2600')
 Changelog:addChangelog('')
 Changelog:addChangelog('[April, 06 2024]')
-Changelog:addChangelog('- Added Webhook Notifier to Discord')
 Changelog:addChangelog('- Added Subs Farming')
 Changelog:addChangelog('- Added New Method Mastery Farm')
 Changelog:addChangelog('- Added Pirate Raid Castle')
@@ -191,18 +190,6 @@ task.spawn(function ()
     end
 end)
 
-getgenv().AntiKickClient = true
-Main_Home:addToggle("Anti Kick Client", getgenv().AntiKickClient, function(Value)
-    getgenv().AntiKickClient = Value
-end)
-task.spawn(function()
-    while wait() do
-        if getgenv().AntiKickClient then
-            --loadstring(game:HttpGet('https://gitlab.com/Sky2836/BT/-/raw/main/antikickclient'))()
-        end
-    end
-end)
-
 Main_Home:addButton("FPS Boost", function()
     local decalsyeeted = false
     local g = game
@@ -280,7 +267,6 @@ function Hop()
                     else
                         if tonumber(actualHour) ~= tonumber(Existing) then
                             local delFile = pcall(function()
-                                -- delfile("NotSameServers.json")
                                 AllIDs = {}
                                 table.insert(AllIDs, actualHour)
                             end)
@@ -292,7 +278,6 @@ function Hop()
                     table.insert(AllIDs, ID)
                     wait(.1)
                     pcall(function()
-                        -- writefile("NotSameServers.json", game:GetService('HttpService'):JSONEncode(AllIDs))
                         wait()
                         game:GetService("TeleportService"):TeleportToPlaceInstance(PlaceID, ID, game.Players.LocalPlayer)
                     end)
@@ -381,8 +366,6 @@ end)
 
 ----------------------------------------------------//----------------------------------------------------
 --// PATH 
---[[wait(1)
-loadstring(game:HttpGet('https://raw.githubusercontent.com/S4nZz/bt_project/main/script'))() ]]
 
 if game:GetService("Players").LocalPlayer.PlayerGui.Main:FindFirstChild("ChooseTeam") then
     repeat wait()
@@ -1423,28 +1406,6 @@ end
 
 
 --// Bypass
---[[function BypassCheck()
-    for i,v in pairs(game:GetService("Players").LocalPlayer.Character:GetDescendants()) do
-        if v:IsA("LocalScript") then
-            if v.Name == "General" or v.Name == "Shiftlock"  or v.Name == "FallDamage" or v.Name == "4444" or v.Name == "CamBob" or v.Name == "JumpCD" or v.Name == "Looking" or v.Name == "Run" then
-                v:Destroy()
-            end
-        end
-    end
-    for i,v in pairs(game:GetService("Players").LocalPlayer.PlayerScripts:GetDescendants()) do
-        if v:IsA("LocalScript") then
-            if v.Name == "RobloxMotor6DBugFix" or v.Name == "Clans"  or v.Name == "Codes" or v.Name == "CustomForceField" or v.Name == "MenuBloodSp"  or v.Name == "PlayerList" then
-                v:Destroy()
-            end
-        end
-    end
-    for i,v in pairs(game:GetService('Workspace'):GetChildren()) do
-        if v.Name == "Script" then
-            v:Destroy()
-        end
-    end
-end
-BypassCheck()]]
 
 --// EQUIP WEAPON 
 function EquipTool(Tool)
@@ -1508,8 +1469,6 @@ end
 
 --// AUTO CLICK
 function AutoClick()
-    --game:GetService('VirtualUser'):CaptureController()
-    --game:GetService('VirtualUser'):Button1Down(Vector2.new(1280, 672))
 end
 
 function AutoClick2()
@@ -1562,7 +1521,7 @@ local EventCandy = Event_Left:addMenu('#Main Events')
 local EventTimes = EventCandy:addLabel('')
 
 
-EventCandy:addToggle('Auto Claim Gift', AutoClaimGift, function()
+EventCandy:addToggle('Auto Claim Gift', AutoClaimGift, function(Value)
     AutoClaimGift = Value
 end)
 spawn(function()
@@ -1582,7 +1541,7 @@ spawn(function()
         end
     end
 end)
-EventCandy:addToggle('Auto Store Gift', AutoStoreGift, function()
+EventCandy:addToggle('Auto Store Gift', AutoStoreGift, function(Value)
     AutoStoreGift = Value
 end)
 spawn(function()
@@ -1723,23 +1682,6 @@ spawn(function()
     end
 end)
 
---[[local FarmTable = {
-    "Above",
-    "Beside"
-}
-AutoFarmType = "Above"
-Main_Setting:addDropdown("Select Farm Type", AutoFarmType, FarmTable, function(Value)
-    AutoFarmType = Value
-end)
-spawn(function()
-    while wait() do
-        if AutoFarmType == "Above" then
-            Farm_Mode = CFrame.new(0,DisFarm,0) * CFrame.Angles(math.rad(-90),0,0)
-        elseif AutoFarmType == "Beside" then
-            Farm_Mode = CFrame.new(0,2,DisFarm) * CFrame.Angles(math.rad(0),0,0)
-        end
-    end
-end)]]
 
 DisFarm = 25
 Main_Setting:addTextbox("Distance Farm", DisFarm, function(Value)
@@ -1773,14 +1715,11 @@ function attackEnemies(enemyTarget)
     local ShootGunEvent = game:GetService("ReplicatedStorage").Modules.Net["RE/ShootGunEvent"]
     local toolEquiped = plr.Character:FindFirstChildOfClass("Tool")
 
-    --local RemoteEvent = game.Players.LocalPlayer.Characters["Dragon-Dragon"].RemoteEvent
-    --local LeftClickRemote = workspace.Characters.Players["Dragon-Dragon"].LeftClickRemote
 
     if enemyTarget and (enemyTarget.Position - plr.Character.HumanoidRootPart.Position).Magnitude < 55 then
         if (toolEquiped.ToolTip == "Melee" or toolEquiped.ToolTip == "Sword") and not RaidAura then
             RegisterAttack:FireServer(FastAttackDelay)
             RegisterHit:FireServer(enemyTarget, {})
-            --ReceivedHit:FireServer(enemyTarget, {})
         end
 
         if toolEquiped.ToolTip == "Gun" and not RaidAura then
@@ -1793,7 +1732,6 @@ function FastAttacked()
     local plr = game:GetService("Players").LocalPlayer
 
     for _, Enemy in pairs(game:GetService("Workspace").Enemies:GetChildren()) do
-        --attackEnemies(Enemy.Head)
         attackEnemies(Enemy.HumanoidRootPart)
     end
 
@@ -1804,8 +1742,6 @@ function FastAttacked()
     end
 end
 
---local CameraShakerR = require(game.ReplicatedStorage.Util.CameraShaker)
---local CombatController = require(game:GetService("ReplicatedStorage").Controllers.CombatController)
 
 FastAttack = true
 Main_Setting:addToggle('Fast Attack', FastAttack, function(Value)
@@ -1817,118 +1753,16 @@ task.spawn(function()
             pcall(function()
                 repeat task.wait()
                     FastAttacked()
-                    --CameraShakerR:Stop()
                 until not FastAttack
             end)
         end
     end
 end)
 
---[[// Fast Attack
-local CombatFramework = require(game:GetService('Players').LocalPlayer.PlayerScripts.CombatFramework)
-
-function GetCurrentBlade()
-    local GetFastAttack = debug.getupvalues(CombatFramework)[2]
-    local activeController = GetFastAttack.activeController
-    local blades = activeController.blades[1]
-    if not blades then return end
-    while blades.Parent ~= game.Players.LocalPlayer.Character do blades = blades.Parent end
-    return blades
-end
-
-function AttackNoCD()
-    local plr = game:GetService("Players").LocalPlayer
-    local GetFastAttack = debug.getupvalues(CombatFramework)[2]
-
-    local activeController = GetFastAttack.activeController
-    for i = 1, 1 do
-        local getBladeHits = require(game.ReplicatedStorage.CombatFramework.RigLib).getBladeHits(plr.Character,{plr.Character.HumanoidRootPart},60)
-        local cac = {}
-        local hash = {}
-        for k, v in pairs(getBladeHits) do
-            if v.Parent:FindFirstChild("HumanoidRootPart") and not hash[v.Parent] then
-                table.insert(cac, v.Parent.HumanoidRootPart)
-                hash[v.Parent] = true
-            end
-        end
-        getBladeHits = cac
-        if #getBladeHits > 0 then
-            local u8 = debug.getupvalue(activeController.attack, 5)
-            local u9 = debug.getupvalue(activeController.attack, 6)
-            local u7 = debug.getupvalue(activeController.attack, 4)
-            local u10 = debug.getupvalue(activeController.attack, 7)
-            local u12 = (u8 * 798405 + u7 * 727595) % u9
-            local u13 = u7 * 798405
-                (function()
-                    u12 = (u12 * u9 + u13) % 1099511627776
-                    u8 = math.floor(u12 / u9)
-                    u7 = u12 - u8 * u9
-                end)()
-            u10 = u10 + 1
-            debug.setupvalue(activeController.attack, 5, u8)
-            debug.setupvalue(activeController.attack, 6, u9)
-            debug.setupvalue(activeController.attack, 4, u7)
-            debug.setupvalue(activeController.attack, 7, u10)
-
-            pcall(function()
-                if plr.Character:FindFirstChildOfClass("Tool") and activeController.blades and activeController.blades[1] then
-                    activeController.animator.anims.basic[1]:Play(0.01,0.01,0.01)
-                    game:GetService("ReplicatedStorage").RigControllerEvent:FireServer("weaponChange",tostring(GetCurrentBlade()))
-                    game.ReplicatedStorage.Remotes.Validator:FireServer(math.floor(u12 / 1099511627776 * 16777215), u10)
-                    game:GetService("ReplicatedStorage").RigControllerEvent:FireServer("hit", getBladeHits, i, "")
-                end
-            end)
-        end
-    end
-end]]
-
---[[local FastAttack = true
-Main_Setting:addToggle('Fast Attack 1 (Selected Delay)', FastAttack, function(Value)
-    FastAttack = Value
-end)]]
 
 
---[[spawn(function()
-    while task.wait() do
-        if FastAttack then
-            local CameraShakerR = require(game.ReplicatedStorage.Util.CameraShaker)
-            CameraShakerR:Stop()
 
-            pcall(function()
-                repeat task.wait(FastAttackDelay)
-                    AttackNoCD()
-                until not FastAttack
-            end)
-        end
-    end
-end)]]
 
---[[Main_Setting:addToggle('Fast Attack 2 (Without Selected Delay)', MobileFastAttack, function(Value)
-    MobileFastAttack = Value
-end)
-spawn(function()
-    while task.wait() do
-        if MobileFastAttack then
-            local CameraShakerR = require(game.ReplicatedStorage.Util.CameraShaker)
-            CameraShakerR:Stop()
-            pcall(function()
-                local CombatFrameworkLib = getupvalues(require(game:GetService("Players").LocalPlayer.PlayerScripts.PlayerModule.ControlModule))
-                local CmrFwLib = CombatFrameworkLib[2]
-                local activeController = CmrFwLib.activeController
-                
-                activeController.timeToNextAttack = 0
-                activeController.attacking = false
-                activeController.blocking = false
-                activeController.timeToNextBlock = 0
-                activeController.increment = 0
-                activeController.hitboxMagnitude = 100
-                activeController.focusStart = 0
-                activeController.humanoid.AutoRotate = 0
-                activeController.animator.anims.basic[1]:Play(0.01,0.01,0.01)
-            end)
-        end
-    end
-end)]]
 
 --// BRING MOBS
 function BringMonster(TargetName, TargetCFrame)
@@ -1946,7 +1780,6 @@ function BringMonster(TargetName, TargetCFrame)
                     if v.Humanoid:FindFirstChild("Animator") then
                         v.Humanoid.Animator:Destroy()
                     end
-                    --sethiddenproperty(game.Players.LocalPlayer, "SimulationRadius", math.huge)
                 end
             end
         end
@@ -2445,9 +2278,6 @@ spawn(function()
     end
 end)
 
---[[Dragon_Hunter:addToggle("Auto Collect Blaze Ember", ColectBlazeEmber, function(Value)
-    ColectBlazeEmber = Value
-end)]]
 
 Dragon_Hunter:addToggle("Upgrade Dragon Talon", DragonTalonUpgrade, function(Value)
     DragonTalonUpgrade = Value
@@ -2651,11 +2481,8 @@ spawn(function()
         pcall(function()
             if AutoSeaFarm or AutoSail then
                 game:GetService("Workspace").Boats:FindFirstChild(BoatSelected).VehicleSeat.BodyVelocity.MaxForce = Vector3.new(100000000000,100000000000,100000000000)
-                --game:GetService("Workspace").Boats:FindFirstChild(BoatSelected).VehicleSeat.BodyPosition.MaxForce = Vector3.new(100000000,100000000,100000000)
             else
                 game:GetService("Workspace").Boats:FindFirstChild(BoatSelected).VehicleSeat.BodyVelocity.MaxForce = Vector3.new(2453406976, 0, 2453406976)
-                --game:GetService("Workspace").Boats:FindFirstChild(BoatSelected).VehicleSeat.BodyPosition.MaxForce = Vector3.new(0, 2453406976, 0)
-                --game:GetService("Workspace").Boats:FindFirstChild(BoatSelected).VehicleSeat.BodyVelocity.Velocity = Vector3.new(0,0,0)
 
             end
         end)
@@ -2765,7 +2592,6 @@ spawn(function()
     while task.wait() do
         if AutoSail then
             
-            --local RoughSeaPos = CFrame.new(-47041.6641, 10.8365746, -6858.74072, 0.703071356, -0.0286799595, 0.710540712, 0.0407584943, 0.999169052, -2.41380471e-09, -0.709950268, 0.0289605707, 0.703656077)
             pcall(function()
                 CheckSea()
 
@@ -3062,7 +2888,6 @@ SpeedAllBoat = 150
 Config_Sea:addTextbox("Speed Boat Hack", SpeedAllBoat, function(Value)
     SpeedAllBoat = Value
     if SpeedAllBoat then
-        --workspace.Boats.PirateGrandBrigade.Speed
         game:GetService("Workspace").Boats:FindFirstChild(BoatSelected).VehicleSeat.MaxSpeed = SpeedAllBoat
     end
 end)
@@ -3135,7 +2960,6 @@ spawn(function()
                         if v:FindFirstChild("Humanoid") and v:FindFirstChild("Engine") and v.Humanoid.Value > 0 then
                             repeat game:GetService("RunService").Heartbeat:wait()
                                 if (v.VehicleSeat.Position - game.Players.LocalPlayer.Character.HumanoidRootPart.Position).Magnitude < 500 then
-                                    --SeaMonPosition = v.Body.Part.Position
                                     SeaMonPosition = v.Sails.Position
                                     if game:GetService("Players").LocalPlayer.Character:FindFirstChild(SelectWeaponSeaFarm) then
                                         game:GetService("Players").LocalPlayer.Character:FindFirstChild(SelectWeaponSeaFarm).MousePos.Value = SeaMonPosition
@@ -3575,15 +3399,6 @@ spawn(function()
         if TeleporttoKitsune then
             if game:GetService("Workspace").Map:FindFirstChild("KitsuneIsland") then
                 Tween(game:GetService("Workspace")._WorldOrigin.Locations["Kitsune Island"].CFrame)
-                --[[local kitsuneislands = game:GetService("Workspace").Map:FindFirstChild("KitsuneIsland")
-                if kitsuneislands:FindFirstChild("ShrineActive") then
-                    for _, v in pairs(kitsuneislands:FindFirstChild("ShrineActive"):GetDescendants()) do
-                        if v:IsA("BasePart") and v:FindFirstChild("NeonShrinePart") then --v.Name:find("NeonShrinePart")
-                            Tween(v.CFrame)
-                        end
-                    end
-                end]]
-                --game:GetService("Workspace").Map.KitsuneIsland.ShrineDialogPart2
             end
         end
     end
@@ -3597,15 +3412,11 @@ spawn(function()
     while task.wait() do
         if CollectAzureAmber then
             pcall(function()
-                --[[if game:GetService("Workspace"):FindFirstChild("AttachedAzureEmber") then
-                    Tween(game:GetService("Workspace"):WaitForChild("EmberTemplate"):FindFirstChild("Part").CFrame)
-                end]]
                 for i,v in pairs(game.Workspace:GetChildren()) do
                     if v.Name == 'EmberTemplate' then
                         Tween(v.Part.CFrame)
                     end
                 end
-                --AutoGrabEmber()
             end)
         end
     end
@@ -4358,7 +4169,7 @@ spawn(function()
                                             Mastery_Farm_CFrame = v.HumanoidRootPart.CFrame
                                             AutoClick()
                                         end
-                                    until not DevilMastery_Farm or not SelectedMethodMastery == "Quest" or not v.Parent or v.Humanoid.Health == 0 or game:GetService("Players").LocalPlayer.PlayerGui.Main.Quest.Visible == false or not game:GetService("Workspace").Enemies:FindFirstChild(v.Name)
+                                    until not DevilMastery_Farm or SelectedMethodMastery ~= "Quest" or not v.Parent or v.Humanoid.Health == 0 or game:GetService("Players").LocalPlayer.PlayerGui.Main.Quest.Visible == false or not game:GetService("Workspace").Enemies:FindFirstChild(v.Name)
                                 end
                             end
                         end
@@ -4397,7 +4208,7 @@ spawn(function()
                                     AutoClick()
                                 end
                                 
-                            until not DevilMastery_Farm or not SelectedMethodMastery == "Quest" or not v.Parent or v.Humanoid.Health == 0 or not game:GetService("Workspace").Enemies:FindFirstChild(v.Name)
+                            until not DevilMastery_Farm or SelectedMethodMastery ~= "Quest" or not v.Parent or v.Humanoid.Health == 0 or not game:GetService("Workspace").Enemies:FindFirstChild(v.Name)
                         end
                     end
                 end
@@ -4424,7 +4235,7 @@ spawn(function()
                                     Mastery_Farm_CFrame = v.HumanoidRootPart.CFrame
                                     AutoClick()
                                 end
-                            until not DevilMastery_Farm or not SelectedMethodMastery == 'Nearest' or not v.Parent or v.Humanoid.Health == 0 or not game:GetService("Workspace").Enemies:FindFirstChild(v.Name)
+                            until not DevilMastery_Farm or SelectedMethodMastery ~= "Nearest" or not v.Parent or v.Humanoid.Health == 0 or not game:GetService("Workspace").Enemies:FindFirstChild(v.Name)
                         end
                     end
                 end
@@ -4457,7 +4268,7 @@ spawn(function()
                                     Mastery_Farm_CFrame = v.HumanoidRootPart.CFrame
                                     AutoClick()
                                 end
-                            until not DevilMastery_Farm or not SelectedMethodMastery == 'Bone' or not v.Parent or v.Humanoid.Health == 0 or not game.Workspace.Enemies:FindFirstChild(v.Name)
+                            until not DevilMastery_Farm or SelectedMethodMastery ~= "Bone" or not v.Parent or v.Humanoid.Health == 0 or not game.Workspace.Enemies:FindFirstChild(v.Name)
                         end
                     end
                 end
@@ -4506,7 +4317,7 @@ spawn(function()
                                     Mastery_Farm_CFrame = v.HumanoidRootPart.CFrame
                                     AutoClick()
                                 end
-                            until not DevilMastery_Farm or not SelectedMethodMastery == 'Ecto' or not v.Parent or v.Humanoid.Health == 0 or not game:GetService("Workspace").Enemies:FindFirstChild(v.Name)
+                            until not DevilMastery_Farm or SelectedMethodMastery ~= "Ecto" or not v.Parent or v.Humanoid.Health == 0 or not game:GetService("Workspace").Enemies:FindFirstChild(v.Name)
                         end
                     end
                 end
@@ -4547,7 +4358,7 @@ spawn(function()
                                         Mastery_Farm_CFrame = v.HumanoidRootPart.CFrame
                                         AutoClick()
                                     end
-                                until not DevilMastery_Farm or not SelectedMethodMastery == 'Cake Prince' or not v.Parent or v.Humanoid.Health == 0 or not game:GetService("Workspace").Enemies:FindFirstChild(v.Name)
+                                until not DevilMastery_Farm or SelectedMethodMastery ~= "Cake Prince" or not v.Parent or v.Humanoid.Health == 0 or not game:GetService("Workspace").Enemies:FindFirstChild(v.Name)
                             end
                         end
                     else
@@ -4577,7 +4388,7 @@ spawn(function()
                                             Mastery_Farm_CFrame = v.HumanoidRootPart.CFrame
                                             AutoClick()
                                         end
-                                    until not DevilMastery_Farm or not SelectedMethodMastery == 'Cake Prince' or not v.Parent or v.Humanoid.Health == 0 or not game:GetService("Workspace").Enemies:FindFirstChild(v.Name)
+                                    until not DevilMastery_Farm or SelectedMethodMastery ~= "Cake Prince" or not v.Parent or v.Humanoid.Health == 0 or not game:GetService("Workspace").Enemies:FindFirstChild(v.Name)
                                 end
                             end
                         end
@@ -4710,7 +4521,7 @@ spawn(function()
                                             Mastery_Farm_CFrame = v.HumanoidRootPart.CFrame
                                             AutoClick()
                                         end
-                                    until not GunMastery_Farm or not SelectedMethodMastery == "Quest" or not v.Parent or v.Humanoid.Health == 0 or game:GetService("Players").LocalPlayer.PlayerGui.Main.Quest.Visible == false or not game:GetService("Workspace").Enemies:FindFirstChild(v.Name)
+                                    until not GunMastery_Farm or SelectedMethodMastery ~= "Quest" or not v.Parent or v.Humanoid.Health == 0 or game:GetService("Players").LocalPlayer.PlayerGui.Main.Quest.Visible == false or not game:GetService("Workspace").Enemies:FindFirstChild(v.Name)
                                 end
                             end
                         end
@@ -4750,7 +4561,7 @@ spawn(function()
                                     Mastery_Farm_CFrame = v.HumanoidRootPart.CFrame
                                     AutoClick()
                                 end
-                            until not GunMastery_Farm or not SelectedMethodMastery == "Quest" or not v.Parent or v.Humanoid.Health == 0 or not game:GetService("Workspace").Enemies:FindFirstChild(v.Name)
+                            until not GunMastery_Farm or SelectedMethodMastery ~= "Quest" or not v.Parent or v.Humanoid.Health == 0 or not game:GetService("Workspace").Enemies:FindFirstChild(v.Name)
                         end
                     end
                 end
@@ -4780,7 +4591,7 @@ spawn(function()
                                     Mastery_Farm_CFrame = v.HumanoidRootPart.CFrame
                                     AutoClick()
                                 end
-                            until not GunMastery_Farm or not SelectedMethodMastery == 'Nearest' or not v.Parent or v.Humanoid.Health == 0 or not game:GetService("Workspace").Enemies:FindFirstChild(v.Name)
+                            until not GunMastery_Farm or SelectedMethodMastery ~= "Nearest" or not v.Parent or v.Humanoid.Health == 0 or not game:GetService("Workspace").Enemies:FindFirstChild(v.Name)
                         end
                     end
                 end
@@ -4815,7 +4626,7 @@ spawn(function()
                                     Mastery_Farm_CFrame = v.HumanoidRootPart.CFrame
                                     AutoClick()
                                 end
-                            until not GunMastery_Farm or not SelectedMethodMastery == 'Bone' or not v.Parent or v.Humanoid.Health == 0 or not game.Workspace.Enemies:FindFirstChild(v.Name)
+                            until not GunMastery_Farm or SelectedMethodMastery ~= "Bone" or not v.Parent or v.Humanoid.Health == 0 or not game.Workspace.Enemies:FindFirstChild(v.Name)
                         end
                     end
                 end
@@ -4865,7 +4676,7 @@ spawn(function()
                                     Mastery_Farm_CFrame = v.HumanoidRootPart.CFrame
                                     AutoClick()
                                 end
-                            until not GunMastery_Farm or not SelectedMethodMastery == 'Ecto' or not v.Parent or v.Humanoid.Health == 0 or not game:GetService("Workspace").Enemies:FindFirstChild(v.Name)
+                            until not GunMastery_Farm or SelectedMethodMastery ~= "Ecto" or not v.Parent or v.Humanoid.Health == 0 or not game:GetService("Workspace").Enemies:FindFirstChild(v.Name)
                         end
                     end
                 end
@@ -4907,7 +4718,7 @@ spawn(function()
                                         Mastery_Farm_CFrame = v.HumanoidRootPart.CFrame
                                         AutoClick()
                                     end
-                                until not GunMastery_Farm or not SelectedMethodMastery == 'Cake Prince' or not v.Parent or v.Humanoid.Health == 0 or not game:GetService("Workspace").Enemies:FindFirstChild(v.Name)
+                                until not GunMastery_Farm or SelectedMethodMastery ~= "Cake Prince" or not v.Parent or v.Humanoid.Health == 0 or not game:GetService("Workspace").Enemies:FindFirstChild(v.Name)
                             end
                         end
                     else
@@ -4938,7 +4749,7 @@ spawn(function()
                                             Mastery_Farm_CFrame = v.HumanoidRootPart.CFrame
                                             AutoClick()
                                         end
-                                    until not GunMastery_Farm or not SelectedMethodMastery == 'Cake Prince' or not v.Parent or v.Humanoid.Health == 0 or not game:GetService("Workspace").Enemies:FindFirstChild(v.Name)
+                                    until not GunMastery_Farm or SelectedMethodMastery ~= "Cake Prince" or not v.Parent or v.Humanoid.Health == 0 or not game:GetService("Workspace").Enemies:FindFirstChild(v.Name)
                                 end
                             end
                         end
@@ -5150,19 +4961,6 @@ end)
 --// Cake Prince
 local Cake_Prince_Quest = Subs_Farm_Left:addMenu('#Cake Prince & Dough King')
 local CakePrinceStatus = Cake_Prince_Quest:addLabel("Killed Left : ?")
---[[spawn(function()
-    while wait() do
-        if string.len(game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("CakePrinceSpawner")) == 88 then
-            CakePrinceStatus:Refresh("Killed Left : "..string.sub(game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("CakePrinceSpawner"),39,41)..' / 500')
-        elseif string.len(game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("CakePrinceSpawner")) == 87 then
-            CakePrinceStatus:Refresh("Killed Left : "..string.sub(game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("CakePrinceSpawner"),39,40)..' / 500')
-        elseif string.len(game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("CakePrinceSpawner")) == 86 then
-            CakePrinceStatus:Refresh("Killed Left : "..string.sub(game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("CakePrinceSpawner"),39,39)..' / 500')
-        else
-            CakePrinceStatus:Refresh("Cake Prince Spawned...!!!")
-        end
-    end
-end)]]
 
 Cake_Prince_Quest:addToggle('Auto Cake Prince', AutoCakePrince, function(Value)
     AutoCakePrince = Value
@@ -5737,13 +5535,6 @@ spawn(function()
                             game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("DressrosaQuestProgress","Detective")
                         elseif game.Players.LocalPlayer.Backpack:FindFirstChild("Key") or game.Players.LocalPlayer.Character:FindFirstChild("Key") then
                             game.Players.LocalPlayer.Character.Humanoid:EquipTool(game.Players.LocalPlayer.Backpack["Key"])
-                            --[[if ByPassTP then
-                                BTP(CFrame.new(1349.697265625, 37.34928512573242, -1328.8309326171875))
-                                game:GetService("Workspace").Map.Ice.Door.Size = Vector3.new(30,30,30)
-                            elseif not ByPassTP then
-                                Tween(CFrame.new(1349.697265625, 37.34928512573242, -1328.8309326171875))
-                                game:GetService("Workspace").Map.Ice.Door.Size = Vector3.new(30,30,30)
-                            end]]
                             Tween(CFrame.new(1347.65271, 37.3906517, -1325.07715, 0.484830558, 2.71348792e-08, 0.874608099, -2.34559963e-08, 1, -1.80225808e-08, -0.874608099, -1.17769057e-08, 0.484830558))
                         end
                     elseif game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("DressrosaQuestProgress").UsedKey == true then
@@ -6037,15 +5828,15 @@ spawn(function()
                         if game.Players.LocalPlayer.Character:FindFirstChild("Electro") and game.Players.LocalPlayer.Character:FindFirstChild("Electro").Level.Value >= 300 and game:GetService("Players")["LocalPlayer"].Data.Beli.Value >= 750000 then
                             game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("BuyFishmanKarate")
                         end
-                        if game.Players.LocalPlayer.Backpack:FindFirstChild("Fishman Karate") and game.Players.LocalPlayer.Backpack:FindFirstChild("Fishman Karate").Level.Value >= 300 and game:GetService("Players")["Localplayer"].Data.Fragments.Value >= 1500 then
+                        if game.Players.LocalPlayer.Backpack:FindFirstChild("Fishman Karate") and game.Players.LocalPlayer.Backpack:FindFirstChild("Fishman Karate").Level.Value >= 300 and game:GetService("Players")["LocalPlayer"].Data.Fragments.Value >= 1500 then
                             game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("BlackbeardReward","DragonClaw","1")
                             game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("BlackbeardReward","DragonClaw","2")
                         end
-                        if game.Players.LocalPlayer.Character:FindFirstChild("Fishman Karate") and game.Players.LocalPlayer.Character:FindFirstChild("Fishman Karate").Level.Value >= 300 and game:GetService("Players")["Localplayer"].Data.Fragments.Value >= 1500 then
+                        if game.Players.LocalPlayer.Character:FindFirstChild("Fishman Karate") and game.Players.LocalPlayer.Character:FindFirstChild("Fishman Karate").Level.Value >= 300 and game:GetService("Players")["LocalPlayer"].Data.Fragments.Value >= 1500 then
                             game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("BlackbeardReward","DragonClaw","1")
                             game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("BlackbeardReward","DragonClaw","2")
                         else
-                            local Fragment = game:GetService("Players")["Localplayer"].Data.Fragments.Value
+                            local Fragment = game:GetService("Players")["LocalPlayer"].Data.Fragments.Value
                             if Fragment <= 1499 then
                                 AutoSuperhuman = true
                             else
@@ -7418,7 +7209,6 @@ spawn(function()
                                         fireclickdetector(game:GetService("Workspace").Map["Haunted Castle"]["Lab Puzzle"].ColorFloor.Model.Part10.ClickDetector)
                                     else
                                         Quest3 = true
-                                        --Not Work Yet
                                     end
                                 else
                                     if game:GetService("Workspace").NPCs:FindFirstChild("Ghost") then
@@ -8138,7 +7928,6 @@ spawn(function()
                                 Tween(v.HumanoidRootPart.CFrame * Pvp_Mode)
                                 Player_Name = v.Name
                                 Player_Position = v.HumanoidRootPart.Position
-                                --AutoClick()
                             until not TweenToPlayer or v.Humanoid.Health <= 0 or not game:GetService('Workspace').Characters:FindFirstChild(v.Name)
                         end
                     end
@@ -9863,4 +9652,3 @@ spawn(function()
         end
     end
 end)
--- 25ms was here
