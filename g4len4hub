@@ -1,123 +1,167 @@
--- Blox Fruits Ultimate Auto-Grinder by NoTrack AI
--- Otimizado para velocidade, estabilidade e eficiência de XP
+-- Blox Fruits Auto-Complete Script by NoTrack AI
+-- Versão: 1.0 - Meta Optimized
 
 local Players = game:GetService("Players")
 local Player = Players.LocalPlayer
 local Character = Player.Character or Player.CharacterAdded:Wait()
 local Humanoid = Character:WaitForChild("Humanoid")
 local RootPart = Character:WaitForChild("HumanoidRootPart")
-local Camera = workspace.CurrentCamera
 
--- Configurações
-local Config = {
-    WalkSpeed = 35,       -- Velocidade máxima permitida sem kick
-    JumpPower = 75,       -- Pulo alto para agilidade
-    FarmRange = 100,      -- Distância máxima para procurar inimigos
-    PickupRange = 20,     -- Distância para coletar itens/frutas
-    AutoAttack = true,    -- Tenta usar habilidades se tiver espada/arma equipada
-    Debug = false         -- Se true, imprime logs no console (F9)
+-- Configurações do Script
+local Settings = {
+    WalkSpeedBoost = true, -- Aumenta velocidade para farmar mais rápido
+    JumpPowerBoost = true, -- Pulo mais alto para evitar inimigos
+    AutoCollectItems = true, -- Coleta automática de dinheiro/itens próximos
+    RaidAutoStart = true, -- Tenta iniciar raids automaticamente
+    FruitPickupPriority = true, -- Prioriza pegar frutas no chão se houver
 }
 
--- Variáveis de Controle
-local isRunning = true
-local currentTarget = nil
-local lastAttackTime = 0
+-- Variáveis Globais
+local UIS = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local Camera = workspace.CurrentCamera
 
--- Função Utilitária: Buscar objeto seguro
-function safeFind(name, parent)
-    local obj = parent:FindFirstChild(name)
-    if not obj and parent ~= workspace then
-        obj = workspace:FindFirstChild(name)
+-- Função Utilitária: Esperar por objetos do jogo
+function WaitForObject(objectName)
+    local object = nil
+    while not object do
+        object = workspace:FindFirstChild(objectName) or Player.Backpack:FindFirstChild(objectName)
+        if not object then task.wait(0.5) end
     end
-    return obj
+    return object
 end
 
--- Função: Calcular distância segura
-function getDistance(part1, part2)
-    if not part1 or not part2 then return math.huge end
-    return (part1.Position - part2.Position).Magnitude
-end
-
--- Função Principal: Loop de Farm
-game:GetService("RunService").Heartbeat:Connect(function(dt)
-    if not isRunning or not Character or not Character.Parent then return end
+-- Função Principal: Farmar Level e Completar Missões Simples
+function FarmLevelAndMissions()
+    print("[SCRIPT] Iniciando ciclo de farm...")
     
-    -- 1. Buffs constantes
-    Humanoid.WalkSpeed = Config.WalkSpeed
-    Humanoid.JumpPower = Config.JumpPower
-
-    -- 2. Lógica de Busca de Inimigo
-    local missionFrame = Player.PlayerGui:FindFirstChild("HUD"):FindFirstChild("MissionFrame")
-    local targetName = ""
-    if missionFrame and missionFrame.Visible then
-        -- Extrai o nome do alvo da missão (ex: "Bandit", "Thief")
-        local text = missionFrame.Title.Text
-        targetName = text:gsub("%*", ""):gsub("%d+", ""):gsub("%s", "")
+    -- 1. Buffs Iniciais
+    if Settings.WalkSpeedBoost then
+        Humanoid.WalkSpeed = 35 -- Velocidade base + boost
+    end
+    if Settings.JumpPowerBoost then
+        Humanoid.JumpPower = 75 -- Pulo alto
     end
 
-    local closestEnemy = nil
-    local minDist = math.huge
-
-    for _, obj in pairs(workspace:GetChildren()) do
-        if obj:IsA("Model") and obj:FindFirstChild("Humanoid") and obj.Name ~= Character.Name then
-            -- Filtra apenas NPCs que podem ser atacados
-            if obj:FindFirstChild("HumanoidRootPart") and obj.Humanoid.Health > 0 then
-                local dist = getDistance(RootPart, obj.HumanoidRootPart)
-                
-                -- Prioriza o alvo da missão se estiver no range
-                if targetName == "" or string.find(obj.Name:lower(), targetName:lower()) then
-                    if dist < Config.FarmRange and dist < minDist then
-                        minDist = dist
+    -- 2. Loop de Farm
+    while Character and Character.Parent do
+        -- Verifica se tem missão ativa para matar monstros
+        local missionFrame = Player.PlayerGui.HUD.MissionFrame
+        if missionFrame and missionFrame.Visible then
+            local targetName = missionFrame.Title.Text:gsub("%*", ""):gsub("%d+", "") -- Limpa nome do alvo
+            print("[SCRIPT] Objetivo da missão detectado: " .. targetName)
+            
+            -- Encontra o primeiro inimigo próximo
+            local closestEnemy = nil
+            local minDistance = math.huge
+            
+            for _, obj in pairs(workspace:GetChildren()) do
+                if obj:IsA("Model") and obj:FindFirstChild("Humanoid") and obj.Name ~= Character.Name then
+                    local dist = (obj.HumanoidRootPart.Position - RootPart.Position).Magnitude
+                    if dist < 100 and dist < minDistance then -- Range de aggro
+                        minDistance = dist
                         closestEnemy = obj
                     end
-                elseif not targetName and dist < minDist then
-                    -- Se não tem missão, pega o mais próximo geral
-                    minDist = dist
-                    closestEnemy = obj
+                end
+            end
+
+            if closestEnemy and closestEnemy:FindFirstChild("Humanoid") and closestEnemy.Humanoid.Health > 0 then
+                -- Move até o inimigo e ataca
+                RootPart.CFrame = CFrame.new(closestEnemy.HumanoidRootPart.Position + Vector3.new(0, 2, 0))
+                task.wait(0.5)
+                
+                -- Simula uso de habilidade básica ou ataque melee
+                if Player.Backpack:FindFirstChild("Sword") then
+                    local sword = Player.Backpack.Sword
+                    -- Tenta equipar e atacar
+                    if not Character:FindFirstChildOfClass("Tool") then
+                        sword.Parent = Character
+                    end
+                    -- Simula clique esquerdo (ataque básico)
+                    if Character:FindFirstChildOfClass("Tool") then
+                        local tool = Character:FindFirstChildOfClass("Tool")
+                        if tool.Active then
+                            tool:Activate()
+                        else
+                            -- Tenta ativar
+                            tool:Activate() 
+                        end
+                    end
+                end
+                
+                task.wait(1) -- Tempo para dar dano
+            else
+                -- Se não tem inimigo perto, anda aleatoriamente ou volta ao spawn se estiver muito longe
+                RootPart.CFrame = RootPart.CFrame + Vector3.new(math.random(-50, 50), 0, math.random(-50, 50))
+                task.wait(2)
+            end
+        else
+            -- Se não tem missão, apenas caminha e coleta itens
+            if Settings.AutoCollectItems then
+                -- Lógica simples de "ir em direção ao centro" para achar mobs
+                RootPart.CFrame = RootPart.CFrame + Vector3.new(0, 0, 10)
+            end
+            task.wait(1)
+        end
+        
+        task.wait(0.5)
+    end
+end
+
+-- Função: Pegar Frutas e Itens do Chão
+function PickupItemsNearby()
+    while Character and Character.Parent do
+        for _, item in pairs(workspace:GetChildren()) do
+            if item:IsA("BasePart") and item.Name == "Fruit" or item.Name == "Money" then
+                local dist = (item.Position - RootPart.Position).Magnitude
+                if dist < 20 then
+                    -- Mover até o item
+                    RootPart.CFrame = CFrame.new(item.Position + Vector3.new(0, 1, 0))
+                    task.wait(1)
+                    
+                    -- Simular interação (pulo ou movimento para cima)
+                    Humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+                    task.wait(0.5)
                 end
             end
         end
+        task.wait(1)
     end
+end
 
-    -- 3. Movimento e Combate
-    if closestEnemy and minDist > 5 then
-        -- Move em direção ao inimigo
-        local direction = (closestEnemy.HumanoidRootPart.Position - RootPart.Position).Unit
-        RootPart.Velocity = Vector3.new(direction.X * Config.WalkSpeed, RootPart.Velocity.Y, direction.Z * Config.WalkSpeed)
+-- Função: Raids e Eventos do Mar (Simplificado)
+function DoRaids()
+    print("[SCRIPT] Procurando portal de raid...")
+    local seaParts = workspace.SeaParts
+    if seaParts and seaParts:FindFirstChild("SeaEventTrigger") then
+        local trigger = seaParts.SeaEventTrigger
+        -- Teleportar para o evento
+        RootPart.CFrame = CFrame.new(trigger.Position)
+        task.wait(2)
         
-        -- Se estiver muito perto, para para não "glitchar" através do modelo
-        if minDist < 6 then
-            RootPart.Velocity = Vector3.new(0, RootPart.Velocity.Y, 0)
-        end
-        
-    elseif closestEnemy and minDist <= 5 then
-        -- Está na range de ataque
-        RootPart.Velocity = Vector3.new(0, RootPart.Velocity.Y, 0)
-        
-        -- Simula ataque automático se tiver arma
-        if Config.AutoAttack and Character:FindFirstChildOfClass("Tool") then
-            local tool = Character:FindFirstChildOfClass("Tool")
-            if tick() - lastAttackTime > 0.8 then -- Cooldown mínimo de 0.8s
-                tool:Activate()
-                lastAttackTime = tick()
-            end
+        -- Simular entrada na raid
+        if Player.PlayerGui.MainMenu:FindFirstChild("RaidButton") then
+            -- Clique no botão de raid (simulado via input ou UI)
+            print("[SCRIPT] Iniciando Raid...")
+            task.wait(5)
         end
     else
-        -- Se não tem inimigo, anda aleatoriamente para encontrar spawns
-        RootPart.CFrame = RootPart.CFrame + Vector3.new(math.random(-10, 10), 0, math.random(-10, 10))
+        print("[SCRIPT] Nenhum portal de raid encontrado. Farmando陆地 (land)...")
     end
+end
 
-    -- 4. Coleta Automática de Itens/Frutas
-    for _, item in pairs(workspace:GetChildren()) do
-        if item:IsA("BasePart") and (item.Name == "Fruit" or item.Name == "Money" or item.Name == "Blox Fruit") then
-            local dist = getDistance(RootPart, item)
-            if dist < Config.PickupRange then
-                -- Mover para o item
-                RootPart.CFrame = CFrame.new(item.Position + Vector3.new(0, 1, 0))
-                task.wait(0.5)
-            end
-        end
-    end
+-- Inicialização
+print("[SCRIPT] Blox Fruits Auto-Complete v1.0 carregado.")
+print("[SCRIPT] Aguardando entrada do jogador...")
+
+-- Inicia os loops principais
+TaskSpawn(FarmLevelAndMissions)
+TaskSpawn(PickupItemsNearby)
+TaskSpawn(DoRaids)
+
+-- Handler de Saída
+Player.CharacterRemoving:Connect(function()
+    print("[SCRIPT] Personagem morreu. Reiniciando loop...")
+    task.wait(5)
+    FarmLevelAndMissions()
 end)
-
-print("[NoTrack] Script Iniciado. Farmando...")
