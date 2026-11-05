@@ -1,100 +1,61 @@
--- Blox Fruits Auto-Grinder Realista by NoTrack AI
--- Versão 2.0 - Usa referências internas do jogo
+-- NoTrack Blox Fruits Smart Teleport Module
+-- Usa busca por nome do objeto no Workspace para evitar bugs de coordenada
 
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
-local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-local Humanoid = Character:WaitForChild("Humanoid")
-local RootPart = Character:WaitForChild("HumanoidRootPart")
+local RunService = game:GetService("RunService")
 
--- Referência direta à UI do Blox Fruits para pegar o nome da missão
-local PlayerScripts = LocalPlayer:FindFirstChild("PlayerScripts")
-local PlayerModule = require(PlayerScripts:WaitForChild("PlayerModule"))
-local ControlModule = PlayerModule:FindFirstChild("ControlModule")
-local CameraMod = PlayerModule:FindFirstChild("CameraModule")
-
--- Configurações
-local Settings = {
-    WalkSpeed = 35,
-    JumpPower = 75,
-    AutoAttack = true,
-    Debug = false
+local Teleports = {
+    ["Sky Island"] = "Sky Island", -- Busca pelo nome exato no mapa
+    ["Magma Village"] = "Magma Village",
+    ["Frozen Village"] = "Frozen Village",
+    ["Jungle"] = "Jungle",
+    ["Garden of Swallowtails"] = "Garden of Swallowtails",
+    ["Fountain"] = "Fountain" -- Para recuperar vida/energia
 }
 
--- Função para encontrar a arma/fruta correta na mochila
-function getEquippableItem()
-    local backpack = LocalPlayer.Backpack
-    local char = LocalPlayer.Character
-    
-    -- Tenta achar a primeira ferramenta equipada ou na mochila
-    for _, item in pairs(backpack:GetChildren()) do
-        if item:IsA("Tool") then
-            return item
-        end
-    end
-    for _, item in pairs(char:GetChildren()) do
-        if item:IsA("Tool") and item.Name ~= "Sword" and item.Name ~= "Fruit" then
-            return item
-        end
-    end
-    return nil
+function getCharacter()
+    return LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
 end
 
--- Loop Principal
-game:GetService("RunService").Heartbeat:Connect(function()
-    if not Character or not Character.Parent then return end
+function teleportTo(name)
+    local char = getCharacter()
+    if not char then return end
     
-    -- Buffs básicos
-    Humanoid.WalkSpeed = Settings.WalkSpeed
-    Humanoid.JumpPower = Settings.JumpPower
+    print("[NoTrack] Procurando destino: " .. name)
     
-    -- 1. Lógica de Missão (Busca pelo HUD real do BF)
-    local hud = LocalPlayer.PlayerGui:FindFirstChild("HUD")
-    if hud then
-        local missionLabel = hud:FindFirstChild("MissionFrame"):FindFirstChild("Title")
-        if missionLabel and missionLabel.Visible then
-            local targetText = missionLabel.Text:gsub("%*", ""):gsub("%d+", "")
+    -- Busca o objeto principal da ilha pelo nome
+    local targetObj = workspace:FindFirstChild(name)
+    
+    if targetObj and targetObj:IsA("Model") then
+        local rootPart = targetObj:FindFirstChild("SpawnLocation") or targetObj:FindFirstChild("HumanoidRootPart")
+        
+        if rootPart then
+            char.HumanoidRootPart.CFrame = rootPart.CFrame + Vector3.new(0, 5, 0)
+            print("[NoTrack] Teleport realizado com sucesso!")
             
-            -- Encontra o NPC alvo
-            local closestNPC = nil
-            local minDist = math.huge
-            
-            for _, obj in pairs(workspace:GetDescendants()) do
-                if obj:IsA("Model") and obj:FindFirstChild("Humanoid") and obj:FindFirstChild("HumanoidRootPart") then
-                    -- Filtra NPCs do Blox Fruits (geralmente têm tags específicas ou estão em pastas como "NPCs")
-                    if obj:FindFirstChild("NPC") or obj:FindFirstChild("HumanoidRootPart") and obj.Humanoid.Health > 0 then
-                        local dist = (obj.HumanoidRootPart.Position - RootPart.Position).Magnitude
-                        if dist < 100 and string.find(obj.Name:lower(), targetText:lower()) then
-                            if dist < minDist then
-                                minDist = dist
-                                closestNPC = obj
-                            end
+            -- Ativa o Auto-Pickup se estiver disponível na UI
+            local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+            if playerGui then
+                local ui = playerGui:FindFirstChild("MainUI")
+                if ui then
+                    local pickupButton = ui:FindFirstChild("PickUpAll") or ui:FindFirstChild("CollectAll")
+                    if pickupButton and pickupButton.Enabled then
+                        -- Simula o clique no botão de pegar tudo
+                        local event = game:GetService("ReplicatedStorage").DefaultModule.RemoteEvents.PickupAll
+                        if event then
+                            event:FireServer()
                         end
                     end
                 end
             end
-            
-            if closestNPC and minDist > 5 then
-                -- Move até o NPC
-                local dir = (closestNPC.HumanoidRootPart.Position - RootPart.Position).Unit
-                RootPart.Velocity = Vector3.new(dir.X * Settings.WalkSpeed, RootPart.Velocity.Y, dir.Z * Settings.WalkSpeed)
-            elseif closestNPC and minDist <= 5 then
-                -- Ataque Automático (Simula o uso da habilidade Z se disponível)
-                if Settings.AutoAttack then
-                    local tool = getEquippableItem()
-                    if tool and Character:FindFirstChildOfClass("Tool") == tool then
-                        -- Tenta ativar a habilidade Z (comum em fruits/espadas)
-                        if tool:FindFirstChild("Z") or tool:FindFirstChild("Q") then
-                            tool:Activate()
-                        else
-                            -- Ataque básico
-                            tool:Activate()
-                        end
-                    end
-                end
-            end
+        else
+            print("[NoTrack] Erro: Raiz do destino não encontrada.")
         end
+    else
+        print("[NoTrack] Destino '" .. name .. "' não encontrado no workspace.")
     end
-end)
+end
 
-print("[NoTrack] Script v2 carregado. Procurando referências do Blox Fruits...")
+-- Exemplo de uso:
+-- teleportTo("Sky Island")
