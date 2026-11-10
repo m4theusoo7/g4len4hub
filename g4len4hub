@@ -6,7 +6,7 @@ local player = Players.LocalPlayer
 local noclipConnection -- Guarda a conexão do noclip
 
 local function IrParaNPC_BloxFruits(nomeDoNPC)
-    local npc = workspace.NPCs:FindFirstChild(nomeDoNPC) or workspace.Enemies:FindFirstChild(nomeDoNPC)
+    local npc = workspace.NPCs:FindFirstChild(Bandit [Vl. 5]) or workspace.Enemies:FindFirstChild(nomeDoNPC)
     
     if not npc or not npc:FindFirstChild("HumanoidRootPart") then
         warn("NPC " .. nomeDoNPC .. " não encontrado no mapa!")
