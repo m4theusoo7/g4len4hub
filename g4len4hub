@@ -1,36 +1,140 @@
 -- =========================================================
--- DEBUGGER DE LOCALIZAÇÃO: BANDIT & NPC (SEA 1)
+-- OMEGACORE SEA 1 - AUTO FARM DEFINITIVO (NÍVEL 1 AO 10)
+-- Foco: Estabilidade no Delta Executor & Combate Real
 -- =========================================================
 
-print("=== INICIANDO VARREDURA DE BANDITS E NPCS ===")
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local VirtualUser = game:GetService("VirtualUser")
 
--- 1. Varre os inimigos (Enemies)
-if workspace:FindFirstChild("Enemies") then
-    for _, enemy in ipairs(workspace.Enemies:GetChildren()) do
-        if string.find(enemy.Name, "Bandit") then
-            local hrp = enemy:FindFirstChild("HumanoidRootPart")
-            local hum = enemy:FindFirstChild("Humanoid")
-            if hrp then
-                print(string.find(enemy.Name, "Bandit") and "[MOB ACHADO] " or "", enemy.Name, "| HP:", hum and hum.Health or "N/A", "| Pos:", hrp.Position)
+local Player = Players.LocalPlayer
+
+getgenv().AutoFarm = true
+getgenv().MeleeWeapon = "Combat" -- Altere para a arma/estilo que estiver usando
+
+-- Coordenadas validadas no console do Sea 1 (Starter Island)
+local NPC_Position = CFrame.new(1062.8, 16.5, 1546.5)
+local QuestName = "BanditQuest1"
+local QuestLevel = 1
+local TargetMobName = "Bandit"
+
+-- 1. Sistema de Noclip para o voo não colidir com o cenário
+RunService.Stepped:Connect(function()
+    if getgenv().AutoFarm then
+        local char = Player.Character
+        if char then
+            for _, part in ipairs(char:GetDescendants()) do
+                if part:IsA("BasePart") and part.CanCollide then
+                    part.CanCollide = false
+                end
+            end
+            if char:FindFirstChild("HumanoidRootPart") then
+                char.HumanoidRootPart.Velocity = Vector3.new(0, 0, 0)
             end
         end
     end
-else
-    print("[AVISO] Pasta workspace.Enemies não encontrada!")
+end)
+
+-- 2. Função de Movimentação Suave (Tween)
+local function MoveTo(targetCFrame)
+    local char = Player.Character
+    if char and char:FindFirstChild("HumanoidRootPart") then
+        local hrp = char.HumanoidRootPart
+        local distance = (hrp.Position - targetCFrame.Position).Magnitude
+        local speed = 250 -- Velocidade segura para o Delta
+        local info = TweenInfo.new(distance / speed, Enum.EasingStyle.Linear)
+        local tween = TweenService:Create(hrp, info, {CFrame = targetCFrame})
+        tween:Play()
+        return tween
+    end
 end
 
--- 2. Varre os NPCs da Starter Island (Quest Giver)
-if workspace:FindFirstChild("NPCs") then
-    for _, npc in ipairs(workspace.NPCs:GetChildren()) do
-        if string.find(npc.Name, "Quest") or string.find(npc.Name, "Bandit") or npc.Name == "Adventurer" then
-            local hrp = npc:FindFirstChild("HumanoidRootPart")
-            if hrp then
-                print("[NPC ACHADO] Nome:", npc.Name, "| Pos:", hrp.Position)
-            end
+-- 3. Função de Ataque Direto (Simulação Humana)
+local function AttackTarget()
+    pcall(function()
+        VirtualUser:CaptureController()
+        VirtualUser:Button1Down(Vector2.new(0, 0))
+    end)
+end
+
+-- 4. Garantir que a arma/estilo esteja equipada
+local function CheckWeapon()
+    local char = Player.Character
+    if char and not char:FindFirstChild(getgenv().MeleeWeapon) then
+        local tool = Player.Backpack:FindFirstChild(getgenv().MeleeWeapon)
+        if tool and char:FindFirstChild("Humanoid") then
+            char.Humanoid:EquipTool(tool)
         end
     end
-else
-    print("[AVISO] Pasta workspace.NPCs não encontrada!")
 end
 
-print("=== VARREDURA CONCLUÍDA ===")
+-- =========================================================
+-- LOOP DE EXECUÇÃO PRINCIPAL
+-- =========================================================
+task.spawn(function()
+    while task.wait(0.1) do
+        if not getgenv().AutoFarm then break end
+        
+        pcall(function()
+            local playerGui = Player:FindFirstChild("PlayerGui")
+            if not playerGui then return end
+            
+            local mainGui = playerGui:FindFirstChild("Main")
+            if not mainGui then return end
+            
+            local questFrame = mainGui:FindFirstChild("Quest")
+            local hasActiveQuest = questFrame and questFrame.Visible
+            
+            -- CASO A: NÃO TEM QUEST ATIVA -> VAI ATÉ O NPC PEGAR
+            if not hasActiveQuest then
+                local hrp = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    if (hrp.Position - NPC_Position.Position).Magnitude > 10 then
+                        MoveTo(NPC_Position)
+                    else
+                        game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("StartQuest", QuestName, QuestLevel)
+                        task.wait(0.5)
+                    end
+                end
+                
+            -- CASO B: TEM QUEST ATIVA -> LOCALIZA O BANDIT E ATaca
+            else
+                CheckWeapon()
+                
+                local closestMob = nil
+                local shortestDistance = math.huge
+                
+                -- Varre os models no workspace procurando os Bandits ativos
+                for _, obj in ipairs(workspace:GetChildren()) do
+                    if obj.Name == TargetMobName and obj:FindFirstChild("Humanoid") and obj:FindFirstChild("HumanoidRootPart") then
+                        local hum = obj.Humanoid
+                        if hum.Health > 0 then
+                            local hrp = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
+                            if hrp then
+                                local dist = (hrp.Position - obj.HumanoidRootPart.Position).Magnitude
+                                if dist < shortestDistance then
+                                    shortestDistance = dist
+                                    closestMob = obj
+                                end
+                            end
+                        end
+                    end
+                end
+                
+                -- Se encontrou um mob válido, vai até ele e ataca
+                if closestMob and closestMob:FindFirstChild("HumanoidRootPart") then
+                    local mobHRP = closestMob.HumanoidRootPart
+                    -- Posiciona logo acima/atrás do mob para evitar dano
+                    local targetCFrame = mobHRP.CFrame * CFrame.new(0, 4, 3) * CFrame.Angles(math.rad(-30), 0, 0)
+                    
+                    MoveTo(targetCFrame)
+                    
+                    if (Player.Character.HumanoidRootPart.Position - mobHRP.Position).Magnitude < 20 then
+                        AttackTarget()
+                    end
+                end
+            end
+        end)
+    end
+end)
