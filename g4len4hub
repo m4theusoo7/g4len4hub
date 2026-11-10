@@ -1,86 +1,94 @@
--- Delta Executor: Auto-Farm Level 1 a 10 (Com Ataque Automático e Habilidades Z, X, C, V) + Teleporte para a Selva
-local plr = game:GetService("Players").LocalPlayer
-local vu = game:GetService("VirtualUser")
-local vim = game:GetService("VirtualInputManager")
+-- =======================================================
+-- BLOX FRUITS - AUTO FARM PIRATE STARTER (LEVEL 1 AO 10)
+-- Foco: Completar 4 missões exatas (20 Bandits)
+-- =======================================================
 
--- Anti-AFK
-plr.Idled:Connect(function()
-    vu:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
-    task.wait(1)
-    vu:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+local player = game.Players.LocalPlayer
+local VirtualUser = game:GetService("VirtualUser")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+-- [1] Sistema Anti-AFK (Evita ser desconectado após 20 minutos)
+player.Idled:Connect(function()
+    VirtualUser:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+    wait(1)
+    VirtualUser:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
 end)
 
-local function getLevel()
-    local success, lvl = pcall(function()
-        return plr.Data.Level.Value
-    end)
-    return success and lvl or 1
-end
+-- Variável para contar quantas missões já foram feitas nesta sessão
+local missoesConcluidas = 0
+local nivelAlvo = 10
 
-local function useKey(keyCode)
-    pcall(function()
-        vim:SendKeyEvent(true, keyCode, false, game)
-        task.wait(0.05)
-        vim:SendKeyEvent(false, keyCode, false, game)
-    end)
-end
-
-task.spawn(function()
-    while task.wait(0.3) do
-        local lvl = getLevel()
-        
-        -- Ao atingir level 10, teleporta para a Jungle e encerra
-        if lvl >= 10 then
-            local char = plr.Character
-            if char and char:FindFirstChild("HumanoidRootPart") then
-                char.HumanoidRootPart.CFrame = CFrame.new(-1249, 11, 332)
-            end
-            break
+-- [2] Função para Equipar o Estilo de Luta (Melee / Combat)
+local function equiparCombate()
+    for _, tool in pairs(player.Backpack:GetChildren()) do
+        if tool:IsA("Tool") and tool.ToolTip == "Melee" then
+            player.Character.Humanoid:EquipTool(tool)
         end
-        
-        local char = plr.Character
-        if char and char:FindFirstChild("HumanoidRootPart") then
-            -- Garante que está usando combate/ferramenta
-            local tool = char:FindFirstChildOfClass("Tool") or plr.Backpack:FindFirstChild("Combat")
-            if tool and tool.Parent == plr.Backpack then
-                tool.Parent = char
-            end
+    end
+end
+
+-- [3] Loop Principal do Auto Farm
+spawn(function()
+    while task.wait() do
+        -- Verifica se o jogador já chegou no nível 10
+        if player.Data.Level.Value < nivelAlvo then
             
-            -- Busca inimigos Bandit
-            local enemies = workspace:FindFirstChild("Enemies")
-            local target = nil
-            if enemies then
-                for _, enemy in ipairs(enemies:GetChildren()) do
-                    if enemy.Name == "Bandit" and enemy:FindFirstChild("Humanoid") and enemy.Humanoid.Health > 0 then
-                        target = enemy
+            -- Verifica se a missão já está ativa na tela do jogador
+            local temMissaoAtiva = player.PlayerGui.Main.Quest.Visible
+            
+            if not temMissaoAtiva then
+                -- Se NÃO tem missão, vai até o NPC e pega a missão
+                -- Teleporta em frente ao NPC para evitar flags de Anti-Cheat
+                if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+                    player.Character.HumanoidRootPart.CFrame = CFrame.new(1062, 16, 1546)
+                    task.wait(0.5)
+                    
+                    -- Invoca a missão remotamente
+                    ReplicatedStorage.Remotes.CommF_:InvokeServer("StartQuest", "BanditQuest1", 1)
+                    
+                    -- Se a missão for aceita com sucesso, soma no contador
+                    task.wait(1)
+                    if player.PlayerGui.Main.Quest.Visible then
+                        missoesConcluidas = missoesConcluidas + 1
+                        print("Missão do Bandit aceita! Contagem: " .. missoesConcluidas .. "/4")
+                    end
+                end
+            else
+                -- Se TEM missão, procura pelos Bandits e ataca
+                for _, inimigo in pairs(workspace.Enemies:GetChildren()) do
+                    if inimigo.Name == "Bandit" and inimigo:FindFirstChild("Humanoid") and inimigo.Humanoid.Health > 0 then
+                        
+                        -- Fica atacando esse inimigo até ele morrer ou a missão acabar
+                        repeat task.wait()
+                            equiparCombate()
+                            
+                            -- Posicionamento CFrame: Fica por cima/atrás do inimigo para evitar danos físicos e hitboxes magnéticas
+                            if player.Character and player.Character:FindFirstChild("HumanoidRootPart") and inimigo:FindFirstChild("HumanoidRootPart") then
+                                player.Character.HumanoidRootPart.CFrame = inimigo.HumanoidRootPart.CFrame * CFrame.new(0, 4, 3) 
+                            end
+                            
+                            -- Auto-Clique (Ataca)
+                            VirtualUser:CaptureController()
+                            VirtualUser:ClickButton1(Vector2.new(0,0))
+                            
+                            -- Usa skills se quiser (Z, X) - Opcional, descomente para ativar
+                            -- VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Z, false, game)
+                            
+                        until not inimigo or not inimigo:FindFirstChild("Humanoid") or inimigo.Humanoid.Health <= 0 or not player.PlayerGui.Main.Quest.Visible
+                        
+                        -- Quebra o loop para pegar um novo Bandit vivo
                         break
                     end
                 end
             end
-            
-            if target and target:FindFirstChild("HumanoidRootPart") then
-                -- Posiciona em cima do bandido
-                char.HumanoidRootPart.CFrame = target.HumanoidRootPart.CFrame * CFrame.new(0, 4, 2)
-                
-                -- Ataque básico automático
-                pcall(function()
-                    vu:Button1Down(Vector2.new(0,0))
-                    task.wait(0.05)
-                    vu:Button1Up(Vector2.new(0,0))
-                end)
-                
-                -- Uso automático de habilidades (Z, X, C, V)
-                useKey(Enum.KeyCode.Z)
-                task.wait(0.1)
-                useKey(Enum.KeyCode.X)
-                task.wait(0.1)
-                useKey(Enum.KeyCode.C)
-                task.wait(0.1)
-                useKey(Enum.KeyCode.V)
-            else
-                -- Vai para a área de spawn se não houver bandidos visíveis
-                char.HumanoidRootPart.CFrame = CFrame.new(1159, 17, 1653)
-            end
+        else
+            -- Condição final: Chegou ao level 10
+            print("=====================================================")
+            print("META ATINGIDA: Level 10 alcançado!")
+            print("4 Missões concluídas (20 Bandits derrotados).")
+            print("O Auto-farm parou. Você já pode seguir para a JUNGLE.")
+            print("=====================================================")
+            break -- Encerra o script para não farmar infinitamente
         end
     end
 end)
