@@ -1,60 +1,45 @@
--- Blox Fruits Sea 1: Auto-Farm Level 1 a 10 + Teleporte para a Selva
-local Players = game:GetService("Players")
-local VirtualInputManager = game:GetService("VirtualInputManager")
-local LocalPlayer = Players.LocalPlayer
+-- Delta Executor: Auto-Farm Level 1 a 10 + Teleporte para a Selva
+local plr = game:GetService("Players").LocalPlayer
+local vu = game:GetService("VirtualUser")
 
--- Coordenadas principais (Pirate Starter & Jungle)
-local QUEST_NPC_POS = CFrame.new(1062, 16, 1546)
-local BANDIT_SPAWN = CFrame.new(1159, 17, 1653)
-local JUNGLE_POS = CFrame.new(-1249, 11, 332)
+-- Anti-AFK
+plr.Idled:Connect(function()
+    vu:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+    task.wait(1)
+    vu:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+end)
 
 local function getLevel()
-    local success, level = pcall(function()
-        return LocalPlayer.Data.Level.Value
+    local success, lvl = pcall(function()
+        return plr.Data.Level.Value
     end)
-    if success then return level end
-    return 1
+    return success and lvl or 1
 end
 
--- Função para equipar arma/combate
-local function equipWeapon()
-    pcall(function()
-        local char = LocalPlayer.Character
-        local backpack = LocalPlayer.Backpack
-        if char and not char:FindFirstChildOfClass("Tool") then
-            local weapon = backpack:FindFirstChild("Combat") or backpack:FindFirstChildOfClass("Tool")
-            if weapon then
-                weapon.Parent = char
-            end
-        end
-    end)
-end
-
--- Loop principal de Auto-Farm
 task.spawn(function()
-    print("=== Auto-Farm Iniciado (Level 1 ao 10) ===")
-    
     while task.wait(0.5) do
-        local currentLevel = getLevel()
+        local lvl = getLevel()
         
-        -- Verifica se atingiu o level 10 para ir para a Selva
-        if currentLevel >= 10 then
-            print("Level 10 atingido! Teleportando para a Ilha da Selva...")
-            local char = LocalPlayer.Character
+        -- Ao atingir level 10, teleporta para a Jungle e encerra o loop
+        if lvl >= 10 then
+            local char = plr.Character
             if char and char:FindFirstChild("HumanoidRootPart") then
-                char.HumanoidRootPart.CFrame = JUNGLE_POS
+                char.HumanoidRootPart.CFrame = CFrame.new(-1249, 11, 332)
             end
             break
         end
         
-        local char = LocalPlayer.Character
+        local char = plr.Character
         if char and char:FindFirstChild("HumanoidRootPart") then
-            equipWeapon()
+            -- Garante que está usando combate/ferramenta
+            local tool = char:FindFirstChildOfClass("Tool") or plr.Backpack:FindFirstChild("Combat")
+            if tool and tool.Parent == plr.Backpack then
+                tool.Parent = char
+            end
             
-            -- Procura por inimigos do tipo Bandit
+            -- Busca inimigos Bandit
             local enemies = workspace:FindFirstChild("Enemies")
             local target = nil
-            
             if enemies then
                 for _, enemy in ipairs(enemies:GetChildren()) do
                     if enemy.Name == "Bandit" and enemy:FindFirstChild("Humanoid") and enemy.Humanoid.Health > 0 then
@@ -65,29 +50,15 @@ task.spawn(function()
             end
             
             if target and target:FindFirstChild("HumanoidRootPart") then
-                -- Posiciona acima do bandido para evitar dano corpo a corpo direto
                 char.HumanoidRootPart.CFrame = target.HumanoidRootPart.CFrame * CFrame.new(0, 5, 2)
-                
-                -- Ataca usando cliques simulados
                 pcall(function()
-                    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 0)
+                    vu:Button1Down(Vector2.new(0,0))
                     task.wait(0.05)
-                    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 0)
-                end)
-                
-                -- Usa habilidades básicas (Z, X) se estiverem prontas
-                pcall(function()
-                    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Z, false, game)
-                    task.wait(0.05)
-                    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Z, false, game)
-                    
-                    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.X, false, game)
-                    task.wait(0.05)
-                    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.X, false, game)
+                    vu:Button1Up(Vector2.new(0,0))
                 end)
             else
-                -- Se nenhum bandido estiver visível, vai até a área de spawn dos bandidos
-                char.HumanoidRootPart.CFrame = BANDIT_SPAWN
+                -- Vai para a área de spawn se nenhum alvo estiver visível
+                char.HumanoidRootPart.CFrame = CFrame.new(1159, 17, 1653)
             end
         end
     end
