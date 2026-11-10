@@ -1,65 +1,103 @@
-local Players = game:GetService("Players")
-local TweenService = game:GetService("TweenService")
-local RunService = game:GetService("RunService")
+_G.AutoFarm = true
 
-local player = Players.LocalPlayer
-local noclipConnection -- Guarda a conexão do noclip
+local player = game.Players.LocalPlayer
+local rs = game:GetService("RunService")
+local ts = game:GetService("TweenService")
+local vim = game:GetService("VirtualInputManager")
+local rep = game:GetService("ReplicatedStorage")
 
-local function IrParaNPC_BloxFruits(nomeDoNPC)
-    local npc = workspace.NPCs:FindFirstChild(Bandit [Vl. 5]) or workspace.Enemies:FindFirstChild(nomeDoNPC)
-    
-    if not npc or not npc:FindFirstChild("HumanoidRootPart") then
-        warn("NPC " .. nomeDoNPC .. " não encontrado no mapa!")
-        return
-    end
-
-    local character = player.Character or player.CharacterAdded:Wait()
-    local rootPart = character:WaitForChild("HumanoidRootPart")
-    
-    -- Ajuste de CFrame: Fica 3 studs DE FRENTE para o NPC, evitando bugar dentro dele
-    local destinoCFrame = npc.HumanoidRootPart.CFrame * CFrame.new(0, 0, 3)
-
-    -- Distância e velocidade (300-350 é o padrão seguro na maioria dos hubs de BF)
-    local distance = (rootPart.Position - destinoCFrame.Position).Magnitude
-    local speed = 320 
-    local timeToTween = distance / speed
-
-    local tweenInfo = TweenInfo.new(timeToTween, Enum.EasingStyle.Linear)
-    local tween = TweenService:Create(rootPart, tweenInfo, {CFrame = destinoCFrame})
-
-    -- 1. Cria um BodyVelocity para anular a gravidade e evitar os solavancos do Blox Fruits
-    local bodyVelocity = Instance.new("BodyVelocity")
-    bodyVelocity.Velocity = Vector3.new(0, 0, 0)
-    bodyVelocity.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-    bodyVelocity.Parent = rootPart
-
-    -- 2. Ativa o Noclip (Impede o personagem de bater em paredes enquanto voa)
-    if noclipConnection then noclipConnection:Disconnect() end
-    noclipConnection = RunService.Stepped:Connect(function()
-        for _, part in pairs(character:GetDescendants()) do
-            if part:IsA("BasePart") then
-                part.CanCollide = false
+-- 1. Anti-Colisão (Noclip) e Anti-Gravidade
+rs.Stepped:Connect(function()
+    if _G.AutoFarm and player.Character then
+        for _, v in pairs(player.Character:GetDescendants()) do
+            if v:IsA("BasePart") then
+                v.CanCollide = false
             end
         end
-    end)
-
-    -- Inicia o voo
-    tween:Play()
-
-    -- 3. Limpeza quando chegar ao destino ou for interrompido
-    tween.Completed:Connect(function()
-        if noclipConnection then
-            noclipConnection:Disconnect()
-            noclipConnection = nil
+        -- Trava a queda para o boneco não tremer enquanto bate
+        local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            hrp.Velocity = Vector3.new(0, 0, 0)
         end
-        if bodyVelocity then
-            bodyVelocity:Destroy()
+    end
+end)
+
+local function equiparArma()
+    for _, v in pairs(player.Backpack:GetChildren()) do
+        if v.ToolTip == "Melee" or v.ToolTip == "Sword" or v.ToolTip == "Blox Fruit" then
+            v.Parent = player.Character
+            break
         end
-    end)
-    
-    -- Espera o voo terminar para o script continuar
-    tween.Completed:Wait() 
+    end
 end
 
--- Como usar (Exemplo do primeiro NPC do Sea 1):
-IrParaNPC_BloxFruits("Bandit Quest Giver")
+local function voarAte(destinoCFrame)
+    local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    
+    local dist = (hrp.Position - destinoCFrame.Position).Magnitude
+    local speed = 320
+    local tween = ts:Create(hrp, TweenInfo.new(dist / speed, Enum.EasingStyle.Linear), {CFrame = destinoCFrame})
+    
+    tween:Play()
+    return tween
+end
+
+local function usarSkills()
+    local teclas = {Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C, Enum.KeyCode.V}
+    for _, tecla in pairs(teclas) do
+        vim:SendKeyEvent(true, tecla, false, game)
+        task.wait(0.05)
+        vim:SendKeyEvent(false, tecla, false, game)
+    end
+end
+
+local function atacar()
+    vim:SendMouseButtonEvent(0, 0, 0, true, game, 1)
+    vim:SendMouseButtonEvent(0, 0, 0, false, game, 1)
+end
+
+-- 2. Loop Principal
+task.spawn(function()
+    while _G.AutoFarm do
+        task.wait()
+        pcall(function()
+            local level = player.Data.Level.Value
+            local temMissao = player.PlayerGui.Main.Quest.Visible
+
+            if level < 10 then
+                -- Farm na Starter Island
+                if not temMissao then
+                    local npc = workspace.NPCs:FindFirstChild("Bandit Quest Giver")
+                    if npc then
+                        local t = voarAte(npc.HumanoidRootPart.CFrame * CFrame.new(0, 0, 3))
+                        if t then t.Completed:Wait() end
+                        -- Puxa a quest
+                        rep.Remotes.CommF_:InvokeServer("StartQuest", "Bandit Quest Giver", 1)
+                    end
+                else
+                    local inimigo = workspace.Enemies:FindFirstChild("Bandit")
+                    if inimigo and inimigo:FindFirstChild("Humanoid") and inimigo.Humanoid.Health > 0 then
+                        equiparArma()
+                        
+                        -- Posição segura: Fica 7 studs acima da cabeça do mob, virado para baixo
+                        local posicaoSegura = inimigo.HumanoidRootPart.CFrame * CFrame.new(0, 7, 0) * CFrame.Angles(math.rad(-90), 0, 0)
+                        
+                        voarAte(posicaoSegura)
+                        atacar()
+                        usarSkills()
+                    end
+                end
+            else
+                -- Vai pra Jungle (Coordenada fixa do Adventurer NPC)
+                local jungleNPC = CFrame.new(-1605, 37, 152) 
+                local t = voarAte(jungleNPC)
+                
+                if t then t.Completed:Wait() end
+                
+                _G.AutoFarm = false -- Para o loop pra você não bugar depois que chegar lá
+                print("Level 10! Script chegou na Jungle.")
+            end
+        end)
+    end
+end)
