@@ -1,101 +1,160 @@
-_G.AutoFarm = true
+-- =========================================================
+-- OMEGACORE SEA 1 - AUTO FARM [Nível 1 ao 15]
+-- Foco: Estabilidade no Delta Executor, Auto-Ataque Real e Noclip
+-- =========================================================
 
-local plr = game.Players.LocalPlayer
-local rs = game:GetService("RunService")
-local rep = game:GetService("ReplicatedStorage")
-local vim = game:GetService("VirtualInputManager")
+local Player = game:GetService("Players").LocalPlayer
+local VirtualUser = game:GetService("VirtualUser")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
 
-print("Iniciando AutoFarm...")
+getgenv().AutoFarm = true
+getgenv().MeleeWeapon = "Combat" -- Mude para o nome do seu estilo de luta atual
 
--- 1. Trava o personagem no ar para não cair quando teleportar
-rs.Stepped:Connect(function()
-    if _G.AutoFarm and plr.Character then
-        for _, v in pairs(plr.Character:GetDescendants()) do
-            if v:IsA("BasePart") then v.CanCollide = false end
-        end
-        local hrp = plr.Character:FindFirstChild("HumanoidRootPart")
-        if hrp then
-            hrp.Velocity = Vector3.new(0, 0, 0)
+-- Tabela de Progressão do Sea 1 (Expansível até o 700)
+local FarmingGuide = {
+    {
+        MinLevel = 1,
+        MaxLevel = 9,
+        QuestName = "BanditQuest1",
+        QuestLevel = 1,
+        MobName = "Bandit [Lv. 5]",
+        NPCName = "Bandit Quest Giver"
+    },
+    {
+        MinLevel = 10,
+        MaxLevel = 14,
+        QuestName = "JungleQuest",
+        QuestLevel = 1,
+        MobName = "Monkey [Lv. 14]",
+        NPCName = "Adventurer"
+    }
+}
+
+-- 1. SISTEMA DE NOCLIP (Impede que o boneco trave no chão durante o voo)
+RunService.Stepped:Connect(function()
+    if getgenv().AutoFarm then
+        local char = Player.Character
+        if char then
+            for _, part in pairs(char:GetDescendants()) do
+                if part:IsA("BasePart") and part.CanCollide == true then
+                    part.CanCollide = false
+                end
+            end
+            -- Trava a rotação e zera a velocidade de queda
+            if char:FindFirstChild("HumanoidRootPart") then
+                char.HumanoidRootPart.Velocity = Vector3.new(0, 0, 0)
+            end
         end
     end
 end)
 
--- 2. Ataca ativando a ferramenta (Garantido no Mobile/Delta)
-local function atacarComArma()
-    if not plr.Character then return end
-    
-    local arma = plr.Character:FindFirstChildOfClass("Tool")
-    
-    -- Se estiver de mãos vazias, procura no inventário
-    if not arma then
-        for _, v in pairs(plr.Backpack:GetChildren()) do
-            if v:IsA("Tool") and (v.ToolTip == "Melee" or v.ToolTip == "Sword") then
-                v.Parent = plr.Character
-                arma = v
-                break
-            end
-        end
-    end
-    
-    -- Se achou a arma, bate e usa skills
-    if arma then
-        arma:Activate() -- Bate perfeitamente sem precisar simular clique
+-- 2. SISTEMA DE MOVIMENTAÇÃO (Voo Suave)
+local function TweenTo(targetCFrame)
+    local char = Player.Character
+    if char and char:FindFirstChild("HumanoidRootPart") then
+        local hrp = char.HumanoidRootPart
+        local dist = (hrp.Position - targetCFrame.Position).Magnitude
+        local speed = 300 -- Velocidade do voo (segura para o Anti-Cheat)
+        local time = dist / speed
         
-        -- Usa as skills (Z, X, C, V)
-        task.spawn(function()
-            local teclas = {Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C, Enum.KeyCode.V}
-            for _, t in pairs(teclas) do
-                vim:SendKeyEvent(true, t, false, game)
-                task.wait(0.05)
-                vim:SendKeyEvent(false, t, false, game)
-            end
-        end)
+        local tweenInfo = TweenInfo.new(time, Enum.EasingStyle.Linear)
+        local tween = TweenService:Create(hrp, tweenInfo, {CFrame = targetCFrame})
+        tween:Play()
+        return tween
     end
 end
 
--- 3. Loop de Farm
+-- 3. SISTEMA DE ATAQUE (Força o M1 e as Skills)
+local function AutoAttack()
+    VirtualUser:CaptureController()
+    VirtualUser:Button1Down(Vector2.new(0, 0))
+    
+    -- Dispara skills caso tenha barra (Opcional, tira o comentário se quiser)
+    -- VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Z, false, game)
+    -- task.wait(0.1)
+    -- VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.X, false, game)
+end
+
+-- 4. SISTEMA DE EQUIPAR ARMA
+local function EquipWeapon()
+    local char = Player.Character
+    if char then
+        -- Se não estiver segurando nada, procura na mochila
+        if not char:FindFirstChild(getgenv().MeleeWeapon) then
+            local tool = Player.Backpack:FindFirstChild(getgenv().MeleeWeapon)
+            if tool then
+                char.Humanoid:EquipTool(tool)
+            end
+        end
+    end
+end
+
+-- 5. VERIFICAÇÃO DO LEVEL ATUAL E GUIA
+local function GetCurrentGuide()
+    local myLevel = Player.Data.Level.Value
+    for _, guide in pairs(FarmingGuide) do
+        if myLevel >= guide.MinLevel and myLevel <= guide.MaxLevel then
+            return guide
+        end
+    end
+    return nil -- Se passou do maxLevel registrado
+end
+
+-- =========================================================
+-- LOOP PRINCIPAL DO AUTO-FARM
+-- =========================================================
 task.spawn(function()
-    while _G.AutoFarm do
-        task.wait(0.1)
+    while task.wait() do
+        if not getgenv().AutoFarm then break end
         
-        -- Agora o erro aparece no console do executor se algo quebrar
-        local sucesso, erro = pcall(function()
-            local char = plr.Character or plr.CharacterAdded:Wait()
-            local hrp = char:WaitForChild("HumanoidRootPart")
-            local level = plr.Data.Level.Value
+        pcall(function()
+            local currentGuide = GetCurrentGuide()
+            if not currentGuide then return end
+
+            local hasQuest = Player.PlayerGui.Main.Quest.Visible
             
-            if level < 10 then
-                -- Busca a interface de forma segura (Não dá erro silencioso)
-                local mainGui = plr.PlayerGui:FindFirstChild("Main")
-                local questGui = mainGui and mainGui:FindFirstChild("Quest")
-                local temMissao = questGui and questGui.Visible
-                
-                if not temMissao then
-                    local npc = workspace.NPCs:FindFirstChild("Bandit Quest Giver")
-                    if npc and npc:FindFirstChild("HumanoidRootPart") then
-                        -- Teleporta direto pro NPC
-                        hrp.CFrame = npc.HumanoidRootPart.CFrame * CFrame.new(0, 0, 3)
-                        task.wait(0.5)
-                        rep.Remotes.CommF_:InvokeServer("StartQuest", "Bandit Quest Giver", 1)
-                    end
-                else
-                    local mob = workspace.Enemies:FindFirstChild("Bandit")
-                    if mob and mob:FindFirstChild("Humanoid") and mob.Humanoid.Health > 0 and mob:FindFirstChild("HumanoidRootPart") then
-                        -- Teleporta para cima do mob (6 studs)
-                        hrp.CFrame = mob.HumanoidRootPart.CFrame * CFrame.new(0, 6, 0) * CFrame.Angles(math.rad(-90), 0, 0)
-                        atacarComArma()
+            -- ETAPA A: PEGAR QUEST
+            if not hasQuest then
+                -- Acha o NPC na Workspace
+                local npc = workspace.NPCs:FindFirstChild(currentGuide.NPCName)
+                if npc and npc:FindFirstChild("HumanoidRootPart") then
+                    local npcPos = npc.HumanoidRootPart.CFrame
+                    TweenTo(npcPos)
+                    
+                    -- Se estiver perto o suficiente, aceita a quest
+                    if (Player.Character.HumanoidRootPart.Position - npcPos.Position).Magnitude < 10 then
+                        game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("StartQuest", currentGuide.QuestName, currentGuide.QuestLevel)
+                        task.wait(0.5) -- Pausa rápida para a quest processar no server
                     end
                 end
+                
+            -- ETAPA B: MATAR OS MOBS
             else
-                -- Level 10 alcançado, vai pra Jungle
-                hrp.CFrame = CFrame.new(-1605, 37, 152)
-                print("Level 10 alcançado! Indo pra Jungle...")
-                _G.AutoFarm = false
+                EquipWeapon()
+                
+                -- Busca os mobs na pasta correta do Blox Fruits
+                local targetMob = nil
+                for _, mob in pairs(workspace.Enemies:GetChildren()) do
+                    if mob.Name == currentGuide.MobName and mob:FindFirstChild("Humanoid") and mob.Humanoid.Health > 0 then
+                        targetMob = mob
+                        break
+                    end
+                end
+                
+                if targetMob and targetMob:FindFirstChild("HumanoidRootPart") then
+                    -- Vai para trás/cima do mob (Evita tomar dano)
+                    local mobCFrame = targetMob.HumanoidRootPart.CFrame * CFrame.new(0, 5, 0) * CFrame.Angles(math.rad(-90), 0, 0)
+                    TweenTo(mobCFrame)
+                    
+                    if (Player.Character.HumanoidRootPart.Position - mobCFrame.Position).Magnitude < 15 then
+                        AutoAttack()
+                    end
+                else
+                    -- Se não achar mob spawnado, fica no ar perto do respawn esperando
+                    -- (O ideal aqui é farmar a posição inicial deles, mas o loop buscará o próximo que der spawn)
+                end
             end
         end)
-        
-        if not sucesso then
-            warn("Erro no AutoFarm: " .. tostring(erro))
-        end
     end
 end)
