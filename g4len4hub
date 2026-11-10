@@ -1,102 +1,110 @@
 -- =======================================================
--- BLOX FRUITS - AUTO FARM PIRATE STARTER V2 (CORRIGIDO)
--- Foco: Pegar missão e ATACAR de verdade (Level 1 ao 10)
+-- BLOX FRUITS - AUTO FARM PIRATE STARTER V3 (DEFINITIVO)
+-- Correção: Atravessa paredes, espera spawn e não congela
 -- =======================================================
 
-local player = game.Players.LocalPlayer
+local plr = game.Players.LocalPlayer
 local rs = game:GetService("RunService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-
--- [1] Anti-AFK Otimizado
 local vu = game:GetService("VirtualUser")
-player.Idled:Connect(function()
-    vu:CaptureController()
-    vu:ClickButton2(Vector2.new())
+local rep = game:GetService("ReplicatedStorage")
+
+-- [1] Sistema Anti-AFK
+plr.Idled:Connect(function()
+    vu:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+    task.wait(1)
+    vu:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
 end)
 
--- [2] Função para Equipar e Retornar o Estilo de Luta
-local function equiparMelee()
-    -- Procura na mochila
-    for _, tool in pairs(player.Backpack:GetChildren()) do
-        if tool:IsA("Tool") and tool.ToolTip == "Melee" then
-            player.Character.Humanoid:EquipTool(tool)
-            return tool
-        end
+local function getMelee()
+    for _, v in pairs(plr.Backpack:GetChildren()) do
+        if v:IsA("Tool") and v.ToolTip == "Melee" then return v end
     end
-    -- Procura se já está na mão
-    for _, tool in pairs(player.Character:GetChildren()) do
-        if tool:IsA("Tool") and tool.ToolTip == "Melee" then
-            return tool
-        end
+    for _, v in pairs(plr.Character:GetChildren()) do
+        if v:IsA("Tool") and v.ToolTip == "Melee" then return v end
     end
     return nil
 end
 
--- [3] Função para Checar se a Missão está Ativa
 local function temMissao()
-    local questGui = player.PlayerGui.Main:FindFirstChild("Quest")
-    if questGui and questGui.Visible then
+    local main = plr.PlayerGui:FindFirstChild("Main")
+    if main and main:FindFirstChild("Quest") and main.Quest.Visible then
         return true
     end
     return false
 end
 
--- [4] Função para Encontrar o Bandit VIVO mais próximo
 local function acharBandit()
-    for _, inimigo in pairs(workspace.Enemies:GetChildren()) do
-        -- string.find resolve o problema do "[Lv. 5]" no nome
-        if string.find(inimigo.Name, "Bandit") and inimigo:FindFirstChild("Humanoid") and inimigo.Humanoid.Health > 0 and inimigo:FindFirstChild("HumanoidRootPart") then
-            return inimigo
+    for _, v in pairs(workspace.Enemies:GetChildren()) do
+        if v.Name:find("Bandit") and v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 and v:FindFirstChild("HumanoidRootPart") then
+            return v
         end
     end
     return nil
 end
 
-local farmAtivo = true
+local farmLigado = true
 
--- [5] Loop de Farm (Usando task.spawn para não travar o jogo)
-task.spawn(function()
-    while farmAtivo and task.wait() do
-        
-        -- Verifica se atingiu a meta (Level 10)
-        if player.Data.Level.Value >= 10 then
-            farmAtivo = false
-            print("===================================")
-            print("NÍVEL 10 ATINGIDO! Pode ir pra Jungle.")
-            print("===================================")
-            break
-        end
-
-        if not temMissao() then
-            -- PEGAR A MISSÃO
-            if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-                -- Fica de frente pro NPC
-                player.Character.HumanoidRootPart.CFrame = CFrame.new(1060, 16, 1547)
-                task.wait(0.5)
-                -- Chama o servidor para iniciar a quest 1
-                ReplicatedStorage.Remotes.CommF_:InvokeServer("StartQuest", "BanditQuest1", 1)
-                task.wait(1)
+-- =======================================================
+-- CÉREBRO 1: MOVIMENTO, NOCLIP E ATAQUE (Roda super rápido)
+-- =======================================================
+rs.Stepped:Connect(function()
+    if not farmLigado then return end
+    if not plr.Character or not plr.Character:FindFirstChild("HumanoidRootPart") then return end
+    
+    if plr.Data.Level.Value >= 10 then 
+        farmLigado = false
+        print("LEVEL 10 ATINGIDO! Script finalizado.")
+        return 
+    end
+    
+    local hrp = plr.Character.HumanoidRootPart
+    
+    -- Ativa NoClip (Atravessar paredes e não bugar fisicamente)
+    plr.Character.Humanoid:ChangeState(11)
+    
+    if temMissao() then
+        local bandit = acharBandit()
+        if bandit then
+            -- Vai pra cima do Bandit (7 studs de altura para não levar dano)
+            hrp.CFrame = bandit.HumanoidRootPart.CFrame * CFrame.new(0, 7, 0) * CFrame.Angles(math.rad(-90), 0, 0)
+            
+            -- Puxa a arma e espanca o clique e as skills
+            local melee = getMelee()
+            if melee then
+                plr.Character.Humanoid:EquipTool(melee)
+                melee:Activate()
+                vu:CaptureController()
+                vu:ClickButton1(Vector2.new())
+                
+                -- Usa skills se estiverem prontas
+                vu:SendKeyEvent(true, Enum.KeyCode.Z, false, game)
+                vu:SendKeyEvent(true, Enum.KeyCode.X, false, game)
             end
         else
-            -- FAZER A MISSÃO (ATACAR)
-            local alvo = acharBandit()
-            
-            if alvo and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-                local hrp = player.Character.HumanoidRootPart
-                local alvoHrp = alvo.HumanoidRootPart
-                
-                -- Pega a arma de combate
-                local arma = equiparMelee()
-                
-                -- Se posiciona 5 studs exatamente ACIMA do inimigo e olha para baixo
-                hrp.CFrame = alvoHrp.CFrame * CFrame.new(0, 5, 0) * CFrame.Angles(math.rad(-90), 0, 0)
-                
-                -- Trava a gravidade/movimento para o personagem não escorregar e bugar o ataque
-                hrp.Velocity = Vector3.new(0, 0, 0)
-                
-                -- Ataca usando a função nativa da ferramenta (Funciona liso no Delta Executor)
-                if arma then
-                    arma:Activate()
+            -- SE OS BANDITS AINDA NÃO NASCERAM, VAI PRO CAMPO DELES ESPERAR!
+            hrp.CFrame = CFrame.new(1185, 16, 1617)
+        end
+    else
+        -- SE NÃO TEM MISSÃO, VAI PRO NPC
+        hrp.CFrame = CFrame.new(1060, 16, 1547)
+    end
+end)
+
+-- =======================================================
+-- CÉREBRO 2: PEGADOR DE MISSÕES (Roda separado para não travar)
+-- =======================================================
+task.spawn(function()
+    while farmLigado do
+        task.wait(1)
+        if plr.Data.Level.Value >= 10 then break end
+        
+        -- Se estiver no NPC e sem missão, aciona o servidor
+        if not temMissao() then
+            if plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then
+                local dist = (plr.Character.HumanoidRootPart.Position - Vector3.new(1060, 16, 1547)).Magnitude
+                -- Só tenta pegar a missão se estiver perto do NPC
+                if dist < 20 then
+                    rep.Remotes.CommF_:InvokeServer("StartQuest", "BanditQuest1", 1)
                 end
             end
         end
