@@ -1,4 +1,4 @@
--- Blox Fruits Sea 1: Auto Farm Lv 1-10 + Mudança Automática para a Jungle
+-- Blox Fruits Sea 1: Auto Quest & Farm (Lv 1-10) com verificação de estado
 -- Compatível com Delta Executor
 
 local Players = game:GetService("Players")
@@ -7,7 +7,7 @@ local TweenService = game:GetService("TweenService")
 local VirtualUser = game:GetService("VirtualUser")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 
--- Anti-AFK para evitar desconexão
+-- Anti-AFK
 for _, connection in pairs(getconnections(LocalPlayer.Idled)) do
     connection:Disable()
 end
@@ -23,14 +23,14 @@ local function tweenTo(targetCFrame)
     if not root then return end
     
     local distance = (root.Position - targetCFrame.Position).Magnitude
-    local speed = 300 -- Velocidade de voo/deslocamento
+    local speed = 300
     local info = TweenInfo.new(distance / speed, Enum.EasingStyle.Linear)
     local tween = TweenService:Create(root, info, {CFrame = targetCFrame})
     tween:Play()
     return tween
 end
 
--- Coordenadas do Sea 1
+-- Coordenadas do Sea 1 (Starter Island)
 local PirateQuestNPC = CFrame.new(1062, 16, 1546)
 local BanditSpawn = CFrame.new(1150, 16, 1630)
 local JungleIsland = CFrame.new(-1249, 11, 1755)
@@ -49,15 +49,24 @@ task.spawn(function()
             local level = LocalPlayer.Data.Level.Value
             
             if level < 10 then
-                -- Verificar se a quest de Bandit está ativa na tela
-                local questGui = LocalPlayer.PlayerGui.Main.Quest
-                local questTitle = questGui.Visible and questGui.Container.QuestTitle.Text or ""
+                -- Verifica se a quest de Bandit está ativa na tela
+                local questGui = LocalPlayer.PlayerGui:FindFirstChild("Main") and LocalPlayer.PlayerGui.Main:FindFirstChild("Quest")
+                local hasQuest = false
                 
-                if not string.find(questTitle, "Bandit") then
-                    -- Vai até o NPC pegar a quest
+                if questGui and questGui.Visible then
+                    local success, title = pcall(function()
+                        return questGui.Container.QuestTitle.Text
+                    end)
+                    if success and title and string.find(string.lower(title), "bandit") then
+                        hasQuest = true
+                    end
+                end
+                
+                if not hasQuest then
+                    -- 1. Não tem missão: Vai até o NPC para pegar (o comando de pegar a missão atua aqui)
                     tweenTo(PirateQuestNPC)
                 else
-                    -- Localiza os Bandits para farmar
+                    -- 2. Já pegou a missão: Desativa o trajeto ao NPC e farme os NPCs até completar
                     local enemyTarget = nil
                     if workspace:FindFirstChild("Enemies") then
                         for _, enemy in pairs(workspace.Enemies:GetChildren()) do
@@ -73,7 +82,7 @@ task.spawn(function()
                     
                     if enemyTarget and enemyTarget:FindFirstChild("HumanoidRootPart") then
                         local eRoot = enemyTarget.HumanoidRootPart
-                        -- Posiciona o avatar levemente acima do inimigo para evitar dano desnecessário
+                        -- Posiciona o avatar próximo ao inimigo
                         root.CFrame = eRoot.CFrame * CFrame.new(0, 5, 3)
                         
                         -- Ataque básico automático
@@ -81,19 +90,19 @@ task.spawn(function()
                         task.wait(0.1)
                         VirtualUser:Button1Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
                         
-                        -- Disparo automático de habilidades (Z, X, C, V)
+                        -- Uso de habilidades automáticas (Z, X, C, V)
                         for _, key in ipairs({Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C, Enum.KeyCode.V}) do
                             VirtualInputManager:SendKeyEvent(true, key, false, game)
                             task.wait(0.05)
                             VirtualInputManager:SendKeyEvent(false, key, false, game)
                         end
                     else
-                        -- Se nenhum bandido estiver visível, vai até a área de spawn
+                        -- Se não houver bandidos vivos na tela, vai para a área de spawn deles
                         tweenTo(BanditSpawn)
                     end
                 end
             else
-                -- Ao atingir o Level 10, teletransporta/viaja para a Ilha da Selva (Jungle)
+                -- Ao atingir o Level 10, viaja automaticamente para a Jungle
                 print("Level 10 alcançado! Indo para a Jungle...")
                 tweenTo(JungleIsland)
                 task.wait(3)
