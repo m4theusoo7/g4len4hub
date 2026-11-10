@@ -1,28 +1,65 @@
+local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
-local player = game.Players.LocalPlayer
+local RunService = game:GetService("RunService")
 
-local function irAteNPC(Bandit [Lv.5])
-    -- Procura o NPC na pasta de NPCs ou de Inimigos
+local player = Players.LocalPlayer
+local noclipConnection -- Guarda a conexão do noclip
+
+local function IrParaNPC_BloxFruits(nomeDoNPC)
     local npc = workspace.NPCs:FindFirstChild(nomeDoNPC) or workspace.Enemies:FindFirstChild(nomeDoNPC)
     
-    if npc and npc:FindFirstChild("HumanoidRootPart") and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-        local hrp = player.Character.HumanoidRootPart
-        local destino = npc.HumanoidRootPart.CFrame
-        
-        -- Calcula o tempo baseado na distância para não ser pego pelo anti-cheat
-        local distancia = (hrp.Position - destino.Position).Magnitude
-        local velocidade = 300 -- Velocidade do voo (ajuste se necessário)
-        local tempo = distancia / velocidade
-        
-        local tweenInfo = TweenInfo.new(tempo, Enum.EasingStyle.Linear)
-        local tween = TweenService:Create(hrp, tweenInfo, {CFrame = destino})
-        
-        tween:Play()
-        return tween -- Retorna o tween caso queira usar tween.Completed:Wait()
-    else
-        warn("NPC não encontrado no mapa.")
+    if not npc or not npc:FindFirstChild("HumanoidRootPart") then
+        warn("NPC " .. nomeDoNPC .. " não encontrado no mapa!")
+        return
     end
+
+    local character = player.Character or player.CharacterAdded:Wait()
+    local rootPart = character:WaitForChild("HumanoidRootPart")
+    
+    -- Ajuste de CFrame: Fica 3 studs DE FRENTE para o NPC, evitando bugar dentro dele
+    local destinoCFrame = npc.HumanoidRootPart.CFrame * CFrame.new(0, 0, 3)
+
+    -- Distância e velocidade (300-350 é o padrão seguro na maioria dos hubs de BF)
+    local distance = (rootPart.Position - destinoCFrame.Position).Magnitude
+    local speed = 320 
+    local timeToTween = distance / speed
+
+    local tweenInfo = TweenInfo.new(timeToTween, Enum.EasingStyle.Linear)
+    local tween = TweenService:Create(rootPart, tweenInfo, {CFrame = destinoCFrame})
+
+    -- 1. Cria um BodyVelocity para anular a gravidade e evitar os solavancos do Blox Fruits
+    local bodyVelocity = Instance.new("BodyVelocity")
+    bodyVelocity.Velocity = Vector3.new(0, 0, 0)
+    bodyVelocity.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+    bodyVelocity.Parent = rootPart
+
+    -- 2. Ativa o Noclip (Impede o personagem de bater em paredes enquanto voa)
+    if noclipConnection then noclipConnection:Disconnect() end
+    noclipConnection = RunService.Stepped:Connect(function()
+        for _, part in pairs(character:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = false
+            end
+        end
+    end)
+
+    -- Inicia o voo
+    tween:Play()
+
+    -- 3. Limpeza quando chegar ao destino ou for interrompido
+    tween.Completed:Connect(function()
+        if noclipConnection then
+            noclipConnection:Disconnect()
+            noclipConnection = nil
+        end
+        if bodyVelocity then
+            bodyVelocity:Destroy()
+        end
+    end)
+    
+    -- Espera o voo terminar para o script continuar
+    tween.Completed:Wait() 
 end
 
--- Exemplo de uso:
-irAteNPC("Bandit Quest Giver") -- Substitua pelo nome exato do NPC
+-- Como usar (Exemplo do primeiro NPC do Sea 1):
+IrParaNPC_BloxFruits("Bandit Quest Giver")
