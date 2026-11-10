@@ -1,81 +1,28 @@
-_G.AutoFarm = true
-_G.WeaponToUse = "Combat" -- Altere para o nome da sua espada/fruta se necessário (ex: "Katana")
-
+local TweenService = game:GetService("TweenService")
 local player = game.Players.LocalPlayer
-local rs = game:GetService("RunService")
-local vim = game:GetService("VirtualInputManager")
 
--- Função de Movimentação Suave (Tween) para evitar anti-cheat
-local function tweenTo(targetCFrame)
-    local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
+local function irAteNPC(Bandit [Lv. 5])
+    -- Procura o NPC na pasta de NPCs ou de Inimigos
+    local npc = workspace.NPCs:FindFirstChild(nomeDoNPC) or workspace.Enemies:FindFirstChild(nomeDoNPC)
     
-    local distance = (hrp.Position - targetCFrame.Position).Magnitude
-    local speed = 250 -- Velocidade do Tween
-    local tweenInfo = TweenInfo.new(distance / speed, Enum.EasingStyle.Linear)
-    local tween = game:GetService("TweenService"):Create(hrp, tweenInfo, {CFrame = targetCFrame})
-    tween:Play()
-    tween.Completed:Wait()
-end
-
--- Mantém a arma equipada
-local function equipWeapon()
-    if player.Backpack:FindFirstChild(_G.WeaponToUse) then
-        player.Character.Humanoid:EquipTool(player.Backpack:FindFirstChild(_G.WeaponToUse))
+    if npc and npc:FindFirstChild("HumanoidRootPart") and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+        local hrp = player.Character.HumanoidRootPart
+        local destino = npc.HumanoidRootPart.CFrame
+        
+        -- Calcula o tempo baseado na distância para não ser pego pelo anti-cheat
+        local distancia = (hrp.Position - destino.Position).Magnitude
+        local velocidade = 300 -- Velocidade do voo (ajuste se necessário)
+        local tempo = distancia / velocidade
+        
+        local tweenInfo = TweenInfo.new(tempo, Enum.EasingStyle.Linear)
+        local tween = TweenService:Create(hrp, tweenInfo, {CFrame = destino})
+        
+        tween:Play()
+        return tween -- Retorna o tween caso queira usar tween.Completed:Wait()
+    else
+        warn("NPC não encontrado no mapa.")
     end
 end
 
--- Loop Principal de Farm
-spawn(function()
-    while rs.RenderStepped:Wait() do
-        if _G.AutoFarm then
-            pcall(function()
-                local character = player.Character
-                if not character or not character:FindFirstChild("HumanoidRootPart") then return end
-
-                -- Verifica se a missão já está ativa checando a interface (PlayerGui)
-                local hasQuest = false
-                if player.PlayerGui.Main.Quest.Visible then
-                    hasQuest = true
-                end
-
-                if not hasQuest then
-                    -- Busca o NPC de missão na Starter Island
-                    local npc = workspace.NPCs:FindFirstChild("Bandit Quest Giver")
-                    if npc then
-                        -- Para um pouco antes do NPC para evitar ficar preso no modelo
-                        tweenTo(npc.HumanoidRootPart.CFrame * CFrame.new(0, 0, 3))
-                        wait(0.3)
-                        -- Invoca a missão remotamente
-                        game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("StartQuest", "BanditQuest1", 1)
-                    end
-                else
-                    -- Procura um Bandit vivo
-                    local enemy = nil
-                    for _, v in pairs(workspace.Enemies:GetChildren()) do
-                        if v.Name == "Bandit" and v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 then
-                            enemy = v
-                            break
-                        end
-                    end
-
-                    if enemy then
-                        -- Se posiciona atrás do Bandit (CFrame relativo) para evitar dano
-                        tweenTo(enemy.HumanoidRootPart.CFrame * CFrame.new(0, 0, 3))
-                        equipWeapon()
-                        
-                        -- Auto Ataque (Cliques Virtuais)
-                        vim:SendMouseButtonEvent(0, 0, 0, true, game, 1)
-                        vim:SendMouseButtonEvent(0, 0, 0, false, game, 1)
-                        
-                        -- Auto Skills
-                        vim:SendKeyEvent(true, Enum.KeyCode.Z, false, game)
-                        vim:SendKeyEvent(true, Enum.KeyCode.X, false, game)
-                        vim:SendKeyEvent(true, Enum.KeyCode.C, false, game)
-                        vim:SendKeyEvent(true, Enum.KeyCode.V, false, game)
-                    end
-                end
-            end)
-        end
-    end
-end)
+-- Exemplo de uso:
+irAteNPC("Bandit Quest Giver") -- Substitua pelo nome exato do NPC
