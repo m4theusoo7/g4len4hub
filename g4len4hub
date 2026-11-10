@@ -1,102 +1,128 @@
 _G.AutoFarm = true
 
-local player = game.Players.LocalPlayer
+local Player = game.Players.LocalPlayer
 local rs = game:GetService("RunService")
-local ts = game:GetService("TweenService")
-local vim = game:GetService("VirtualInputManager")
 local rep = game:GetService("ReplicatedStorage")
+local vu = game:GetService("VirtualUser")
 
--- 1. Anti-Colisão (Noclip) e Anti-Gravidade
+-- 1. Estabilidade Total (Noclip + Flutuar)
 rs.Stepped:Connect(function()
-    if _G.AutoFarm and player.Character then
-        for _, v in pairs(player.Character:GetDescendants()) do
-            if v:IsA("BasePart") then
+    if _G.AutoFarm and Player.Character then
+        local hrp = Player.Character:FindFirstChild("HumanoidRootPart")
+        
+        -- Atravessar paredes
+        for _, v in pairs(Player.Character:GetDescendants()) do
+            if v:IsA("BasePart") and v.CanCollide then
                 v.CanCollide = false
             end
         end
-        -- Trava a queda para o boneco não tremer enquanto bate
-        local hrp = player.Character:FindFirstChild("HumanoidRootPart")
-        if hrp then
-            hrp.Velocity = Vector3.new(0, 0, 0)
+        
+        -- Congelar gravidade (Evita tremedeira em cima do NPC)
+        if hrp and not hrp:FindFirstChild("AntiQueda") then
+            local bv = Instance.new("BodyVelocity")
+            bv.Name = "AntiQueda"
+            bv.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+            bv.Velocity = Vector3.new(0, 0, 0)
+            bv.Parent = hrp
         end
     end
 end)
 
-local function equiparArma()
-    for _, v in pairs(player.Backpack:GetChildren()) do
-        if v.ToolTip == "Melee" or v.ToolTip == "Sword" or v.ToolTip == "Blox Fruit" then
-            v.Parent = player.Character
-            break
+-- 2. Voo Inteligente (Sem spam de lag)
+local function irPara(CFrameDestino)
+    local hrp = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    
+    local distancia = (hrp.Position - CFrameDestino.Position).Magnitude
+    
+    -- Se estiver perto, teleporta em vez de voar (evita bugar o Tween)
+    if distancia < 10 then
+        hrp.CFrame = CFrameDestino
+    else
+        local tween = game:GetService("TweenService"):Create(
+            hrp, 
+            TweenInfo.new(distancia / 320, Enum.EasingStyle.Linear), 
+            {CFrame = CFrameDestino}
+        )
+        tween:Play()
+    end
+end
+
+-- 3. Equipar e Bater
+local function equiparMelee()
+    for _, tool in pairs(Player.Backpack:GetChildren()) do
+        if tool:IsA("Tool") and (tool.ToolTip == "Melee" or tool.ToolTip == "Sword" or tool.ToolTip == "Blox Fruit") then
+            Player.Character.Humanoid:EquipTool(tool)
         end
     end
 end
 
-local function voarAte(destinoCFrame)
-    local hrp = player.Character:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-    
-    local dist = (hrp.Position - destinoCFrame.Position).Magnitude
-    local speed = 320
-    local tween = ts:Create(hrp, TweenInfo.new(dist / speed, Enum.EasingStyle.Linear), {CFrame = destinoCFrame})
-    
-    tween:Play()
-    return tween
+local function atacar()
+    vu:CaptureController()
+    vu:ClickButton1(Vector2.new(851, 158))
 end
 
 local function usarSkills()
+    -- Aciona as skills Z, X, C, V simulando o teclado
+    local Vim = game:GetService("VirtualInputManager")
     local teclas = {Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C, Enum.KeyCode.V}
     for _, tecla in pairs(teclas) do
-        vim:SendKeyEvent(true, tecla, false, game)
-        task.wait(0.05)
-        vim:SendKeyEvent(false, tecla, false, game)
+        Vim:SendKeyEvent(true, tecla, false, game)
+        task.wait(0.1)
+        Vim:SendKeyEvent(false, tecla, false, game)
     end
 end
 
-local function atacar()
-    vim:SendMouseButtonEvent(0, 0, 0, true, game, 1)
-    vim:SendMouseButtonEvent(0, 0, 0, false, game, 1)
-end
-
--- 2. Loop Principal
+-- 4. O Cérebro do AutoFarm
 task.spawn(function()
     while _G.AutoFarm do
-        task.wait()
+        task.wait() -- Delay mínimo, sem travar o jogo
         pcall(function()
-            local level = player.Data.Level.Value
-            local temMissao = player.PlayerGui.Main.Quest.Visible
-
+            local level = Player.Data.Level.Value
+            
+            -- Se for menor que level 10, farma os Bandits
             if level < 10 then
-                -- Farm na Starter Island
+                local temMissao = Player.PlayerGui.Main.Quest.Visible
+                
                 if not temMissao then
+                    -- Busca a missão
                     local npc = workspace.NPCs:FindFirstChild("Bandit Quest Giver")
                     if npc then
-                        local t = voarAte(npc.HumanoidRootPart.CFrame * CFrame.new(0, 0, 3))
-                        if t then t.Completed:Wait() end
-                        -- Puxa a quest
-                        rep.Remotes.CommF_:InvokeServer("StartQuest", "Bandit Quest Giver", 1)
+                        local posicaoNPC = npc.HumanoidRootPart.CFrame * CFrame.new(0, 0, 4)
+                        irPara(posicaoNPC)
+                        
+                        -- Só puxa a missão se estiver perto do NPC
+                        if (Player.Character.HumanoidRootPart.Position - npc.HumanoidRootPart.Position).Magnitude < 10 then
+                            rep.Remotes.CommF_:InvokeServer("StartQuest", "Bandit Quest Giver", 1)
+                        end
                     end
                 else
+                    -- Farma o Bandit
                     local inimigo = workspace.Enemies:FindFirstChild("Bandit")
                     if inimigo and inimigo:FindFirstChild("Humanoid") and inimigo.Humanoid.Health > 0 then
-                        equiparArma()
+                        -- Posição: 7 studs em cima da cabeça, olhando pra baixo (CFrame.Angles)
+                        local posicaoFoco = inimigo.HumanoidRootPart.CFrame * CFrame.new(0, 7, 0) * CFrame.Angles(math.rad(-90), 0, 0)
                         
-                        -- Posição segura: Fica 7 studs acima da cabeça do mob, virado para baixo
-                        local posicaoSegura = inimigo.HumanoidRootPart.CFrame * CFrame.new(0, 7, 0) * CFrame.Angles(math.rad(-90), 0, 0)
+                        irPara(posicaoFoco)
+                        equiparMelee()
                         
-                        voarAte(posicaoSegura)
-                        atacar()
-                        usarSkills()
+                        -- Só ataca se estiver perto do inimigo
+                        if (Player.Character.HumanoidRootPart.Position - inimigo.HumanoidRootPart.Position).Magnitude < 15 then
+                            atacar()
+                            usarSkills()
+                        end
                     end
                 end
+                
+            -- Se chegou no level 10, vaza pra Jungle
             else
-                -- Vai pra Jungle (Coordenada fixa do Adventurer NPC)
-                local jungleNPC = CFrame.new(-1605, 37, 152) 
-                local t = voarAte(jungleNPC)
+                local jungleDestino = CFrame.new(-1605, 37, 152)
+                irPara(jungleDestino)
                 
-                if t then t.Completed:Wait() end
-                
-                _G.AutoFarm = false -- Para o loop pra você não bugar depois que chegar lá
-                print("Level 10! Script chegou na Jungle.")
+                if (Player.Character.HumanoidRootPart.Position - jungleDestino.Position).Magnitude < 10 then
+                    print("Chegou na Jungle! AutoFarm pausado.")
+                    _G.AutoFarm = false -- Desliga para você poder assumir o controle
+                end
             end
         end)
     end
