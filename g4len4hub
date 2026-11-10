@@ -1,6 +1,7 @@
--- Delta Executor: Auto-Farm Level 1 a 10 + Teleporte para a Selva
+-- Delta Executor: Auto-Farm Level 1 a 10 (Com Ataque Automático e Habilidades Z, X, C, V) + Teleporte para a Selva
 local plr = game:GetService("Players").LocalPlayer
 local vu = game:GetService("VirtualUser")
+local vim = game:GetService("VirtualInputManager")
 
 -- Anti-AFK
 plr.Idled:Connect(function()
@@ -16,11 +17,19 @@ local function getLevel()
     return success and lvl or 1
 end
 
+local function useKey(keyCode)
+    pcall(function()
+        vim:SendKeyEvent(true, keyCode, false, game)
+        task.wait(0.05)
+        vim:SendKeyEvent(false, keyCode, false, game)
+    end)
+end
+
 task.spawn(function()
-    while task.wait(0.5) do
+    while task.wait(0.3) do
         local lvl = getLevel()
         
-        -- Ao atingir level 10, teleporta para a Jungle e encerra o loop
+        -- Ao atingir level 10, teleporta para a Jungle e encerra
         if lvl >= 10 then
             local char = plr.Character
             if char and char:FindFirstChild("HumanoidRootPart") then
@@ -50,14 +59,26 @@ task.spawn(function()
             end
             
             if target and target:FindFirstChild("HumanoidRootPart") then
-                char.HumanoidRootPart.CFrame = target.HumanoidRootPart.CFrame * CFrame.new(0, 5, 2)
+                -- Posiciona em cima do bandido
+                char.HumanoidRootPart.CFrame = target.HumanoidRootPart.CFrame * CFrame.new(0, 4, 2)
+                
+                -- Ataque básico automático
                 pcall(function()
                     vu:Button1Down(Vector2.new(0,0))
                     task.wait(0.05)
                     vu:Button1Up(Vector2.new(0,0))
                 end)
+                
+                -- Uso automático de habilidades (Z, X, C, V)
+                useKey(Enum.KeyCode.Z)
+                task.wait(0.1)
+                useKey(Enum.KeyCode.X)
+                task.wait(0.1)
+                useKey(Enum.KeyCode.C)
+                task.wait(0.1)
+                useKey(Enum.KeyCode.V)
             else
-                -- Vai para a área de spawn se nenhum alvo estiver visível
+                -- Vai para a área de spawn se não houver bandidos visíveis
                 char.HumanoidRootPart.CFrame = CFrame.new(1159, 17, 1653)
             end
         end
