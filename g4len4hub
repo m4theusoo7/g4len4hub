@@ -1,160 +1,36 @@
 -- =========================================================
--- OMEGACORE SEA 1 - AUTO FARM [Nível 1 ao 15]
--- Foco: Estabilidade no Delta Executor, Auto-Ataque Real e Noclip
+-- DEBUGGER DE LOCALIZAÇÃO: BANDIT & NPC (SEA 1)
 -- =========================================================
 
-local Player = game:GetService("Players").LocalPlayer
-local VirtualUser = game:GetService("VirtualUser")
-local TweenService = game:GetService("TweenService")
-local RunService = game:GetService("RunService")
+print("=== INICIANDO VARREDURA DE BANDITS E NPCS ===")
 
-getgenv().AutoFarm = true
-getgenv().MeleeWeapon = "Combat" -- Mude para o nome do seu estilo de luta atual
-
--- Tabela de Progressão do Sea 1 (Expansível até o 700)
-local FarmingGuide = {
-    {
-        MinLevel = 1,
-        MaxLevel = 9,
-        QuestName = "BanditQuest1",
-        QuestLevel = 1,
-        MobName = "Bandit [Lv. 5]",
-        NPCName = "Bandit Quest Giver"
-    },
-    {
-        MinLevel = 10,
-        MaxLevel = 14,
-        QuestName = "JungleQuest",
-        QuestLevel = 1,
-        MobName = "Monkey [Lv. 14]",
-        NPCName = "Adventurer"
-    }
-}
-
--- 1. SISTEMA DE NOCLIP (Impede que o boneco trave no chão durante o voo)
-RunService.Stepped:Connect(function()
-    if getgenv().AutoFarm then
-        local char = Player.Character
-        if char then
-            for _, part in pairs(char:GetDescendants()) do
-                if part:IsA("BasePart") and part.CanCollide == true then
-                    part.CanCollide = false
-                end
-            end
-            -- Trava a rotação e zera a velocidade de queda
-            if char:FindFirstChild("HumanoidRootPart") then
-                char.HumanoidRootPart.Velocity = Vector3.new(0, 0, 0)
+-- 1. Varre os inimigos (Enemies)
+if workspace:FindFirstChild("Enemies") then
+    for _, enemy in ipairs(workspace.Enemies:GetChildren()) do
+        if string.find(enemy.Name, "Bandit") then
+            local hrp = enemy:FindFirstChild("HumanoidRootPart")
+            local hum = enemy:FindFirstChild("Humanoid")
+            if hrp then
+                print(string.find(enemy.Name, "Bandit") and "[MOB ACHADO] " or "", enemy.Name, "| HP:", hum and hum.Health or "N/A", "| Pos:", hrp.Position)
             end
         end
     end
-end)
-
--- 2. SISTEMA DE MOVIMENTAÇÃO (Voo Suave)
-local function TweenTo(targetCFrame)
-    local char = Player.Character
-    if char and char:FindFirstChild("HumanoidRootPart") then
-        local hrp = char.HumanoidRootPart
-        local dist = (hrp.Position - targetCFrame.Position).Magnitude
-        local speed = 300 -- Velocidade do voo (segura para o Anti-Cheat)
-        local time = dist / speed
-        
-        local tweenInfo = TweenInfo.new(time, Enum.EasingStyle.Linear)
-        local tween = TweenService:Create(hrp, tweenInfo, {CFrame = targetCFrame})
-        tween:Play()
-        return tween
-    end
+else
+    print("[AVISO] Pasta workspace.Enemies não encontrada!")
 end
 
--- 3. SISTEMA DE ATAQUE (Força o M1 e as Skills)
-local function AutoAttack()
-    VirtualUser:CaptureController()
-    VirtualUser:Button1Down(Vector2.new(0, 0))
-    
-    -- Dispara skills caso tenha barra (Opcional, tira o comentário se quiser)
-    -- VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Z, false, game)
-    -- task.wait(0.1)
-    -- VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.X, false, game)
-end
-
--- 4. SISTEMA DE EQUIPAR ARMA
-local function EquipWeapon()
-    local char = Player.Character
-    if char then
-        -- Se não estiver segurando nada, procura na mochila
-        if not char:FindFirstChild(getgenv().MeleeWeapon) then
-            local tool = Player.Backpack:FindFirstChild(getgenv().MeleeWeapon)
-            if tool then
-                char.Humanoid:EquipTool(tool)
+-- 2. Varre os NPCs da Starter Island (Quest Giver)
+if workspace:FindFirstChild("NPCs") then
+    for _, npc in ipairs(workspace.NPCs:GetChildren()) do
+        if string.find(npc.Name, "Quest") or string.find(npc.Name, "Bandit") or npc.Name == "Adventurer" then
+            local hrp = npc:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                print("[NPC ACHADO] Nome:", npc.Name, "| Pos:", hrp.Position)
             end
         end
     end
+else
+    print("[AVISO] Pasta workspace.NPCs não encontrada!")
 end
 
--- 5. VERIFICAÇÃO DO LEVEL ATUAL E GUIA
-local function GetCurrentGuide()
-    local myLevel = Player.Data.Level.Value
-    for _, guide in pairs(FarmingGuide) do
-        if myLevel >= guide.MinLevel and myLevel <= guide.MaxLevel then
-            return guide
-        end
-    end
-    return nil -- Se passou do maxLevel registrado
-end
-
--- =========================================================
--- LOOP PRINCIPAL DO AUTO-FARM
--- =========================================================
-task.spawn(function()
-    while task.wait() do
-        if not getgenv().AutoFarm then break end
-        
-        pcall(function()
-            local currentGuide = GetCurrentGuide()
-            if not currentGuide then return end
-
-            local hasQuest = Player.PlayerGui.Main.Quest.Visible
-            
-            -- ETAPA A: PEGAR QUEST
-            if not hasQuest then
-                -- Acha o NPC na Workspace
-                local npc = workspace.NPCs:FindFirstChild(currentGuide.NPCName)
-                if npc and npc:FindFirstChild("HumanoidRootPart") then
-                    local npcPos = npc.HumanoidRootPart.CFrame
-                    TweenTo(npcPos)
-                    
-                    -- Se estiver perto o suficiente, aceita a quest
-                    if (Player.Character.HumanoidRootPart.Position - npcPos.Position).Magnitude < 10 then
-                        game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("StartQuest", currentGuide.QuestName, currentGuide.QuestLevel)
-                        task.wait(0.5) -- Pausa rápida para a quest processar no server
-                    end
-                end
-                
-            -- ETAPA B: MATAR OS MOBS
-            else
-                EquipWeapon()
-                
-                -- Busca os mobs na pasta correta do Blox Fruits
-                local targetMob = nil
-                for _, mob in pairs(workspace.Enemies:GetChildren()) do
-                    if mob.Name == currentGuide.MobName and mob:FindFirstChild("Humanoid") and mob.Humanoid.Health > 0 then
-                        targetMob = mob
-                        break
-                    end
-                end
-                
-                if targetMob and targetMob:FindFirstChild("HumanoidRootPart") then
-                    -- Vai para trás/cima do mob (Evita tomar dano)
-                    local mobCFrame = targetMob.HumanoidRootPart.CFrame * CFrame.new(0, 5, 0) * CFrame.Angles(math.rad(-90), 0, 0)
-                    TweenTo(mobCFrame)
-                    
-                    if (Player.Character.HumanoidRootPart.Position - mobCFrame.Position).Magnitude < 15 then
-                        AutoAttack()
-                    end
-                else
-                    -- Se não achar mob spawnado, fica no ar perto do respawn esperando
-                    -- (O ideal aqui é farmar a posição inicial deles, mas o loop buscará o próximo que der spawn)
-                end
-            end
-        end)
-    end
-end)
+print("=== VARREDURA CONCLUÍDA ===")
