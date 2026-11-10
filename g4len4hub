@@ -1,7 +1,7 @@
 local TweenService = game:GetService("TweenService")
 local player = game.Players.LocalPlayer
 
-local function irAteNPC(Bandit [Lv. 5])
+local function irAteNPC(Bandit [Lv.5])
     -- Procura o NPC na pasta de NPCs ou de Inimigos
     local npc = workspace.NPCs:FindFirstChild(nomeDoNPC) or workspace.Enemies:FindFirstChild(nomeDoNPC)
     
