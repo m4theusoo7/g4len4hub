@@ -1,6 +1,5 @@
 -- =====================================================================
--- OmegaCore Sea 1: Ultimate Auto-Farm, Mapper & Combat Engine (Lv. 1-700)
--- Otimizado para Delta Executor | Sem toque em NPC | Habilidades Z, X, C, V
+-- OmegaCore Sea 1: Correção de Ataque e Habilidades (Delta Executor)
 -- =====================================================================
 
 local Players = game:GetService("Players")
@@ -10,19 +9,17 @@ local VirtualUser = game:GetService("VirtualUser")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer = Players.LocalPlayer
 
--- Configurações Gerais
 getgenv().OmegaConfig = {
     AutoFarm = true,
-    FastAttack = true,
-    UseSkills = true,
+    WeaponType = "Melee", -- Mude para "Sword" ou "Blox Fruit" se preferir
     CurrentIsland = nil,
     TargetMob = nil,
     LastQuestCheck = 0
 }
 
--- Mapeamento Completo do Sea 1 (Level 1 até 700)
+-- Mapeamento do Sea 1
 local Sea1Islands = {
-    {Name = "Pirate/Marine Starter", MinLevel = 1, MaxLevel = 10, MobName = "Bandit", QuestName = "BanditQuest1", Spawn = Vector3.new(1062, 16, 1349)},
+    {Name = "Starter", MinLevel = 1, MaxLevel = 10, MobName = "Bandit", QuestName = "BanditQuest1", Spawn = Vector3.new(1062, 16, 1349)},
     {Name = "Jungle", MinLevel = 10, MaxLevel = 30, MobName = "Monkey", QuestName = "JungleQuest", Spawn = Vector3.new(-1598, 36, 153)},
     {Name = "Pirate Village", MinLevel = 30, MaxLevel = 60, MobName = "Pirate", QuestName = "PirateQuest", Spawn = Vector3.new(-1139, 4, 3824)},
     {Name = "Desert", MinLevel = 60, MaxLevel = 90, MobName = "Desert Bandit", QuestName = "DesertQuest", Spawn = Vector3.new(944, 6, 4377)},
@@ -36,19 +33,15 @@ local Sea1Islands = {
     {Name = "Fountain City", MinLevel = 450, MaxLevel = 700, MobName = "Galley Pirate", QuestName = "FountainQuest", Spawn = Vector3.new(5247, 38, 4048)}
 }
 
--- Anti-AFK para evitar desconexão durante o farm longo
+-- Anti-AFK
 LocalPlayer.Idled:Connect(function()
     VirtualUser:CaptureController()
     VirtualUser:ClickButton2(Vector2.new())
 end)
 
--- Função de Mapeamento Dinâmico por Level
 local function ScanAndGetIsland()
     local playerLevel = 1
-    pcall(function()
-        playerLevel = LocalPlayer.Data.Level.Value
-    end)
-    
+    pcall(function() playerLevel = LocalPlayer.Data.Level.Value end)
     for _, island in ipairs(Sea1Islands) do
         if playerLevel >= island.MinLevel and playerLevel <= island.MaxLevel then
             getgenv().OmegaConfig.CurrentIsland = island
@@ -56,75 +49,84 @@ local function ScanAndGetIsland()
             return island
         end
     end
-    -- Fallback padrão
-    getgenv().OmegaConfig.CurrentIsland = Sea1Islands[1]
-    getgenv().OmegaConfig.TargetMob = Sea1Islands[1].MobName
     return Sea1Islands[1]
 end
 
--- Movimentação Suave (Tween)
 local function TweenTo(targetPos)
     local char = LocalPlayer.Character
     if not char or not char:FindFirstChild("HumanoidRootPart") then return end
     local hrp = char.HumanoidRootPart
-    
     local distance = (targetPos - hrp.Position).Magnitude
-    local speed = 310 -- Velocidade segura para Delta Executor
-    
-    local tweenInfo = TweenInfo.new(distance / speed, Enum.EasingStyle.Linear)
-    local tween = TweenService:Create(hrp, tweenInfo, {CFrame = CFrame.new(targetPos)})
+    local speed = 310
+    local tween = TweenService:Create(hrp, TweenInfo.new(distance / speed, Enum.EasingStyle.Linear), {CFrame = CFrame.new(targetPos)})
     tween:Play()
 end
 
--- Resgate Remoto da Missão (Sem encostar no NPC físico)
+-- FUNÇÃO CORRIGIDA: Força o equipamento da arma no inventário
+local function EquipWeapon()
+    pcall(function()
+        local backpack = LocalPlayer.Backpack
+        local char = LocalPlayer.Character
+        if not char then return end
+        
+        -- Verifica se já tem algo na mão
+        local currentTool = char:FindFirstChildOfClass("Tool")
+        if not currentTool then
+            for _, tool in ipairs(backpack:GetChildren()) do
+                if tool:IsA("Tool") then
+                    if tool.ToolTip == getgenv().OmegaConfig.WeaponType or tool.Name:find("Combat") or tool.Name:find("Melee") or #backpack:GetChildren() > 0 then
+                        local humanoid = char:FindFirstChildOfClass("Humanoid")
+                        if humanoid then
+                            humanoid:EquipTool(tool)
+                            break
+                        end
+                    end
+                end
+            end
+        end
+    end)
+end
+
 local function TriggerQuestRemotely()
     if tick() - getgenv().OmegaConfig.LastQuestCheck < 15 then return end
     getgenv().OmegaConfig.LastQuestCheck = tick()
-    
     pcall(function()
         local island = getgenv().OmegaConfig.CurrentIsland
         if not island then return end
-        
         local commF = ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("CommF_")
         if commF then
-            -- Envia o comando direto para iniciar a missão do level correspondente
             commF:InvokeServer("StartQuest", island.QuestName, 1)
         end
     end)
 end
 
--- Sistema de Disparo de Habilidades (Z, X, C, V)
-local function UseCombatSkills()
-    if not getgenv().OmegaConfig.UseSkills then return end
-    
-    local vim = game:GetService("VirtualInputManager")
-    local skills = {Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C, Enum.KeyCode.V}
-    
-    task.spawn(function()
-        for _, key in ipairs(skills) do
-            pcall(function()
-                vim:SendKeyEvent(true, key, false, game)
-                task.wait(0.05)
-                vim:SendKeyEvent(false, key, false, game)
-                task.wait(0.1)
-            end)
+-- Disparo de Habilidades Seguro via VirtualUser
+local function UseSkills()
+    pcall(function()
+        local vim = game:GetService("VirtualInputManager")
+        local keys = {Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C, Enum.KeyCode.V}
+        for _, key in ipairs(keys) do
+            vim:SendKeyEvent(true, key, false, game)
+            task.wait(0.05)
+            vim:SendKeyEvent(false, key, false, game)
+            task.wait(0.08)
         end
     end)
 end
 
--- Loop Principal de Varredura e Combate Automatizado
+-- Loop Principal
 task.spawn(function()
     while task.wait(0.3) do
         if getgenv().OmegaConfig.AutoFarm then
             local island = ScanAndGetIsland()
             TriggerQuestRemotely()
+            EquipWeapon() -- Garante que a arma está sempre equipada
             
             local char = LocalPlayer.Character
             if char and char:FindFirstChild("HumanoidRootPart") then
                 local hrp = char.HumanoidRootPart
                 local targetFound = false
                 
-                -- Varredura em tempo real dos inimigos na pasta Workspace.Enemies
                 local enemiesFolder = Workspace:FindFirstChild("Enemies")
                 if enemiesFolder then
                     for _, enemy in ipairs(enemiesFolder:GetChildren()) do
@@ -134,23 +136,18 @@ task.spawn(function()
                             
                             if enemyHRP and enemyHum and enemyHum.Health > 0 then
                                 targetFound = true
-                                
-                                -- Posição estratégica acima do mob (evita dano corpo a corpo inimigo)
                                 local combatPos = enemyHRP.Position + Vector3.new(0, 25, 0)
                                 
                                 if (hrp.Position - combatPos).Magnitude > 12 then
                                     TweenTo(combatPos)
                                 else
-                                    -- Manter CFrame travado em cima do alvo
                                     hrp.CFrame = CFrame.new(combatPos)
                                     
-                                    -- Executar Ataque Básico contínuo
-                                    pcall(function()
-                                        VirtualUser:Button1Down(Vector2.new(0,0), Workspace.CurrentCamera.CFrame)
-                                    end)
+                                    -- Ataque básico contínuo otimizado para mobile
+                                    VirtualUser:Button1Down(Vector2.new(0,0), Workspace.CurrentCamera.CFrame)
                                     
-                                    -- Disparar Habilidades
-                                    UseCombatSkills()
+                                    -- Executa as skills Z, X, C, V
+                                    UseSkills()
                                 end
                                 break
                             end
@@ -158,7 +155,6 @@ task.spawn(function()
                     end
                 end
                 
-                -- Se não houver monstros na mira, viaja para o spawn padrão da ilha mapeada
                 if not targetFound and island and island.Spawn then
                     if (hrp.Position - island.Spawn).Magnitude > 20 then
                         TweenTo(island.Spawn)
@@ -169,4 +165,4 @@ task.spawn(function()
     end
 end)
 
-print("OmegaCore Sea 1 Mapper + Auto-Farm & Skills ativado com sucesso!")
+print("OmegaCore: Sistema de Ataque e Equipamento de Armas Corrigido!")
