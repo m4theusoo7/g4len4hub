@@ -1,201 +1,158 @@
 -- ==========================================
--- OMEGACORE: Blox Fruits Sea 1 Auto-Farm (Lv 1 - 700)
--- CORREÇÃO: NoClip (Atravessar paredes) adicionado
+-- AUTO-FARM JUNGLE (LVL 10-30) -> PIRATE VILLAGE
+-- OTIMIZADO PARA DELTA EXECUTOR
 -- ==========================================
 
-_G.AutoFarm = true
-_G.AutoAttack = true
-_G.AutoSkills = true
-_G.SkillDelay = 2 
-_G.WeaponName = "Melee" 
-
-local Player = game:GetService("Players").LocalPlayer
-local VIM = game:GetService("VirtualInputManager")
-local VU = game:GetService("VirtualUser")
+local player = game.Players.LocalPlayer
+local VirtualUser = game:GetService("VirtualUser")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 
--- Prevenção de AFK
-Player.Idled:Connect(function()
-    VU:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
-    task.wait(1)
-    VU:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+_G.AutoFarm = true
+_G.AutoSkills = true
+local weaponName = "Combat" -- Mude para o nome do seu estilo de luta ou espada (ex: "Katana")
+
+-- Coordenadas fornecidas
+local Coords = {
+    PirateVillage = CFrame.new(-1141.07, 4.10, 3831.55),
+    JungleNPC = CFrame.new(-1598.09, 35.55, 153.38),
+    MonkeyArea = CFrame.new(-1448.52, 67.85, 11.47),
+    GorillaArea = CFrame.new(-1142.65, 40.46, -515.39)
+}
+
+-- Anti-AFK para não tomar disconnect
+player.Idled:Connect(function()
+    VirtualUser:CaptureController()
+    VirtualUser:ClickButton2(Vector2.new())
 end)
 
--- Tabela de Coordenadas (Sea 1)
-local Sea1Data = {
-    {min = 1, max = 9, npc = Vector3.new(1059.37, 15.45, 1550.42), mob = "Bandit", spawn = Vector3.new(1045.96, 27.00, 1560.82)},
-    {min = 10, max = 14, npc = Vector3.new(-1598.09, 35.55, 153.38), mob = "Monkey", spawn = Vector3.new(-1448.52, 67.85, 11.47)},
-    {min = 15, max = 29, npc = Vector3.new(-1598.09, 35.55, 153.38), mob = "Gorilla", spawn = Vector3.new(-1142.65, 40.46, -515.39)},
-    {min = 30, max = 39, npc = Vector3.new(-1141.07, 4.10, 3831.55), mob = "Pirate", spawn = Vector3.new(-1103.51, 13.75, 3896.09)},
-    {min = 40, max = 59, npc = Vector3.new(-1141.07, 4.10, 3831.55), mob = "Brute", spawn = Vector3.new(-1140.08, 14.81, 4322.92)},
-    {min = 60, max = 74, npc = Vector3.new(894.49, 5.14, 4392.43), mob = "Desert Bandit", spawn = Vector3.new(924.80, 6.45, 4481.59)},
-    {min = 75, max = 89, npc = Vector3.new(894.49, 5.14, 4392.43), mob = "Desert Officer", spawn = Vector3.new(1608.28, 8.61, 4371.01)},
-    {min = 90, max = 99, npc = Vector3.new(1389.74, 88.15, -1298.91), mob = "Snow Bandit", spawn = Vector3.new(1354.35, 87.27, -1393.95)},
-    {min = 100, max = 119, npc = Vector3.new(1389.74, 88.15, -1298.91), mob = "Snowman", spawn = Vector3.new(1218.80, 138.01, -1488.03)},
-    {min = 120, max = 149, npc = Vector3.new(-5039.59, 27.35, 4324.68), mob = "Chief Petty Officer", spawn = Vector3.new(-4881.23, 22.65, 4273.75)},
-    {min = 150, max = 174, npc = Vector3.new(-4841.83, 717.67, -2623.96), mob = "Sky Bandit", spawn = Vector3.new(-4970.74, 294.54, -2890.11)},
-    {min = 175, max = 189, npc = Vector3.new(-4841.83, 717.67, -2623.96), mob = "Dark Master", spawn = Vector3.new(-5220.59, 430.69, -2278.17)},
-    {min = 190, max = 209, npc = Vector3.new(5308.93, 1.66, 475.12), mob = "Prisoner", spawn = Vector3.new(5098.97, -0.32, 474.24)},
-    {min = 210, max = 224, npc = Vector3.new(5308.93, 1.66, 475.12), mob = "Dangerous Prisoner", spawn = Vector3.new(5654.56, 15.63, 866.30)},
-    {min = 225, max = 274, npc = Vector3.new(-1580.05, 6.35, -2986.48), mob = "Toga Warrior", spawn = Vector3.new(-1820.21, 51.68, -2740.67)},
-    {min = 275, max = 299, npc = Vector3.new(-1580.05, 6.35, -2986.48), mob = "Gladiator", spawn = Vector3.new(-1292.84, 56.38, -3339.03)},
-    {min = 300, max = 324, npc = Vector3.new(-5313.37, 10.95, 8515.29), mob = "Military Soldier", spawn = Vector3.new(-5411.16, 11.08, 8454.29)},
-    {min = 325, max = 374, npc = Vector3.new(-5313.37, 10.95, 8515.29), mob = "Military Spy", spawn = Vector3.new(-5802.87, 86.26, 8828.86)},
-    {min = 375, max = 399, npc = Vector3.new(61122.65, 18.50, 1569.40), mob = "Fishman Warrior", spawn = Vector3.new(60878.30, 18.48, 1543.76)},
-    {min = 400, max = 449, npc = Vector3.new(61122.65, 18.50, 1569.40), mob = "Fishman Commando", spawn = Vector3.new(61922.63, 18.48, 1493.93)},
-    {min = 450, max = 474, npc = Vector3.new(-4721.89, 843.87, -1949.97), mob = "God's Guard", spawn = Vector3.new(-4710.04, 845.28, -1927.31)},
-    {min = 475, max = 524, npc = Vector3.new(-7859.10, 5544.19, -381.48), mob = "Shanda", spawn = Vector3.new(-7678.49, 5566.40, -497.22)},
-    {min = 525, max = 549, npc = Vector3.new(-7906.82, 5634.66, -1411.99), mob = "Royal Squad", spawn = Vector3.new(-7624.25, 5658.13, -1467.35)},
-    {min = 550, max = 624, npc = Vector3.new(-7906.82, 5634.66, -1411.99), mob = "Royal Soldier", spawn = Vector3.new(-7836.75, 5645.66, -1790.62)},
-    {min = 625, max = 649, npc = Vector3.new(5259.82, 37.35, 4050.03), mob = "Galley Pirate", spawn = Vector3.new(5551.02, 78.90, 3930.41)},
-    {min = 650, max = 700, npc = Vector3.new(5259.82, 37.35, 4050.03), mob = "Galley Captain", spawn = Vector3.new(5441.95, 42.50, 4950.09)}
-}
-
-local Portals = {
-    Underwater = Vector3.new(3864.85, 6.68, -1926.78),
-    Skylands = Vector3.new(-4607.82, 872.54, -1667.56)
-}
-
-local function GetTargetData()
-    local lvl = Player.Data.Level.Value
-    for _, data in ipairs(Sea1Data) do
-        if lvl >= data.min and lvl <= data.max then return data end
-    end
-    return Sea1Data[#Sea1Data]
-end
-
-local function HasQuest()
-    local questGui = Player.PlayerGui.Main:FindFirstChild("Quest")
-    return questGui and questGui.Visible
-end
-
--- Novo Tween com sistema de Timeout para desbugar se travar
-local isTweening = false
-local function TweenTo(targetVector)
-    local root = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
-    if not root or isTweening then return end
+-- Função para mover o personagem suavemente (Tween) e evitar Kicks
+local function tweenMove(targetCFrame)
+    local char = player.Character or player.CharacterAdded:Wait()
+    local root = char:WaitForChild("HumanoidRootPart")
+    local distance = (root.Position - targetCFrame.Position).Magnitude
+    local speed = 300 -- Velocidade de voo/teleporte
+    local time = distance / speed
     
-    local distance = (root.Position - targetVector).Magnitude
-    if distance < 15 then return end -- Já chegou
-    
-    -- Bypass Portais
-    if targetVector.X > 50000 and root.Position.X < 10000 then
-        root.CFrame = CFrame.new(Portals.Underwater)
-        task.wait(0.5)
-    elseif targetVector.Y > 4000 and root.Position.Y < 2000 then
-        root.CFrame = CFrame.new(Portals.Skylands)
-        task.wait(0.5)
-    end
-    
-    isTweening = true
-    local speed = 300
-    local info = TweenInfo.new(distance / speed, Enum.EasingStyle.Linear)
-    local tween = game:GetService("TweenService"):Create(root, info, {CFrame = CFrame.new(targetVector)})
-    
+    local tween = TweenService:Create(root, TweenInfo.new(time, Enum.EasingStyle.Linear), {CFrame = targetCFrame})
     tween:Play()
-    tween.Completed:Connect(function()
-        isTweening = false
-    end)
-    
-    -- Timeout de segurança (se a viagem demorar mais que o tempo calculado + 2s, ele reseta o estado)
-    task.delay((distance / speed) + 2, function()
-        isTweening = false
-    end)
-    
-    -- Espera o tween terminar sem travar o loop completamente
-    repeat task.wait() until not isTweening or not _G.AutoFarm
+    tween.Completed:Wait()
 end
 
-local function EquipWeapon()
-    for _, tool in ipairs(Player.Backpack:GetChildren()) do
-        if tool.ToolTip == _G.WeaponName or tool.Name == _G.WeaponName then
-            Player.Character.Humanoid:EquipTool(tool)
-        end
-    end
+-- Função de Ataque Automático (Mouse)
+local function autoAttack()
+    VirtualUser:CaptureController()
+    VirtualUser:ClickButton1(Vector2.new())
 end
 
-local lastSkillTime = 0
-local function AutoCombat(targetHRP)
-    EquipWeapon()
-    -- Posiciona exatos 5 studs ACIMA do inimigo
-    Player.Character.HumanoidRootPart.CFrame = targetHRP.CFrame * CFrame.new(0, 5, 0)
-    
-    if _G.AutoAttack then
-        VU:CaptureController()
-        VU:ClickButton1(Vector2.new(851, 158), workspace.CurrentCamera.CFrame)
-    end
-    
-    if _G.AutoSkills and (tick() - lastSkillTime > _G.SkillDelay) then
-        local keys = {Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C, Enum.KeyCode.V}
-        for _, key in ipairs(keys) do
-            VIM:SendKeyEvent(true, key, false, game)
-            task.wait(0.05)
-            VIM:SendKeyEvent(false, key, false, game)
-        end
-        lastSkillTime = tick()
+-- Função para usar Skills automaticamente (Z, X, C, V)
+local function useSkills()
+    if not _G.AutoSkills then return end
+    local keys = {"Z", "X", "C", "V"}
+    for _, key in ipairs(keys) do
+        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode[key], false, game)
+        task.wait(0.1)
+        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode[key], false, game)
     end
 end
 
--- O Segredo: Loop no RunService (NoClip + Flutuar perfeito)
-RunService.Stepped:Connect(function()
-    if _G.AutoFarm and Player.Character then
-        local hrp = Player.Character:FindFirstChild("HumanoidRootPart")
-        
-        -- NOCLIP ATIVO: Atravessa ilhas e paredes sem bater
-        for _, part in pairs(Player.Character:GetDescendants()) do
-            if part:IsA("BasePart") and part.CanCollide then
-                part.CanCollide = false
-            end
-        end
-        
-        -- FLOAT FIX: Impede o boneco de cair no mar
-        if hrp and not hrp:FindFirstChild("Float") then
-            local bv = Instance.new("BodyVelocity")
-            bv.Name = "Float"
-            bv.Parent = hrp
-            bv.MaxForce = Vector3.new(0, 100000, 0)
-            bv.Velocity = Vector3.new(0, 0, 0)
+-- Função para equipar arma
+local function equipWeapon()
+    local char = player.Character
+    if char then
+        local tool = player.Backpack:FindFirstChild(weaponName)
+        if tool then
+            char.Humanoid:EquipTool(tool)
         end
     end
-end)
+end
 
--- Loop Mestre de Farm
+-- Função para verificar se já tem Quest ativa
+local function hasQuest()
+    local questGui = player.PlayerGui:FindFirstChild("Main")
+    if questGui and questGui:FindFirstChild("Quest") then
+        return questGui.Quest.Visible
+    end
+    return false
+end
+
+-- Pegar a Quest via Remote Event do Blox Fruits
+local function getQuest(questName, questLevel)
+    local args = {
+        [1] = "StartQuest",
+        [2] = questName,
+        [3] = questLevel
+    }
+    game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer(unpack(args))
+end
+
+-- ==========================================
+-- LOOP PRINCIPAL DE FARM
+-- ==========================================
 task.spawn(function()
-    while task.wait() do
-        if not _G.AutoFarm or not Player.Character or not Player.Character:FindFirstChild("HumanoidRootPart") then continue end
-        if isTweening then continue end -- Espera chegar antes de agir
-        
-        local data = GetTargetData()
-        
-        if not HasQuest() then
-            local hrp = Player.Character.HumanoidRootPart
-            if (hrp.Position - data.npc).Magnitude > 15 then
-                TweenTo(data.npc)
-            else
-                local npcModel = workspace.NPCs:FindFirstChild(data.mob .. " Quest Giver") or workspace.NPCs:FindFirstChild("Quest Giver")
-                if npcModel and npcModel:FindFirstChild("Head") then
-                    hrp.CFrame = npcModel.Head.CFrame
-                end
-                
-                game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("StartQuest", data.mob .. "Quest", 1)
-                task.wait(1)
+    while _G.AutoFarm do
+        task.wait()
+        pcall(function()
+            local level = player.Data.Level.Value
+            
+            -- LEVEL 30+: IR PARA PIRATE VILLAGE E PARAR
+            if level >= 30 then
+                print("Level 30 atingido! Indo para Pirate Village...")
+                tweenMove(Coords.PirateVillage)
+                _G.AutoFarm = false -- Desliga o script para você assumir
+                return
             end
-        else
-            local mobFound = false
-            for _, v in pairs(workspace.Enemies:GetChildren()) do
-                if string.find(v.Name, data.mob) and v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 and v:FindFirstChild("HumanoidRootPart") then
-                    mobFound = true
-                    AutoCombat(v.HumanoidRootPart)
-                    break
+            
+            -- DEFINIR ALVOS BASEADO NO LEVEL (10 AO 29)
+            local targetMob, questLevel, farmArea
+            if level >= 10 and level < 15 then
+                targetMob = "Monkey"
+                questLevel = 1
+                farmArea = Coords.MonkeyArea
+            elseif level >= 15 and level < 30 then
+                targetMob = "Gorilla"
+                questLevel = 2
+                farmArea = Coords.GorillaArea
+            end
+            
+            -- LOGICA DE PEGAR QUEST E MATAR O MOB
+            if targetMob then
+                if not hasQuest() then
+                    -- Se não tem quest, vai pro NPC
+                    tweenMove(Coords.JungleNPC)
+                    task.wait(0.5)
+                    getQuest("JungleQuest", questLevel)
+                    task.wait(1)
+                else
+                    -- Se tem quest, vai pra área de farm e ataca
+                    local enemies = game.Workspace.Enemies:GetChildren()
+                    local foundMob = false
+                    
+                    for _, mob in ipairs(enemies) do
+                        if mob.Name == targetMob and mob:FindFirstChild("Humanoid") and mob.Humanoid.Health > 0 then
+                            foundMob = true
+                            local mobRoot = mob:FindFirstChild("HumanoidRootPart")
+                            if mobRoot then
+                                -- Posiciona o player em cima do mob para não tomar tanto dano
+                                local attackPos = mobRoot.CFrame * CFrame.new(0, 5, 0)
+                                tweenMove(attackPos)
+                                
+                                equipWeapon()
+                                autoAttack()
+                                useSkills()
+                            end
+                            break -- Foca em um mob por vez
+                        end
+                    end
+                    
+                    -- Se o mob não estiver spawnado no momento, fica esperando na área dele
+                    if not foundMob then
+                        tweenMove(farmArea * CFrame.new(0, 20, 0)) -- Espera no ar para segurança
+                    end
                 end
             end
             
-            if not mobFound then
-                local hrp = Player.Character.HumanoidRootPart
-                if (hrp.Position - data.spawn).Magnitude > 15 then
-                    TweenTo(data.spawn)
-                end
-            end
-        end
+        end)
     end
 end)
