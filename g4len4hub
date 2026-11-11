@@ -1,281 +1,205 @@
 -- ==========================================
--- SCRIPT AUTO FARM (LVL 1 AO 10) -> JUNGLE
+-- OMEGACORE: Blox Fruits Sea 1 Auto-Farm (Lv 1 - 700)
 -- Otimizado para Delta Executor
 -- ==========================================
 
-local player = game.Players.LocalPlayer
-local vim = game:GetService("VirtualInputManager")
-local ts = game:GetService("TweenService")
-local runService = game:GetService("RunService")
-
 _G.AutoFarm = true
+_G.AutoAttack = true
+_G.AutoSkills = true
+_G.SkillDelay = 2 -- Segundos entre rodadas de skills
+_G.WeaponName = "Melee" -- Mude para "Sword" ou "Blox Fruit" se preferir
 
--- Coordenadas extraídas da varredura (Bandits)
-local banditSpawns = {
-    Vector3.new(1000.87, 13.18, 1568.19),
-    Vector3.new(922.15, 13.18, 1528.03),
-    Vector3.new(1310.66, 13.47, 1593.06),
-    Vector3.new(928.00, 13.18, 1597.26),
-    Vector3.new(1280.75, 13.47, 1528.91),
-    Vector3.new(1254.71, 13.18, 1623.05),
-    Vector3.new(1203.57, 13.18, 1563.34),
-    Vector3.new(1147.22, 13.18, 1676.80),
-    Vector3.new(1210.01, 13.18, 1673.53),
-    Vector3.new(1114.26, 13.18, 1590.18)
+local Player = game:GetService("Players").LocalPlayer
+local VIM = game:GetService("VirtualInputManager")
+local VU = game:GetService("VirtualUser")
+local RunService = game:GetService("RunService")
+
+-- Prevenção de AFK
+Player.Idled:Connect(function()
+    VU:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+    task.wait(1)
+    VU:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+end)
+
+-- Tabela de Coordenadas (Sea 1 Completo)
+local Sea1Data = {
+    {min = 1, max = 9, npc = Vector3.new(1059.37, 15.45, 1550.42), mob = "Bandit", spawn = Vector3.new(1045.96, 27.00, 1560.82)},
+    {min = 10, max = 14, npc = Vector3.new(-1598.09, 35.55, 153.38), mob = "Monkey", spawn = Vector3.new(-1448.52, 67.85, 11.47)},
+    {min = 15, max = 29, npc = Vector3.new(-1598.09, 35.55, 153.38), mob = "Gorilla", spawn = Vector3.new(-1142.65, 40.46, -515.39)},
+    {min = 30, max = 39, npc = Vector3.new(-1141.07, 4.10, 3831.55), mob = "Pirate", spawn = Vector3.new(-1103.51, 13.75, 3896.09)},
+    {min = 40, max = 59, npc = Vector3.new(-1141.07, 4.10, 3831.55), mob = "Brute", spawn = Vector3.new(-1140.08, 14.81, 4322.92)},
+    {min = 60, max = 74, npc = Vector3.new(894.49, 5.14, 4392.43), mob = "Desert Bandit", spawn = Vector3.new(924.80, 6.45, 4481.59)},
+    {min = 75, max = 89, npc = Vector3.new(894.49, 5.14, 4392.43), mob = "Desert Officer", spawn = Vector3.new(1608.28, 8.61, 4371.01)},
+    {min = 90, max = 99, npc = Vector3.new(1389.74, 88.15, -1298.91), mob = "Snow Bandit", spawn = Vector3.new(1354.35, 87.27, -1393.95)},
+    {min = 100, max = 119, npc = Vector3.new(1389.74, 88.15, -1298.91), mob = "Snowman", spawn = Vector3.new(1218.80, 138.01, -1488.03)},
+    {min = 120, max = 149, npc = Vector3.new(-5039.59, 27.35, 4324.68), mob = "Chief Petty Officer", spawn = Vector3.new(-4881.23, 22.65, 4273.75)},
+    {min = 150, max = 174, npc = Vector3.new(-4841.83, 717.67, -2623.96), mob = "Sky Bandit", spawn = Vector3.new(-4970.74, 294.54, -2890.11)},
+    {min = 175, max = 189, npc = Vector3.new(-4841.83, 717.67, -2623.96), mob = "Dark Master", spawn = Vector3.new(-5220.59, 430.69, -2278.17)},
+    {min = 190, max = 209, npc = Vector3.new(5308.93, 1.66, 475.12), mob = "Prisoner", spawn = Vector3.new(5098.97, -0.32, 474.24)},
+    {min = 210, max = 224, npc = Vector3.new(5308.93, 1.66, 475.12), mob = "Dangerous Prisoner", spawn = Vector3.new(5654.56, 15.63, 866.30)},
+    {min = 225, max = 274, npc = Vector3.new(-1580.05, 6.35, -2986.48), mob = "Toga Warrior", spawn = Vector3.new(-1820.21, 51.68, -2740.67)},
+    {min = 275, max = 299, npc = Vector3.new(-1580.05, 6.35, -2986.48), mob = "Gladiator", spawn = Vector3.new(-1292.84, 56.38, -3339.03)},
+    {min = 300, max = 324, npc = Vector3.new(-5313.37, 10.95, 8515.29), mob = "Military Soldier", spawn = Vector3.new(-5411.16, 11.08, 8454.29)},
+    {min = 325, max = 374, npc = Vector3.new(-5313.37, 10.95, 8515.29), mob = "Military Spy", spawn = Vector3.new(-5802.87, 86.26, 8828.86)},
+    {min = 375, max = 399, npc = Vector3.new(61122.65, 18.50, 1569.40), mob = "Fishman Warrior", spawn = Vector3.new(60878.30, 18.48, 1543.76)},
+    {min = 400, max = 449, npc = Vector3.new(61122.65, 18.50, 1569.40), mob = "Fishman Commando", spawn = Vector3.new(61922.63, 18.48, 1493.93)},
+    {min = 450, max = 474, npc = Vector3.new(-4721.89, 843.87, -1949.97), mob = "God's Guard", spawn = Vector3.new(-4710.04, 845.28, -1927.31)},
+    {min = 475, max = 524, npc = Vector3.new(-7859.10, 5544.19, -381.48), mob = "Shanda", spawn = Vector3.new(-7678.49, 5566.40, -497.22)},
+    {min = 525, max = 549, npc = Vector3.new(-7906.82, 5634.66, -1411.99), mob = "Royal Squad", spawn = Vector3.new(-7624.25, 5658.13, -1467.35)},
+    {min = 550, max = 624, npc = Vector3.new(-7906.82, 5634.66, -1411.99), mob = "Royal Soldier", spawn = Vector3.new(-7836.75, 5645.66, -1790.62)},
+    {min = 625, max = 649, npc = Vector3.new(5259.82, 37.35, 4050.03), mob = "Galley Pirate", spawn = Vector3.new(5551.02, 78.90, 3930.41)},
+    {min = 650, max = 700, npc = Vector3.new(5259.82, 37.35, 4050.03), mob = "Galley Captain", spawn = Vector3.new(5441.95, 42.50, 4950.09)}
 }
 
-local junglePos = Vector3.new(-1246, 15, 1551) -- Coordenada padrão da Jungle
+-- Portais para evitar Kick por Teleporte Distante
+local Portals = {
+    Underwater = Vector3.new(3864.85, 6.68, -1926.78),
+    Skylands = Vector3.new(-4607.82, 872.54, -1667.56)
+}
 
--- Função de movimentação segura (Tween)
-local function tweenTo(targetPos)
-    local char = player.Character
-    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+-- Helpers de Verificação
+local function GetCurrentLevel()
+    return Player.Data.Level.Value
+end
+
+local function HasQuest()
+    local questGui = Player.PlayerGui.Main:FindFirstChild("Quest")
+    return questGui and questGui.Visible
+end
+
+local function GetTargetData()
+    local lvl = GetCurrentLevel()
+    for _, data in ipairs(Sea1Data) do
+        if lvl >= data.min and lvl <= data.max then
+            return data
+        end
+    end
+    return Sea1Data[#Sea1Data] -- Retorna o último se passou do 700
+end
+
+-- Sistema de Movimentação Seguro (Tween + Portal Bypass)
+local function TweenTo(targetVector)
+    local root = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
+    if not root then return end
     
-    local distance = (char.HumanoidRootPart.Position - targetPos).Magnitude
-    local speed = 300 -- Velocidade do Tween
-    local timeToReach = distance / speed
+    local distance = (root.Position - targetVector).Magnitude
     
-    local tweenInfo = TweenInfo.new(timeToReach, Enum.EasingStyle.Linear)
-    local tween = ts:Create(char.HumanoidRootPart, tweenInfo, {CFrame = CFrame.new(targetPos)})
+    -- Bypass de Portais (Se tentar ir para Underwater City estando muito longe)
+    if targetVector.X > 50000 and root.Position.X < 10000 then
+        root.CFrame = CFrame.new(Portals.Underwater)
+        task.wait(0.5)
+    -- Bypass de Portais (Skylands topo)
+    elseif targetVector.Y > 4000 and root.Position.Y < 2000 then
+        root.CFrame = CFrame.new(Portals.Skylands)
+        task.wait(0.5)
+    end
+    
+    -- Tween principal
+    local speed = 300
+    local info = TweenInfo.new(distance / speed, Enum.EasingStyle.Linear)
+    local tween = game:GetService("TweenService"):Create(root, info, {CFrame = CFrame.new(targetVector)})
     tween:Play()
     tween.Completed:Wait()
 end
 
--- Função para usar Skills e Ataque Básico
-local function autoAttackAndSkills()
-    -- Clica para atacar
-    vim:SendMouseButtonEvent(0, 0, 0, true, game, 0)
-    vim:SendMouseButtonEvent(0, 0, 0, false, game, 0)
-    
-    -- Ativa as skills Z, X, C, V
-    local keys = {Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C, Enum.KeyCode.V}
-    for _, key in ipairs(keys) do
-        vim:SendKeyEvent(true, key, false, game)
-        task.wait(0.1)
-        vim:SendKeyEvent(false, key, false, game)
-    end
-end
-
--- Função para encontrar um Bandit vivo perto das coordenadas mapeadas
-local function getClosestBandit()
-    for _, obj in pairs(workspace.Enemies:GetChildren()) do
-        if obj.Name == "Bandit" and obj:FindFirstChild("Humanoid") and obj.Humanoid.Health > 0 then
-            return obj
+-- Funções de Combate
+local function EquipWeapon()
+    for _, tool in ipairs(Player.Backpack:GetChildren()) do
+        if tool.ToolTip == _G.WeaponName or tool.Name == _G.WeaponName then
+            Player.Character.Humanoid:EquipTool(tool)
         end
     end
-    return nil
 end
 
--- Loop Principal
+local function Attack()
+    if _G.AutoAttack then
+        VU:CaptureController()
+        VU:ClickButton1(Vector2.new(851, 158), game:GetService("Workspace").CurrentCamera.CFrame)
+    end
+end
+
+local lastSkillTime = 0
+local function UseSkills()
+    if _G.AutoSkills and (tick() - lastSkillTime > _G.SkillDelay) then
+        local keys = {Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C, Enum.KeyCode.V}
+        for _, key in ipairs(keys) do
+            VIM:SendKeyEvent(true, key, false, game)
+            task.wait(0.05)
+            VIM:SendKeyEvent(false, key, false, game)
+        end
+        lastSkillTime = tick()
+    end
+end
+
+-- Loop Principal do Auto-Farm
 task.spawn(function()
-    while _G.AutoFarm do
-        task.wait()
+    while task.wait() do
+        if not _G.AutoFarm or not Player.Character or not Player.Character:FindFirstChild("HumanoidRootPart") then continue end
         
-        local char = player.Character
-        if not char or not char:FindFirstChild("HumanoidRootPart") then continue end
+        local data = GetTargetData()
         
-        -- Verifica o Nível do Jogador
-        local playerLevel = player.Data.Level.Value
-        
-        if playerLevel < 10 then
-            -- Lógica de Farm nos Bandits
-            local target = getClosestBandit()
-            
-            if target and target:FindFirstChild("HumanoidRootPart") then
-                -- Voa para trás das costas do Bandit para não tomar dano
-                local farmPos = target.HumanoidRootPart.CFrame * CFrame.new(0, 5, 4)
-                tweenTo(farmPos.Position)
-                
-                -- Fica batendo e soltando skill enquanto o bicho estiver vivo
-                if target.Humanoid.Health > 0 then
-                    char.HumanoidRootPart.CFrame = CFrame.new(char.HumanoidRootPart.Position, target.HumanoidRootPart.Position)
-                    autoAttackAndSkills()
-                end
+        -- 1. Lógica de Missão (Evita travamento no NPC)
+        if not HasQuest() then
+            -- Vai até o NPC
+            if (Player.Character.HumanoidRootPart.Position - data.npc).Magnitude > 10 then
+                TweenTo(data.npc)
             else
-                -- Se não achar nenhum vivo, voa para o primeiro ponto de spawn mapeado e aguarda
-                tweenTo(banditSpawns[1])
-                task.wait(1)
+                -- Tenta disparar o ProximityPrompt ou Remotes para pegar a missão
+                local npcModel = workspace.NPCs:FindFirstChild(data.mob .. " Quest Giver") or workspace.NPCs:FindFirstChild("Quest Giver")
+                if npcModel and npcModel:FindFirstChild("Head") then
+                    Player.Character.HumanoidRootPart.CFrame = npcModel.Head.CFrame
+                end
+                
+                -- Aciona o remoting (Formato genérico CommF_, ajusta a missão pelo nível)
+                local args = {
+                    [1] = "StartQuest",
+                    [2] = data.mob .. "Quest", 
+                    [3] = 1 
+                }
+                game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer(unpack(args))
+                task.wait(1) -- Aguarda a UI da missão atualizar
             end
         else
-            -- Chegou ao Level 10 - Vai para a Jungle
-            print("Level 10 alcançado! Indo para a Jungle...")
-            tweenTo(junglePos)
-            _G.AutoFarm = false -- Desliga o loop para você pegar a quest dos macacos manualmente
-        end
-    end
-end)
--- ==========================================
--- AUTO FARM JUNGLE (LEVEL 10 AO 30) + AUTO SKILL
--- ==========================================
-
-local player = game.Players.LocalPlayer
-local rs = game:GetService("RunService")
-local ts = game:GetService("TweenService")
-local vu = game:GetService("VirtualUser")
-local vim = game:GetService("VirtualInputManager")
-
-local _G = {
-    AutoFarm = true,
-    Distance = 300, -- Velocidade do voo (Tween)
-}
-
--- Coordenadas Fornecidas:
-local coords = {
-    ProximaIlha = Vector3.new(-1141.2, 4.8, 3828.3),
-    NPCQuest = Vector3.new(-1255.4, 11.8, 2154.2), -- Cabana Principal
-    MonkeySpawn = Vector3.new(-1445.8, 50.8, 48.2),
-    GorillaSpawn = Vector3.new(-1236.1, 6.2, 452.1),
-    GorillaKingSpawn = Vector3.new(-1135.2, 23.9, 412.6)
-}
-
--- ANTI-AFK: Previne que o Roblox desconecte
-player.Idled:Connect(function()
-    vu:CaptureController()
-    vu:ClickButton2(Vector2.new())
-end)
-
--- FUNÇÃO: Retorna o Nível Atual
-local function getLevel()
-    return player.Data.Level.Value
-end
-
--- FUNÇÃO: Equipar Arma (Melee, Sword ou Blox Fruit)
-local function equipWeapon()
-    for _, tool in pairs(player.Backpack:GetChildren()) do
-        if tool:IsA("Tool") and (tool.ToolTip == "Melee" or tool.ToolTip == "Sword" or tool.ToolTip == "Blox Fruit") then
-            player.Character.Humanoid:EquipTool(tool)
-            break
-        end
-    end
-end
-
--- FUNÇÃO: Movimentação suave (Tween) para evitar kick do Anti-Cheat
-local function tweenTo(targetPos)
-    local char = player.Character or player.CharacterAdded:Wait()
-    local hrp = char:WaitForChild("HumanoidRootPart")
-    local distance = (hrp.Position - targetPos).Magnitude
-    
-    -- Se estiver perto, só usa CFrame direto para ser mais rápido
-    if distance < 15 then
-        hrp.CFrame = CFrame.new(targetPos)
-        return
-    end
-
-    local info = TweenInfo.new(distance / _G.Distance, Enum.EasingStyle.Linear)
-    local tween = ts:Create(hrp, info, {CFrame = CFrame.new(targetPos)})
-    tween:Play()
-    tween.Completed:Wait()
-end
-
--- FUNÇÃO: Verificar se já possui missão ativa
-local function hasQuest()
-    local questGui = player.PlayerGui.Main.Quest
-    return questGui.Visible
-end
-
--- FUNÇÃO: Pegar Missão via RemoteEvent
-local function getQuest(questName, questNum)
-    if not hasQuest() then
-        -- Vai até o NPC
-        tweenTo(coords.NPCQuest)
-        task.wait(0.5)
-        -- Envia o comando para o servidor te dar a missão
-        game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("StartQuest", questName, questNum)
-        task.wait(1) -- Aguarda a interface atualizar
-    end
-end
-
--- FUNÇÕES DE COMBATE: Ataque e Skills
-local function autoAttack()
-    vu:CaptureController()
-    vu:ClickButton1(Vector2.new(800, 800))
-end
-
-local function useSkills()
-    local skills = {"Z", "X", "C", "V"}
-    for _, key in ipairs(skills) do
-        vim:SendKeyEvent(true, Enum.KeyCode[key], false, game)
-        task.wait(0.05)
-        vim:SendKeyEvent(false, Enum.KeyCode[key], false, game)
-    end
-end
-
--- FUNÇÃO PRINCIPAL: Lógica de travar no inimigo e bater
-local function farmEnemy(enemyName, fallbackPos)
-    equipWeapon()
-    
-    local target = nil
-    -- Procura o inimigo no workspace
-    for _, v in pairs(workspace.Enemies:GetChildren()) do
-        if v.Name == enemyName and v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 then
-            target = v
-            break
-        end
-    end
-
-    local char = player.Character
-    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
-    local hrp = char.HumanoidRootPart
-
-    if target and target:FindFirstChild("HumanoidRootPart") then
-        -- Trava o personagem nas costas do inimigo (evita apanhar)
-        hrp.CFrame = target.HumanoidRootPart.CFrame * CFrame.new(0, 2, 3)
-        autoAttack()
-        useSkills()
-    else
-        -- Se não achou o inimigo, vai para o respawn dele esperar
-        tweenTo(fallbackPos)
-    end
-end
--- ==========================================
--- LOOP PRINCIPAL DO SCRIPT
--- ==========================================
-task.spawn(function()
-    while _G.AutoFarm do
-        task.wait()
-        
-        local level = getLevel()
-        
-        -- Condição 1: Nível 30+ -> Ir para próxima Ilha (Vila Pirata)
-        if level >= 30 then
-            print("Level 30 atingido! Indo para as coordenadas da próxima ilha...")
-            tweenTo(coords.ProximaIlha)
-            _G.AutoFarm = false -- Desliga o farm pois o objetivo da ilha acabou
-            break
-            
-        -- Condição 2: Nível 10 ao 14 -> Farmar Monkeys
-        elseif level >= 10 and level <= 14 then
-            getQuest("JungleQuest", 1)
-            if hasQuest() then
-                farmEnemy("Monkey", coords.MonkeySpawn)
-            end
-            
-        -- Condição 3: Nível 15 ao 29 -> Farmar Gorillas (E King no lv 20)
-        elseif level >= 15 and level <= 29 then
-            -- Se for nível 20+, tenta verificar se o King está vivo e pegar a missão dele
-            if level >= 20 then
-                local kingAlive = false
-                for _, v in pairs(workspace.Enemies:GetChildren()) do
-                    if v.Name == "Gorilla King" and v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 then
-                        kingAlive = true
-                        break
-                    end
-                end
-                
-                if kingAlive then
-                    getQuest("JungleQuest", 3)
-                    if hasQuest() then
-                        farmEnemy("Gorilla King", coords.GorillaKingSpawn)
-                    end
-                    continue -- Pula para o próximo ciclo para focar no Boss
+            -- 2. Lógica de Caça
+            local mobFound = false
+            for _, v in pairs(workspace.Enemies:GetChildren()) do
+                if string.find(v.Name, data.mob) and v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 then
+                    mobFound = true
+                    EquipWeapon()
+                    
+                    -- Fica acima do inimigo para evitar dano melee
+                    local targetPos = v.HumanoidRootPart.CFrame * CFrame.new(0, 5, 0)
+                    Player.Character.HumanoidRootPart.CFrame = targetPos
+                    
+                    Attack()
+                    UseSkills()
+                    break
                 end
             end
             
-            -- Se o boss não estiver vivo ou for level 15-19, farma Gorilla normal
-            getQuest("JungleQuest", 2)
-            if hasQuest() then
-                farmEnemy("Gorilla", coords.GorillaSpawn)
+            -- Se não encontrar o mob vivo, vai para a área de spawn aguardar
+            if not mobFound then
+                if (Player.Character.HumanoidRootPart.Position - data.spawn).Magnitude > 15 then
+                    TweenTo(data.spawn)
+                end
             end
+        end
+    end
+end)
+
+-- Fix para não cair do mapa durante o Tween
+RunService.Stepped:Connect(function()
+    if _G.AutoFarm and Player.Character and Player.Character:FindFirstChild("HumanoidRootPart") then
+        local hrp = Player.Character.HumanoidRootPart
+        if hrp.Velocity.Y < -50 then
+            hrp.Velocity = Vector3.new(hrp.Velocity.X, 0, hrp.Velocity.Z)
+        end
+        if not Player.Character:FindFirstChild("Float") then
+            local bv = Instance.new("BodyVelocity")
+            bv.Name = "Float"
+            bv.Parent = hrp
+            bv.MaxForce = Vector3.new(0, 100000, 0)
+            bv.Velocity = Vector3.new(0, 0, 0)
         end
     end
 end)
