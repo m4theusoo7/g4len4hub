@@ -1,19 +1,16 @@
 -- ==========================================
--- AUTO-FARM JUNGLE (LVL 10-30) -> PIRATE VILLAGE
--- OTIMIZADO PARA DELTA EXECUTOR
+-- AUTO-FARM JUNGLE (LVL 10-30) V2 (ANTI-FREEZE)
 -- ==========================================
 
 local player = game.Players.LocalPlayer
-local VirtualUser = game:GetService("VirtualUser")
-local VirtualInputManager = game:GetService("VirtualInputManager")
-local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local VirtualUser = game:GetService("VirtualUser")
 
 _G.AutoFarm = true
 _G.AutoSkills = true
-local weaponName = "Combat" -- Mude para o nome do seu estilo de luta ou espada (ex: "Katana")
+_G.WeaponName = "Combat" -- Mude para o nome exato da sua arma/estilo de luta
 
--- Coordenadas fornecidas
 local Coords = {
     PirateVillage = CFrame.new(-1141.07, 4.10, 3831.55),
     JungleNPC = CFrame.new(-1598.09, 35.55, 153.38),
@@ -21,90 +18,97 @@ local Coords = {
     GorillaArea = CFrame.new(-1142.65, 40.46, -515.39)
 }
 
--- Anti-AFK para não tomar disconnect
-player.Idled:Connect(function()
-    VirtualUser:CaptureController()
-    VirtualUser:ClickButton2(Vector2.new())
+local targetCFrame = nil
+
+-- 1. SISTEMA DE VOO E NOCLIP (EVITA TRAVAR NO AR)
+RunService.Stepped:Connect(function(_, dt)
+    if _G.AutoFarm and targetCFrame and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+        local hrp = player.Character.HumanoidRootPart
+        local dist = (hrp.Position - targetCFrame.Position).Magnitude
+        local speed = 300
+        
+        -- Ativa NoClip para não bater nas árvores da Jungle
+        for _, v in pairs(player.Character:GetDescendants()) do
+            if v:IsA("BasePart") then
+                v.CanCollide = false
+            end
+        end
+
+        -- Se estiver longe, voa na direção. Se estiver perto, teleporta exato.
+        if dist > 15 then
+            hrp.CFrame = CFrame.new(hrp.Position, targetCFrame.Position) * CFrame.new(0, 0, -speed * dt)
+        else
+            hrp.CFrame = targetCFrame
+        end
+    end
 end)
 
--- Função para mover o personagem suavemente (Tween) e evitar Kicks
-local function tweenMove(targetCFrame)
-    local char = player.Character or player.CharacterAdded:Wait()
-    local root = char:WaitForChild("HumanoidRootPart")
-    local distance = (root.Position - targetCFrame.Position).Magnitude
-    local speed = 300 -- Velocidade de voo/teleporte
-    local time = distance / speed
-    
-    local tween = TweenService:Create(root, TweenInfo.new(time, Enum.EasingStyle.Linear), {CFrame = targetCFrame})
-    tween:Play()
-    tween.Completed:Wait()
+-- 2. SISTEMA DE ATAQUE CORRIGIDO
+local function Attack()
+    local char = player.Character
+    if char then
+        -- Checa se a arma tá na mochila e equipa
+        local toolInBackpack = player.Backpack:FindFirstChild(_G.WeaponName)
+        if toolInBackpack then
+            char.Humanoid:EquipTool(toolInBackpack)
+        end
+        
+        -- Executa o ataque diretamente pela ferramenta
+        local equippedTool = char:FindFirstChild(_G.WeaponName)
+        if equippedTool then
+            equippedTool:Activate()
+        end
+        
+        -- Backup de clique
+        VirtualUser:CaptureController()
+        VirtualUser:ClickButton1(Vector2.new())
+    end
 end
 
--- Função de Ataque Automático (Mouse)
-local function autoAttack()
-    VirtualUser:CaptureController()
-    VirtualUser:ClickButton1(Vector2.new())
-end
-
--- Função para usar Skills automaticamente (Z, X, C, V)
+-- 3. SISTEMA DE SKILLS
 local function useSkills()
     if not _G.AutoSkills then return end
     local keys = {"Z", "X", "C", "V"}
     for _, key in ipairs(keys) do
         VirtualInputManager:SendKeyEvent(true, Enum.KeyCode[key], false, game)
-        task.wait(0.1)
+        task.wait(0.05)
         VirtualInputManager:SendKeyEvent(false, Enum.KeyCode[key], false, game)
     end
 end
 
--- Função para equipar arma
-local function equipWeapon()
-    local char = player.Character
-    if char then
-        local tool = player.Backpack:FindFirstChild(weaponName)
-        if tool then
-            char.Humanoid:EquipTool(tool)
-        end
-    end
-end
-
--- Função para verificar se já tem Quest ativa
+-- 4. VERIFICADOR DE QUEST
 local function hasQuest()
-    local questGui = player.PlayerGui:FindFirstChild("Main")
-    if questGui and questGui:FindFirstChild("Quest") then
-        return questGui.Quest.Visible
+    local mainGui = player.PlayerGui:FindFirstChild("Main")
+    if mainGui and mainGui:FindFirstChild("Quest") then
+        return mainGui.Quest.Visible
     end
     return false
 end
 
--- Pegar a Quest via Remote Event do Blox Fruits
-local function getQuest(questName, questLevel)
-    local args = {
-        [1] = "StartQuest",
-        [2] = questName,
-        [3] = questLevel
-    }
-    game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer(unpack(args))
-end
-
 -- ==========================================
--- LOOP PRINCIPAL DE FARM
+-- LOOP PRINCIPAL
 -- ==========================================
 task.spawn(function()
-    while _G.AutoFarm do
-        task.wait()
+    while task.wait(0.1) do
+        if not _G.AutoFarm then break end
+        
         pcall(function()
             local level = player.Data.Level.Value
             
-            -- LEVEL 30+: IR PARA PIRATE VILLAGE E PARAR
+            -- SE LEVEL 30+: VAI PRA PIRATE VILLAGE E PARA O SCRIPT
             if level >= 30 then
-                print("Level 30 atingido! Indo para Pirate Village...")
-                tweenMove(Coords.PirateVillage)
-                _G.AutoFarm = false -- Desliga o script para você assumir
+                targetCFrame = Coords.PirateVillage
+                local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+                
+                -- Checa se já chegou no destino final
+                if hrp and (hrp.Position - Coords.PirateVillage.Position).Magnitude < 20 then
+                    _G.AutoFarm = false
+                    print("Level 30 atingido. Bem-vindo a Pirate Village! Script pausado.")
+                end
                 return
             end
             
-            -- DEFINIR ALVOS BASEADO NO LEVEL (10 AO 29)
+            -- CONFIGURA OS ALVOS (LVL 10 AO 29)
             local targetMob, questLevel, farmArea
             if level >= 10 and level < 15 then
                 targetMob = "Monkey"
@@ -116,39 +120,40 @@ task.spawn(function()
                 farmArea = Coords.GorillaArea
             end
             
-            -- LOGICA DE PEGAR QUEST E MATAR O MOB
+            -- LÓGICA DE CAÇA
             if targetMob then
                 if not hasQuest() then
-                    -- Se não tem quest, vai pro NPC
-                    tweenMove(Coords.JungleNPC)
-                    task.wait(0.5)
-                    getQuest("JungleQuest", questLevel)
-                    task.wait(1)
-                else
-                    -- Se tem quest, vai pra área de farm e ataca
-                    local enemies = game.Workspace.Enemies:GetChildren()
-                    local foundMob = false
+                    -- 1. Vai pro NPC pegar a missão
+                    targetCFrame = Coords.JungleNPC
+                    local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
                     
-                    for _, mob in ipairs(enemies) do
+                    -- Só envia o RemoteEvent se o boneco estiver perto do NPC
+                    if hrp and (hrp.Position - Coords.JungleNPC.Position).Magnitude < 15 then
+                        game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("StartQuest", "JungleQuest", questLevel)
+                        task.wait(0.5) -- Pausa rápida para a UI da quest atualizar
+                    end
+                else
+                    -- 2. Tem missão, vai farmar
+                    local foundMob = false
+                    local enemies = game.Workspace.Enemies:GetChildren()
+                    
+                    for _, mob in pairs(enemies) do
                         if mob.Name == targetMob and mob:FindFirstChild("Humanoid") and mob.Humanoid.Health > 0 then
                             foundMob = true
                             local mobRoot = mob:FindFirstChild("HumanoidRootPart")
                             if mobRoot then
-                                -- Posiciona o player em cima do mob para não tomar tanto dano
-                                local attackPos = mobRoot.CFrame * CFrame.new(0, 5, 0)
-                                tweenMove(attackPos)
-                                
-                                equipWeapon()
-                                autoAttack()
+                                -- Vai para 5 studs acima da cabeça do macaco
+                                targetCFrame = mobRoot.CFrame * CFrame.new(0, 5, 0)
+                                Attack()
                                 useSkills()
                             end
-                            break -- Foca em um mob por vez
+                            break -- Só foca em 1 por vez
                         end
                     end
                     
-                    -- Se o mob não estiver spawnado no momento, fica esperando na área dele
+                    -- 3. Se os macacos morreram, fica voando lá no alto esperando nascer
                     if not foundMob then
-                        tweenMove(farmArea * CFrame.new(0, 20, 0)) -- Espera no ar para segurança
+                        targetCFrame = farmArea * CFrame.new(0, 30, 0)
                     end
                 end
             end
