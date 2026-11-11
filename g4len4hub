@@ -1,6 +1,6 @@
 -- ==========================================
 -- OMEGA CORE: AUTO FARM SEA 1 (LVL 1 AO 700)
--- FIX: Anti-Trava de NPC após aceitar missão
+-- Versão Final: Pega missão remotamente sem ir ao NPC
 -- ==========================================
 
 local player = game.Players.LocalPlayer
@@ -64,7 +64,7 @@ local function getQuestData(level)
     return Sea1Guide[#Sea1Guide]
 end
 
--- 3. SISTEMA DE VOO SEGURO
+-- 3. VOO SEGURO
 local function tweenTo(targetPos)
     local char = player.Character
     if not char or not char:FindFirstChild("HumanoidRootPart") then return end
@@ -167,17 +167,11 @@ task.spawn(function()
             local questData = getQuestData(myLevel)
             
             if not hasQuest() then
-                -- PEGA A MISSÃO DE FORMA RÁPIDA E JOGA O AVATAR PARA CIMA (Evita travar no NPC)
-                local npcPos = findNPC(questData.npc)
-                if npcPos then
-                    cancelTween()
-                    -- Teleporta bem rápido para o NPC, aceita e já joga o avatar 30 studs para cima
-                    hrp.CFrame = CFrame.new(npcPos + Vector3.new(0, 2, 0))
-                    task.wait(0.1)
+                -- SOLUÇÃO DEFINITIVA: Pede a missão diretamente ao servidor sem ir até o NPC
+                task.spawn(function()
                     rs.Remotes.CommF_:InvokeServer("StartQuest", questData.quest, questData.num)
-                    hrp.CFrame = CFrame.new(npcPos + Vector3.new(0, 30, 0)) -- Joga para cima instantaneamente
-                    task.wait(0.3)
-                end
+                end)
+                task.wait(1) -- Aguarda um segundo para o servidor registrar a missão na tela
             else
                 -- FARM DIRETO DOS MONSTROS
                 local targetMob = scanForMob(questData.mob)
@@ -195,7 +189,7 @@ task.spawn(function()
                         end
                     end
                 else
-                    -- Se não houver monstros, paira no ar acima da ilha
+                    -- Se não houver monstros na área, voa até o centro da ilha para forçar o spawn
                     local islandPos = findNPC(questData.npc)
                     if islandPos then
                         local waitPos = islandPos + Vector3.new(0, 100, 0)
