@@ -1,83 +1,42 @@
 -- ==========================================================
--- MAPEADOR DE ILHAS PARA O GEMINI (BLOX FRUITS)
+-- [MÓDULO: ILHA DA SELVA / JUNGLE (Lv. 10 ao 30)]
 -- ==========================================================
-local player = game.Players.LocalPlayer
-local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+local JungleConfig = {
+    -- NPC que entrega as missões da ilha
+    QuestNPC = {
+        Name = "Adventurer",
+        Position = Vector3.new(-1680, 48, 175)
+    },
+    
+    -- Inimigos organizados por nível para o Auto-Farm
+    Mobs = {
+        Monkey = {
+            Name = "Monkey",
+            LevelReq = 10,
+            QuestName = "Jungle Quest",
+            QuestNumber = 1, -- Opção 1 no menu do NPC
+            Position = Vector3.new(-1479, 29, 319)
+        },
+        Gorilla = {
+            Name = "Gorilla",
+            LevelReq = 15,
+            QuestName = "Jungle Quest",
+            QuestNumber = 2, -- Opção 2 no menu do NPC
+            Position = Vector3.new(-1402, 26, -464)
+        },
+        GorillaKing = {
+            Name = "The Gorilla King",
+            LevelReq = 20,
+            QuestName = "Jungle Quest",
+            QuestNumber = 3, -- Opção 3 no menu do NPC (Boss)
+            Position = Vector3.new(-1194, 10, -550)
+        }
+    },
 
-if not hrp then
-    warn("Personagem não carregado.")
-    return
-end
-
-local scanRadius = 2500 -- Distância para escanear (pega a ilha atual inteira)
-local resultString = "-- Coordenadas da Ilha Atual\nlocal IlhaData = {\n"
-
--- 1. MAPEAR NPCs DE QUEST
-resultString = resultString .. "  QuestNPCs = {\n"
-if workspace:FindFirstChild("NPCs") then
-    for _, npc in pairs(workspace.NPCs:GetChildren()) do
-        if npc:FindFirstChild("HumanoidRootPart") then
-            local dist = (npc.HumanoidRootPart.Position - hrp.Position).Magnitude
-            if dist <= scanRadius then
-                local pos = npc.HumanoidRootPart.Position
-                -- Pega a posição exata, arredondando os números para ficar limpo
-                resultString = resultString .. string.format('    ["%s"] = Vector3.new(%d, %d, %d),\n', npc.Name, math.floor(pos.X), math.floor(pos.Y), math.floor(pos.Z))
-            end
-        end
-    end
-end
-resultString = resultString .. "  },\n"
-
--- 2. MAPEAR SPAWNS DE INIMIGOS (Ideal para o Auto-Farm)
-resultString = resultString .. "  EnemySpawns = {\n"
-local spawnsFound = {}
-
--- Prioridade: Pegar os blocos de spawn oficiais do jogo
-if workspace:FindFirstChild("_WorldOrigin") and workspace._WorldOrigin:FindFirstChild("EnemySpawns") then
-    for _, spawnPart in pairs(workspace._WorldOrigin.EnemySpawns:GetChildren()) do
-        if spawnPart:IsA("Part") or spawnPart:IsA("MeshPart") then
-            local dist = (spawnPart.Position - hrp.Position).Magnitude
-            if dist <= scanRadius then
-                -- Salva apenas 1 coordenada por tipo de inimigo para não poluir o código
-                if not spawnsFound[spawnPart.Name] then
-                    local pos = spawnPart.Position
-                    resultString = resultString .. string.format('    ["%s"] = Vector3.new(%d, %d, %d),\n', spawnPart.Name, math.floor(pos.X), math.floor(pos.Y), math.floor(pos.Z))
-                    spawnsFound[spawnPart.Name] = true
-                end
-            end
-        end
-    end
-end
-
--- Se não achar o spawn (ou se estiver bugado), pega os inimigos que estão vivos no momento
-if workspace:FindFirstChild("Enemies") then
-    for _, enemy in pairs(workspace.Enemies:GetChildren()) do
-        if enemy:FindFirstChild("HumanoidRootPart") and not spawnsFound[enemy.Name] then
-            local dist = (enemy.HumanoidRootPart.Position - hrp.Position).Magnitude
-            if dist <= scanRadius then
-                local pos = enemy.HumanoidRootPart.Position
-                resultString = resultString .. string.format('    ["%s_Live"] = Vector3.new(%d, %d, %d),\n', enemy.Name, math.floor(pos.X), math.floor(pos.Y), math.floor(pos.Z))
-                spawnsFound[enemy.Name] = true
-            end
-        end
-    end
-end
-resultString = resultString .. "  }\n}\n"
-
--- 3. COPIAR PARA O USUÁRIO
-if setclipboard then
-    setclipboard(resultString)
-    -- Envia uma notificação na tela do jogo para avisar que deu certo
-    game.StarterGui:SetCore("SendNotification", {
-        Title = "Mapeador Gemini",
-        Text = "Coordenadas copiadas com sucesso! Cole no chat do Gemini.",
-        Duration = 5
-    })
-else
-    warn(resultString)
-    game.StarterGui:SetCore("SendNotification", {
-        Title = "Erro",
-        Text = "setclipboard não funcionou. As coordenadas estão no console (F9).",
-        Duration = 5
-    })
-end
+    -- Pontos de interesse extra na ilha
+    Special = {
+        Gacha = Vector3.new(-1477, 72, 41),        -- Zioles (Giro de Frutas)
+        BoatDealer = Vector3.new(-1359, 16, 599),  -- Vendedor de Barcos
+        SaberExpert = Vector3.new(-1528, 35, -34)  -- Boss do puzzle do Shanks
+    }
+}
