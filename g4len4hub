@@ -1,5 +1,5 @@
 -- ==========================================================
--- OMEGACORE: AUTO-FARM JUNGLE (COMPLETO)
+-- OMEGACORE: AUTO-FARM JUNGLE (COM SKILLS E FAST ATTACK)
 -- ==========================================================
 getgenv().AutoFarm = true -- Mude para false para parar o script
 
@@ -7,16 +7,28 @@ local Players = game:GetService("Players")
 local Player = Players.LocalPlayer
 local TweenService = game:GetService("TweenService")
 local VirtualUser = game:GetService("VirtualUser")
+local VIM = game:GetService("VirtualInputManager")
 local RunService = game:GetService("RunService")
 
--- Anti-AFK (Evita ser desconectado pelo Roblox por inatividade 20 min)
+-- Anti-AFK (Evita desconexão)
 Player.Idled:Connect(function()
     VirtualUser:Button2Down(Vector2.new(0,0),workspace.CurrentCamera.CFrame)
     task.wait(1)
     VirtualUser:Button2Up(Vector2.new(0,0),workspace.CurrentCamera.CFrame)
 end)
 
--- A Tabela de Coordenadas que você gerou
+-- Noclip (Atravessar paredes/árvores enquanto o AutoFarm estiver ligado)
+RunService.Stepped:Connect(function()
+    if getgenv().AutoFarm and Player.Character then
+        for _, part in pairs(Player.Character:GetDescendants()) do
+            if part:IsA("BasePart") and part.CanCollide then
+                part.CanCollide = false
+            end
+        end
+    end
+end)
+
+-- A Tabela de Coordenadas
 local JungleConfig = {
     QuestNPC = { Position = Vector3.new(-1680, 48, 175) },
     Mobs = {
@@ -26,38 +38,54 @@ local JungleConfig = {
     }
 }
 
--- Função de Teleporte Suave (Tween) para evitar Anti-Cheat
+-- Teleporte Suave (Tween)
 local function TweenTo(targetPos)
     local char = Player.Character
     if not char or not char:FindFirstChild("HumanoidRootPart") then return end
     
     local hrp = char.HumanoidRootPart
     local distance = (hrp.Position - targetPos).Magnitude
-    local speed = 300 -- Velocidade do voo
+    local speed = 300 
     
     local tweenInfo = TweenInfo.new(distance / speed, Enum.EasingStyle.Linear)
-    local tween = TweenService:Create(hrp, tweenInfo, {CFrame = CFrame.new(targetPos + Vector3.new(0, 5, 0))}) -- Fica um pouco acima do alvo
+    -- Fica um pouco acima e atrás do inimigo para não apanhar tanto
+    local tween = TweenService:Create(hrp, tweenInfo, {CFrame = CFrame.new(targetPos + Vector3.new(0, 8, 0))}) 
     
     tween:Play()
     return tween
 end
 
--- Função para Equipar a Arma (Melee/Soco por padrão)
+-- Função para Equipar a Arma
 local function EquipWeapon()
     for _, tool in pairs(Player.Backpack:GetChildren()) do
-        if tool:IsA("Tool") and tool.ToolTip == "Melee" then -- Mude "Melee" para "Sword" se quiser usar espada
+        if tool:IsA("Tool") and tool.ToolTip == "Melee" then -- Mude "Melee" para "Sword" ou "Blox Fruit" se precisar
             Player.Character.Humanoid:EquipTool(tool)
         end
     end
 end
 
--- Função para Auto-Clique (Ataque)
-local function AutoClick()
-    VirtualUser:CaptureController()
-    VirtualUser:ClickButton1(Vector2.new(851, 158))
+-- Fast Attack (Ataque ultra rápido sem depender de clique na tela)
+local function FastAttack()
+    local char = Player.Character
+    if char then
+        local tool = char:FindFirstChildOfClass("Tool")
+        if tool then
+            tool:Activate()
+        end
+    end
 end
 
--- Determina qual inimigo farmar com base no seu nível
+-- Auto Skills (Z, X, C, V)
+local function AutoSkills()
+    local keys = {Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C, Enum.KeyCode.V}
+    for _, key in ipairs(keys) do
+        VIM:SendKeyEvent(true, key, false, game)
+        task.wait(0.05) -- Pequeno delay para o jogo registrar o botão
+        VIM:SendKeyEvent(false, key, false, game)
+    end
+end
+
+-- Determina qual inimigo farmar
 local function GetTargetMob()
     local myLevel = Player.Data.Level.Value
     if myLevel >= 20 then
@@ -82,21 +110,25 @@ task.spawn(function()
             local targetEnemy = workspace.Enemies:FindFirstChild(targetMobInfo.Name)
             
             if targetEnemy and targetEnemy:FindFirstChild("HumanoidRootPart") and targetEnemy.Humanoid.Health > 0 then
-                -- Inimigo está vivo, vai até ele e ataca
                 EquipWeapon()
-                TweenTo(targetEnemy.HumanoidRootPart.Position)
-                AutoClick()
+                
+                local enemyPos = targetEnemy.HumanoidRootPart.Position
+                TweenTo(enemyPos)
+                
+                -- Trava a câmera/personagem olhando para o inimigo (Garante que a skill acerte)
+                char.HumanoidRootPart.CFrame = CFrame.new(char.HumanoidRootPart.Position, enemyPos)
+                
+                FastAttack()
+                AutoSkills()
             else
-                -- Inimigo não está na tela, vai para a coordenada de spawn aguardar
                 TweenTo(targetMobInfo.Position)
             end
         end)
     end
 end)
 
--- Notificação de Sucesso
 game.StarterGui:SetCore("SendNotification", {
     Title = "OmegaCore",
-    Text = "Auto-Farm Jungle Iniciado!",
+    Text = "Auto-Farm Jungle com Skills Iniciado!",
     Duration = 5
 })
