@@ -1,42 +1,102 @@
 -- ==========================================================
--- [MÓDULO: ILHA DA SELVA / JUNGLE (Lv. 10 ao 30)]
+-- OMEGACORE: AUTO-FARM JUNGLE (COMPLETO)
 -- ==========================================================
-local JungleConfig = {
-    -- NPC que entrega as missões da ilha
-    QuestNPC = {
-        Name = "Adventurer",
-        Position = Vector3.new(-1680, 48, 175)
-    },
-    
-    -- Inimigos organizados por nível para o Auto-Farm
-    Mobs = {
-        Monkey = {
-            Name = "Monkey",
-            LevelReq = 10,
-            QuestName = "Jungle Quest",
-            QuestNumber = 1, -- Opção 1 no menu do NPC
-            Position = Vector3.new(-1479, 29, 319)
-        },
-        Gorilla = {
-            Name = "Gorilla",
-            LevelReq = 15,
-            QuestName = "Jungle Quest",
-            QuestNumber = 2, -- Opção 2 no menu do NPC
-            Position = Vector3.new(-1402, 26, -464)
-        },
-        GorillaKing = {
-            Name = "The Gorilla King",
-            LevelReq = 20,
-            QuestName = "Jungle Quest",
-            QuestNumber = 3, -- Opção 3 no menu do NPC (Boss)
-            Position = Vector3.new(-1194, 10, -550)
-        }
-    },
+getgenv().AutoFarm = true -- Mude para false para parar o script
 
-    -- Pontos de interesse extra na ilha
-    Special = {
-        Gacha = Vector3.new(-1477, 72, 41),        -- Zioles (Giro de Frutas)
-        BoatDealer = Vector3.new(-1359, 16, 599),  -- Vendedor de Barcos
-        SaberExpert = Vector3.new(-1528, 35, -34)  -- Boss do puzzle do Shanks
+local Players = game:GetService("Players")
+local Player = Players.LocalPlayer
+local TweenService = game:GetService("TweenService")
+local VirtualUser = game:GetService("VirtualUser")
+local RunService = game:GetService("RunService")
+
+-- Anti-AFK (Evita ser desconectado pelo Roblox por inatividade 20 min)
+Player.Idled:Connect(function()
+    VirtualUser:Button2Down(Vector2.new(0,0),workspace.CurrentCamera.CFrame)
+    task.wait(1)
+    VirtualUser:Button2Up(Vector2.new(0,0),workspace.CurrentCamera.CFrame)
+end)
+
+-- A Tabela de Coordenadas que você gerou
+local JungleConfig = {
+    QuestNPC = { Position = Vector3.new(-1680, 48, 175) },
+    Mobs = {
+        Monkey = { LevelReq = 10, Position = Vector3.new(-1479, 29, 319), Name = "Monkey" },
+        Gorilla = { LevelReq = 15, Position = Vector3.new(-1402, 26, -464), Name = "Gorilla" },
+        GorillaKing = { LevelReq = 20, Position = Vector3.new(-1194, 10, -550), Name = "The Gorilla King" }
     }
 }
+
+-- Função de Teleporte Suave (Tween) para evitar Anti-Cheat
+local function TweenTo(targetPos)
+    local char = Player.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+    
+    local hrp = char.HumanoidRootPart
+    local distance = (hrp.Position - targetPos).Magnitude
+    local speed = 300 -- Velocidade do voo
+    
+    local tweenInfo = TweenInfo.new(distance / speed, Enum.EasingStyle.Linear)
+    local tween = TweenService:Create(hrp, tweenInfo, {CFrame = CFrame.new(targetPos + Vector3.new(0, 5, 0))}) -- Fica um pouco acima do alvo
+    
+    tween:Play()
+    return tween
+end
+
+-- Função para Equipar a Arma (Melee/Soco por padrão)
+local function EquipWeapon()
+    for _, tool in pairs(Player.Backpack:GetChildren()) do
+        if tool:IsA("Tool") and tool.ToolTip == "Melee" then -- Mude "Melee" para "Sword" se quiser usar espada
+            Player.Character.Humanoid:EquipTool(tool)
+        end
+    end
+end
+
+-- Função para Auto-Clique (Ataque)
+local function AutoClick()
+    VirtualUser:CaptureController()
+    VirtualUser:ClickButton1(Vector2.new(851, 158))
+end
+
+-- Determina qual inimigo farmar com base no seu nível
+local function GetTargetMob()
+    local myLevel = Player.Data.Level.Value
+    if myLevel >= 20 then
+        return JungleConfig.Mobs.GorillaKing
+    elseif myLevel >= 15 then
+        return JungleConfig.Mobs.Gorilla
+    else
+        return JungleConfig.Mobs.Monkey
+    end
+end
+
+-- Loop Principal do Auto-Farm
+task.spawn(function()
+    while task.wait() do
+        if not getgenv().AutoFarm then break end
+        
+        pcall(function()
+            local char = Player.Character
+            if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+            
+            local targetMobInfo = GetTargetMob()
+            local targetEnemy = workspace.Enemies:FindFirstChild(targetMobInfo.Name)
+            
+            if targetEnemy and targetEnemy:FindFirstChild("HumanoidRootPart") and targetEnemy.Humanoid.Health > 0 then
+                -- Inimigo está vivo, vai até ele e ataca
+                EquipWeapon()
+                TweenTo(targetEnemy.HumanoidRootPart.Position)
+                AutoClick()
+            else
+                -- Inimigo não está na tela, vai para a coordenada de spawn aguardar
+                TweenTo(targetMobInfo.Position)
+            end
+        end)
+    end
+end)
+
+-- Notificação de Sucesso
+game.StarterGui:SetCore("SendNotification", {
+    Title = "OmegaCore",
+    Text = "Auto-Farm Jungle Iniciado!",
+    Duration = 5
+})
