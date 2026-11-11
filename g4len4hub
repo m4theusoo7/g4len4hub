@@ -1,39 +1,36 @@
---[[
-    OmegaCore - Pirate Village Auto-Farm (Lv. 30 a 60)
-    Otimizado para Delta Executor (Blox Fruits Sea 1)
-]]
-
+-- Blox Fruits Jungle Auto-Farm Script (Levels 10 to 30)
+-- Compatível com Delta Executor
 local Players = game:GetService("Players")
-local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
+local VirtualUser = game:GetService("VirtualUser")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local player = Players.LocalPlayer
-local remotes = ReplicatedStorage:WaitForChild("Remotes")
-local commF = remotes:WaitForChild("CommF_")
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
 
--- Configurações do Usuário
-getgenv().Config = {
-    AutoFarm = true,
-    SelectWeapon = "Combat", -- Altere para sua arma/fruta equipada
-    SkillZ = true,
-    SkillX = true,
-    SkillC = true,
-    SkillV = true,
-}
+-- Configurações de Estado
+getgenv().JungleFarm = true
+getgenv().CurrentTarget = "Monkey"
 
--- Anti-AFK
-local vu = game:GetService("VirtualUser")
+-- Coordenadas de Referência (Jungle)
+local QUEST_NPC = VectorTuple(-1255.4, 11.8, 2154.2)
+local MONKEY_POS = Vector3.new(-1448.52, 67.85, 11.47)
+local GORILLA_POS = Vector3.new(-1142.65, 40.46, -515.39)
+local BOSS_POS = Vector3.new(-1200.0, 40.0, -450.0)
+local PIRATE_VILLAGE = Vector3.new(-1141.07, 4.10, 3831.55)
+
+-- Função Anti-AFK
 player.Idled:Connect(function()
-    vu:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+    VirtualUser:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
     task.wait(1)
-    vu:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+    VirtualUser:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
 end)
 
--- Noclip para evitar travamentos nas paredes da ilha
+-- Sistema de Noclip para atravessar paredes
 RunService.Stepped:Connect(function()
-    if getgenv().Config.AutoFarm and player.Character then
-        for _, part in pairs(player.Character:GetDescendants()) do
+    if getgenv().JungleFarm and player.Character and player.Character:FindFirstChild("Humanoid") then
+        for _, part in ipairs(player.Character:GetDescendants()) do
             if part:IsA("BasePart") then
                 part.CanCollide = false
             end
@@ -41,129 +38,111 @@ RunService.Stepped:Connect(function()
     end
 end)
 
--- Função de Tween (Movimentação suave até o alvo)
-local function safeTween(targetCFrame)
-    if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then return end
-    local hrp = player.Character.HumanoidRootPart
-    local distance = (hrp.Position - targetCFrame.Position).Magnitude
-    local speed = 300
+-- Função de Teletransporte Suave
+local function smoothTeleport(targetCFrame)
+    if not humanoidRootPart then return end
+    local distance = (humanoidRootPart.Position - targetCFrame.Position).Magnitude
+    local speed = 300 -- Velocidade de voo
+    local timeToTravel = distance / speed
     
-    local info = TweenInfo.new(distance / speed, Enum.EasingStyle.Linear)
-    local tween = TweenService:Create(hrp, info, {CFrame = targetCFrame + Vector3.new(0, 5, 0)})
-    tween:Play()
+    local startTime = tick()
+    local startCFrame = humanoidRootPart.CFrame
     
-    local connection
-    connection = RunService.RenderStepped:Connect(function()
-        if not getgenv().Config.AutoFarm or (hrp.Position - targetCFrame.Position).Magnitude < 10 then
-            tween:Cancel()
-            connection:Disconnect()
-        end
-    end)
-    tween.Completed:Wait()
+    repeat
+        local alpha = math.min((tick() - startTime) / timeToTravel, 1)
+        humanoidRootPart.CFrame = startCFrame:Lerp(targetCFrame, alpha)
+        humanoidRootPart.Velocity = Vector3.new(0, 0, 0)
+        RunService.Heartbeat:Wait()
+    until alpha >= 1 or not getgenv().JungleFarm
 end
 
--- Função para equipar arma selecionada
-local function equipWeapon()
-    local backpack = player.Backpack
-    local char = player.Character
-    if char and not char:FindFirstChildOfClass("Tool") then
-        for _, tool in pairs(backpack:GetChildren()) do
-            if tool:IsA("Tool") and (tool.Name == getgenv().Config.SelectWeapon or tool.ToolTip == getgenv().Config.SelectWeapon or true) then
-                char.Humanoid:EquipTool(tool)
-                break
+-- Ativar ferramenta equipada (Arma/Fruta/Espada)
+local function attack()
+    pcall(function()
+        local tool = player.Character:FindFirstChildOfClass("Tool")
+        if tool then
+            tool:Activate()
+        else
+            -- Se não tiver tool equipada, tenta equipar a primeira da mochila
+            local backpack = player:FindFirstChildOfClass("Backpack")
+            if backpack then
+                for _, item in ipairs(backpack:GetChildren()) do
+                    if item:IsA("Tool") then
+                        player.Character.Humanoid:EquipTool(item)
+                        break
+                    end
+                end
             end
         end
+    end)
+end
+
+-- Disparar Skills (Z, X, C, V)
+local function useSkills()
+    local keys = {Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C, Enum.KeyCode.V}
+    for _, key in ipairs(keys) do
+        pcall(function()
+            game:GetService("VirtualInputManager"):SendKeyEvent(true, key, false, game)
+            task.wait(0.05)
+            game:GetService("VirtualInputManager"):SendKeyEvent(false, key, false, game)
+        end)
     end
 end
 
--- Loop Principal de Farm na Pirate Village
+-- Loop Principal de Farm
 task.spawn(function()
-    while task.wait(0.5) do
-        if getgenv().Config.AutoFarm then
-            pcall(function()
-                local level = player.Data.Level.Value
-                local currentQuest = player.PlayerGui.Main.Quest.Visible
-                
-                if level >= 30 and level < 40 then
-                    -- Missão: Pirates
-                    local questTitle = player.PlayerGui.Main.Quest.Container.QuestTitle.Text
-                    if not currentQuest or not string.find(questTitle, "Pirate") then
-                        safeTween(CFrame.new(-1141.07, 4.10, 3831.55)) -- NPC Giver da Pirate Village
-                        commF:InvokeServer("RequestQuest", "PiratesQuest", 1)
-                        task.wait(1)
-                    else
-                        for _, enemy in pairs(workspace.Enemies:GetChildren()) do
-                            if enemy.Name == "Pirate" and enemy:FindFirstChild("HumanoidRootPart") and enemy:FindFirstChild("Humanoid") and enemy.Humanoid.Health > 0 then
-                                repeat
-                                    task.wait()
-                                    equipWeapon()
-                                    safeTween(enemy.HumanoidRootPart.CFrame * CFrame.new(0, 3, 3))
-                                    enemy.HumanoidRootPart.Size = Vector3.new(60, 60, 60)
-                                    enemy.HumanoidRootPart.Transparency = 0.8
-                                    
-                                    game:GetService("VirtualUser"):Button1Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
-                                    if getgenv().Config.SkillZ then game:GetService("VirtualInputManager"):SendKeyEvent(true, Enum.KeyCode.Z, false, game) task.wait(0.1) end
-                                    if getgenv().Config.SkillX then game:GetService("VirtualInputManager"):SendKeyEvent(true, Enum.KeyCode.X, false, game) task.wait(0.1) end
-                                    if getgenv().Config.SkillC then game:GetService("VirtualInputManager"):SendKeyEvent(true, Enum.KeyCode.C, false, game) task.wait(0.1) end
-                                    if getgenv().Config.SkillV then game:GetService("VirtualInputManager"):SendKeyEvent(true, Enum.KeyCode.V, false, game) task.wait(0.1) end
-                                until not enemy:FindFirstChild("Humanoid") or enemy.Humanoid.Health <= 0 or not getgenv().Config.AutoFarm
-                            end
-                        end
-                    end
-                    
-                elseif level >= 40 and level < 55 then
-                    -- Missão: Brutes
-                    local questTitle = player.PlayerGui.Main.Quest.Container.QuestTitle.Text
-                    if not currentQuest or not string.find(questTitle, "Brute") then
-                        safeTween(CFrame.new(-1141.07, 4.10, 3831.55))
-                        commF:InvokeServer("RequestQuest", "PiratesQuest", 2)
-                        task.wait(1)
-                    else
-                        for _, enemy in pairs(workspace.Enemies:GetChildren()) do
-                            if enemy.Name == "Brute" and enemy:FindFirstChild("HumanoidRootPart") and enemy:FindFirstChild("Humanoid") and enemy.Humanoid.Health > 0 then
-                                repeat
-                                    task.wait()
-                                    equipWeapon()
-                                    safeTween(enemy.HumanoidRootPart.CFrame * CFrame.new(0, 3, 3))
-                                    enemy.HumanoidRootPart.Size = Vector3.new(60, 60, 60)
-                                    
-                                    game:GetService("VirtualUser"):Button1Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
-                                    if getgenv().Config.SkillZ then game:GetService("VirtualInputManager"):SendKeyEvent(true, Enum.KeyCode.Z, false, game) task.wait(0.1) end
-                                    if getgenv().Config.SkillX then game:GetService("VirtualInputManager"):SendKeyEvent(true, Enum.KeyCode.X, false, game) task.wait(0.1) end
-                                    if getgenv().Config.SkillC then game:GetService("VirtualInputManager"):SendKeyEvent(true, Enum.KeyCode.C, false, game) task.wait(0.1) end
-                                    if getgenv().Config.SkillV then game:GetService("VirtualInputManager"):SendKeyEvent(true, Enum.KeyCode.V, false, game) task.wait(0.1) end
-                                until not enemy:FindFirstChild("Humanoid") or enemy.Humanoid.Health <= 0 or not getgenv().Config.AutoFarm
-                            end
-                        end
-                    end
-                    
-                elseif level >= 55 then
-                    -- Missão do Boss: Bobby (Chef)
-                    local questTitle = player.PlayerGui.Main.Quest.Container.QuestTitle.Text
-                    if not currentQuest or not string.find(questTitle, "Chef") then
-                        safeTween(CFrame.new(-1141.07, 4.10, 3831.55))
-                        commF:InvokeServer("RequestQuest", "PiratesQuest", 3)
-                        task.wait(1)
-                    else
-                        for _, enemy in pairs(workspace.Enemies:GetChildren()) do
-                            if enemy.Name == "Chef" and enemy:FindFirstChild("HumanoidRootPart") and enemy:FindFirstChild("Humanoid") and enemy.Humanoid.Health > 0 then
-                                repeat
-                                    task.wait()
-                                    equipWeapon()
-                                    safeTween(enemy.HumanoidRootPart.CFrame * CFrame.new(0, 3, 3))
-                                    enemy.HumanoidRootPart.Size = Vector3.new(60, 60, 60)
-                                    
-                                    game:GetService("VirtualUser"):Button1Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
-                                    if getgenv().Config.SkillZ then game:GetService("VirtualInputManager"):SendKeyEvent(true, Enum.KeyCode.Z, false, game) task.wait(0.1) end
-                                    if getgenv().Config.SkillX then game:GetService("VirtualInputManager"):SendKeyEvent(true, Enum.KeyCode.X, false, game) task.wait(0.1) end
-                                    if getgenv().Config.SkillC then game:GetService("VirtualInputManager"):SendKeyEvent(true, Enum.KeyCode.C, false, game) task.wait(0.1) end
-                                    if getgenv().Config.SkillV then game:GetService("VirtualInputManager"):SendKeyEvent(true, Enum.KeyCode.V, false, game) task.wait(0.1) end
-                                until not enemy:FindFirstChild("Humanoid") or enemy.Humanoid.Health <= 0 or not getgenv().Config.AutoFarm
-                            end
-                        end
+    while getgenv().JungleFarm do
+        task.wait(0.1)
+        pcall(function()
+            local level = player.Data.Level.Value
+            
+            -- Checar transição para Pirate Village no Level 30
+            if level >= 30 then
+                smoothTeleport(CFrame.new(PIRATE_VILLAGE))
+                return
+            end
+            
+            -- Determinar Alvo com base no Level
+            local targetName, targetPos, questName
+            if level < 15 then
+                targetName = "Monkey"
+                targetPos = MONKEY_POS
+                questName = "JungleQuest"
+            else
+                targetName = "Gorilla"
+                targetPos = GORILLA_POS
+                questName = "JungleQuest"
+            end
+            
+            -- Verificar se o Boss The Gorilla King está spawnado (opcional extra de XP)
+            local enemyFolder = workspace:FindFirstChild("Enemies")
+            local boss = enemyFolder and enemyFolder:FindFirstChild("The Gorilla King")
+            
+            if boss and boss:FindFirstChild("HumanoidRootPart") and boss.Humanoid.Health > 0 then
+                targetPos = boss.HumanoidRootPart.Position
+                targetName = "The Gorilla King"
+            end
+            
+            -- Procurar inimigo próximo para farmar
+            local enemy = nil
+            if enemyFolder then
+                for _, v in ipairs(enemyFolder:GetChildren()) do
+                    if v.Name == targetName and v:FindFirstChild("HumanoidRootPart") and v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 then
+                        enemy = v
+                        break
                     end
                 end
-            end)
-        end
+            end
+            
+            if enemy and enemy:FindFirstChild("HumanoidRootPart") then
+                -- Ficar levemente acima do inimigo para evitar dano corpo a corpo direto
+                smoothTeleport(enemy.HumanoidRootPart.CFrame + Vector3.new(0, 4, 0))
+                attack()
+                useSkills()
+            else
+                -- Caso o inimigo não tenha carregado, vai para o spawn padrão
+                smoothTeleport(CFrame.new(targetPos))
+            end
+        end)
     end
 end)
