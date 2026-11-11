@@ -1,59 +1,56 @@
 -- ==========================================
--- OMEGA CORE: AUTO FARM SEA 1 COMPLETO (LVL 1 AO 700)
--- Motor de Varredura Dinâmica e Progressão
+-- OMEGA CORE: AUTO FARM DIRETO (SEM MISSÃO)
+-- Nível 1 ao 700 (Grind Bruto)
 -- ==========================================
 
 local player = game.Players.LocalPlayer
 local vim = game:GetService("VirtualInputManager")
 local ts = game:GetService("TweenService")
-local rs = game:GetService("ReplicatedStorage")
 local workspace = game:GetService("Workspace")
 
 _G.AutoFarm = true
 local currentTween = nil
 
--- 1. BASE DE DADOS DE PROGRESSÃO (SEA 1 INTEIRO)
--- O script consulta esta tabela para saber o que caçar com base no seu level
+-- 1. BASE DE DADOS (Limpa: Sem nomes de quests, usa o NPC apenas como GPS da Ilha)
 local Sea1Guide = {
-    {min = 1,   max = 9,   npc = "Bandit Quest Giver", quest = "BanditQuest1", num = 1, mob = "Bandit"},
-    {min = 10,  max = 14,  npc = "Jungle Quest Giver", quest = "JungleQuest", num = 1, mob = "Monkey"},
-    {min = 15,  max = 29,  npc = "Jungle Quest Giver", quest = "JungleQuest", num = 2, mob = "Gorilla"},
-    {min = 30,  max = 39,  npc = "Pirate Village Quest Giver", quest = "BuggyQuest1", num = 1, mob = "Pirate"},
-    {min = 40,  max = 59,  npc = "Pirate Village Quest Giver", quest = "BuggyQuest1", num = 2, mob = "Brute"},
-    {min = 60,  max = 74,  npc = "Desert Quest Giver", quest = "DesertQuest", num = 1, mob = "Desert Bandit"},
-    {min = 75,  max = 89,  npc = "Desert Quest Giver", quest = "DesertQuest", num = 2, mob = "Desert Officer"},
-    {min = 90,  max = 99,  npc = "Snow Quest Giver", quest = "SnowQuest", num = 1, mob = "Snow Bandit"},
-    {min = 100, max = 119, npc = "Snow Quest Giver", quest = "SnowQuest", num = 2, mob = "Snowman"},
-    {min = 120, max = 149, npc = "Marine Quest Giver", quest = "MarineQuest2", num = 1, mob = "Chief Petty Officer"},
-    {min = 150, max = 174, npc = "Sky Quest Giver", quest = "SkyQuest", num = 1, mob = "Sky Bandit"},
-    {min = 175, max = 189, npc = "Sky Quest Giver", quest = "SkyQuest", num = 2, mob = "Dark Master"},
-    {min = 190, max = 209, npc = "Prison Quest Giver", quest = "PrisonQuest 1", num = 1, mob = "Prisoner"},
-    {min = 210, max = 249, npc = "Prison Quest Giver", quest = "PrisonQuest 1", num = 2, mob = "Dangerous Prisoner"},
-    {min = 250, max = 274, npc = "Colosseum Quest Giver", quest = "ColosseumQuest", num = 1, mob = "Toga Warrior"},
-    {min = 275, max = 299, npc = "Colosseum Quest Giver", quest = "ColosseumQuest", num = 2, mob = "Gladiator"},
-    {min = 300, max = 324, npc = "Magma Quest Giver", quest = "MagmaQuest", num = 1, mob = "Military Soldier"},
-    {min = 325, max = 374, npc = "Magma Quest Giver", quest = "MagmaQuest", num = 2, mob = "Military Spy"},
-    {min = 375, max = 399, npc = "Fishman Quest Giver", quest = "FishmanQuest", num = 1, mob = "Fishman Warrior"},
-    {min = 400, max = 449, npc = "Fishman Quest Giver", quest = "FishmanQuest", num = 2, mob = "Fishman Commando"},
-    {min = 450, max = 474, npc = "Sky Quest Giver", quest = "SkyExp1Quest", num = 1, mob = "God's Guard"},
-    {min = 475, max = 524, npc = "Sky Quest Giver", quest = "SkyExp1Quest", num = 2, mob = "Shanda"},
-    {min = 525, max = 549, npc = "Sky Quest Giver", quest = "SkyExp2Quest", num = 1, mob = "Royal Squad"},
-    {min = 550, max = 624, npc = "Sky Quest Giver", quest = "SkyExp2Quest", num = 2, mob = "Royal Soldier"},
-    {min = 625, max = 649, npc = "Fountain Quest Giver", quest = "FountainQuest", num = 1, mob = "Galley Pirate"},
-    {min = 650, max = 700, npc = "Fountain Quest Giver", quest = "FountainQuest", num = 2, mob = "Galley Captain"}
+    {min = 1,   max = 9,   npc = "Bandit Quest Giver", mob = "Bandit"},
+    {min = 10,  max = 14,  npc = "Jungle Quest Giver", mob = "Monkey"},
+    {min = 15,  max = 29,  npc = "Jungle Quest Giver", mob = "Gorilla"},
+    {min = 30,  max = 39,  npc = "Pirate Village Quest Giver", mob = "Pirate"},
+    {min = 40,  max = 59,  npc = "Pirate Village Quest Giver", mob = "Brute"},
+    {min = 60,  max = 74,  npc = "Desert Quest Giver", mob = "Desert Bandit"},
+    {min = 75,  max = 89,  npc = "Desert Quest Giver", mob = "Desert Officer"},
+    {min = 90,  max = 99,  npc = "Snow Quest Giver", mob = "Snow Bandit"},
+    {min = 100, max = 119, npc = "Snow Quest Giver", mob = "Snowman"},
+    {min = 120, max = 149, npc = "Marine Quest Giver", mob = "Chief Petty Officer"},
+    {min = 150, max = 174, npc = "Sky Quest Giver", mob = "Sky Bandit"},
+    {min = 175, max = 189, npc = "Sky Quest Giver", mob = "Dark Master"},
+    {min = 190, max = 209, npc = "Prison Quest Giver", mob = "Prisoner"},
+    {min = 210, max = 249, npc = "Prison Quest Giver", mob = "Dangerous Prisoner"},
+    {min = 250, max = 274, npc = "Colosseum Quest Giver", mob = "Toga Warrior"},
+    {min = 275, max = 299, npc = "Colosseum Quest Giver", mob = "Gladiator"},
+    {min = 300, max = 324, npc = "Magma Quest Giver", mob = "Military Soldier"},
+    {min = 325, max = 374, npc = "Magma Quest Giver", mob = "Military Spy"},
+    {min = 375, max = 399, npc = "Fishman Quest Giver", mob = "Fishman Warrior"},
+    {min = 400, max = 449, npc = "Fishman Quest Giver", mob = "Fishman Commando"},
+    {min = 450, max = 474, npc = "Sky Quest Giver", mob = "God's Guard"},
+    {min = 475, max = 524, npc = "Sky Quest Giver", mob = "Shanda"},
+    {min = 525, max = 549, npc = "Sky Quest Giver", mob = "Royal Squad"},
+    {min = 550, max = 624, npc = "Sky Quest Giver", mob = "Royal Soldier"},
+    {min = 625, max = 649, npc = "Fountain Quest Giver", mob = "Galley Pirate"},
+    {min = 650, max = 700, npc = "Fountain Quest Giver", mob = "Galley Captain"}
 }
 
-local function getQuestData(level)
+local function getMobData(level)
     for _, data in ipairs(Sea1Guide) do
         if level >= data.min and level <= data.max then
             return data
         end
     end
-    -- Se passar do 700, ele continua a farmar o último
-    return Sea1Guide[#Sea1Guide]
+    return Sea1Guide[#Sea1Guide] -- Continua no último se passar do 700
 end
 
--- 2. SISTEMA DE MOVIMENTAÇÃO (TWEEN)
+-- 2. SISTEMA DE MOVIMENTAÇÃO
 local function tweenTo(targetPos)
     local char = player.Character
     if not char or not char:FindFirstChild("HumanoidRootPart") then return end
@@ -62,10 +59,9 @@ local function tweenTo(targetPos)
     local distance = (hrp.Position - targetPos).Magnitude
     if distance < 5 then return end
     
-    -- Se a distância for muito grande (mudança de ilha), voa mais alto para não bater nas montanhas
     local finalPos = targetPos
+    -- Voo seguro alto para evitar bater em montanhas ao mudar de ilha
     if distance > 1000 then
-        -- Voo alto de segurança temporário
         finalPos = Vector3.new(targetPos.X, targetPos.Y + 300, targetPos.Z)
     end
     
@@ -82,7 +78,7 @@ local function cancelTween()
     if currentTween then currentTween:Cancel(); currentTween = nil end
 end
 
--- 3. COMBATE (SKILLS + CLICK)
+-- 3. ATAQUES E SKILLS
 local function autoAttackAndSkills()
     vim:SendMouseButtonEvent(0, 0, 0, true, game, 0)
     vim:SendMouseButtonEvent(0, 0, 0, false, game, 0)
@@ -95,11 +91,11 @@ local function autoAttackAndSkills()
     end
 end
 
--- 4. VARREDURA GLOBAL (Mapeia o mapa dinamicamente)
-local function findNPC(npcName)
+-- 4. VARREDURA 
+-- Usa o NPC apenas para saber onde é o centro da Ilha (quando ela ainda não carregou)
+local function getIslandGPS(npcName)
     if workspace:FindFirstChild("NPCs") then
         for _, npc in pairs(workspace.NPCs:GetChildren()) do
-            -- Procura ignorando letras maiúsculas/minúsculas para evitar erros
             if string.find(string.lower(npc.Name), string.lower(npcName)) and npc:FindFirstChild("HumanoidRootPart") then
                 return npc.HumanoidRootPart.Position
             end
@@ -118,88 +114,3 @@ local function scanForMob(mobName)
         for _, mob in pairs(workspace.Enemies:GetChildren()) do
             if string.find(string.lower(mob.Name), string.lower(mobName)) and mob:FindFirstChild("Humanoid") and mob.Humanoid.Health > 0 and mob:FindFirstChild("HumanoidRootPart") then
                 local dist = (char.HumanoidRootPart.Position - mob.HumanoidRootPart.Position).Magnitude
-                if dist < shortestDist then
-                    shortestDist = dist
-                    closestMob = mob
-                end
-            end
-        end
-    end
-    return closestMob
-end
-
-local function hasQuest()
-    local gui = player.PlayerGui:FindFirstChild("Main")
-    if gui and gui:FindFirstChild("Quest") then return gui.Quest.Visible end
-    return false
-end
-
--- 5. CÉREBRO DO OMEGA CORE
-task.spawn(function()
-    while _G.AutoFarm do
-        task.wait(0.1)
-        
-        pcall(function()
-            local char = player.Character
-            if not char or not char:FindFirstChild("HumanoidRootPart") then return end
-            local hrp = char.HumanoidRootPart
-            local myLevel = player.Data.Level.Value
-            
-            -- Puxa a diretriz do que fazer com base no nível atual
-            local questData = getQuestData(myLevel)
-            
-            -- Se chegou no level 700, ele avisa e para o script (Pronto para o Sea 2!)
-            if myLevel >= 700 then
-                print("=======================================")
-                print("🎉 SEA 1 COMPLETADO! BEM VINDO AO LEVEL 700 🎉")
-                print("=======================================")
-                _G.AutoFarm = false
-                cancelTween()
-                return
-            end
-            
-            -- Procura o NPC no mundo
-            local npcPos = findNPC(questData.npc)
-            if not npcPos then return end
-            
-            if not hasQuest() then
-                -- ESTÁGIO 1: NAVEGAR ATÉ A ILHA / PEGAR MISSÃO
-                -- Removemos a altura de segurança quando estivermos perto para ele pousar no NPC
-                local distNPC = (hrp.Position - npcPos).Magnitude
-                
-                if distNPC > 15 then
-                    tweenTo(npcPos)
-                else
-                    cancelTween()
-                    task.spawn(function()
-                        rs.Remotes.CommF_:InvokeServer("StartQuest", questData.quest, questData.num)
-                    end)
-                    task.wait(1)
-                end
-            else
-                -- ESTÁGIO 2: VARREDURA E CAÇA DOS MONSTROS
-                local targetMob = scanForMob(questData.mob)
-                
-                if targetMob then
-                    -- Voa para trás do bicho
-                    local farmPos = targetMob.HumanoidRootPart.CFrame * CFrame.new(0, 5, 4)
-                    
-                    if (hrp.Position - farmPos.Position).Magnitude > 8 then
-                        tweenTo(farmPos.Position)
-                    else
-                        cancelTween()
-                        if targetMob.Humanoid.Health > 0 then
-                            hrp.CFrame = farmPos 
-                            autoAttackAndSkills()
-                        end
-                    end
-                else
-                    -- Se o monstro não for encontrado, ele fica perto do NPC de missão aguardando o Spawn
-                    if (hrp.Position - npcPos).Magnitude > 30 then
-                        tweenTo(npcPos)
-                    end
-                end
-            end
-        end)
-    end
-end)
