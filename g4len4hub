@@ -104,3 +104,119 @@ task.spawn(function()
         end
     end
 end)
+-- ==========================================
+-- SCRIPT AUTO FARM (JUNGLE: LVL 10 AO 30)
+-- Otimizado para Delta Executor
+-- ==========================================
+
+local player = game.Players.LocalPlayer
+local vim = game:GetService("VirtualInputManager")
+local ts = game:GetService("TweenService")
+local runService = game:GetService("RunService")
+
+_G.AutoFarm = true
+
+-- Coordenadas e posições na Jungle
+local junglePos = Vector3.new(-1246, 15, 1551) -- Centro da Jungle
+local nextIslandPos = Vector3.new(1137, 17, 4345) -- Coordenada aproximada da Pirate Village (Próxima ilha)
+
+-- Função de movimentação segura (Tween)
+local function tweenTo(targetPos)
+    local char = player.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+    
+    local distance = (char.HumanoidRootPart.Position - targetPos).Magnitude
+    local speed = 300 -- Velocidade do Tween
+    local timeToReach = distance / speed
+    
+    local tweenInfo = TweenInfo.new(timeToReach, Enum.EasingStyle.Linear)
+    local tween = ts:Create(char.HumanoidRootPart, tweenInfo, {CFrame = CFrame.new(targetPos)})
+    tween:Play()
+    tween.Completed:Wait()
+end
+
+-- Função para usar Skills e Ataque Básico
+local function autoAttackAndSkills()
+    vim:SendMouseButtonEvent(0, 0, 0, true, game, 0)
+    vim:SendMouseButtonEvent(0, 0, 0, false, game, 0)
+    
+    local keys = {Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C, Enum.KeyCode.V}
+    for _, key in ipairs(keys) do
+        vim:SendKeyEvent(true, key, false, game)
+        task.wait(0.1)
+        vim:SendKeyEvent(false, key, false, game)
+    end
+end
+
+-- Função para encontrar o inimigo correto baseado no nível do jogador na Jungle
+local function getTargetByLevel(playerLevel)
+    local targetName = "Monkey"
+    
+    if playerLevel >= 15 then
+        targetName = "Gorilla"
+    end
+    
+    -- Prioridade especial para o Boss Gorilla King se o jogador tiver level 15+ e ele estiver vivo
+    if playerLevel >= 15 then
+        if workspace:FindFirstChild("Enemies") then
+            for _, obj in pairs(workspace.Enemies:GetChildren()) do
+                if obj.Name == "Gorilla King" and obj:FindFirstChild("Humanoid") and obj.Humanoid.Health > 0 then
+                    return obj
+                end
+            end
+        end
+    end
+
+    -- Procura o inimigo comum designado
+    if workspace:FindFirstChild("Enemies") then
+        for _, obj in pairs(workspace.Enemies:GetChildren()) do
+            if obj.Name == targetName and obj:FindFirstChild("Humanoid") and obj.Humanoid.Health > 0 then
+                return obj
+            end
+        end
+    end
+    
+    return nil
+end
+
+-- Loop Principal
+task.spawn(function()
+    while _G.AutoFarm do
+        task.wait()
+        
+        local char = player.Character
+        if not char or not char:FindFirstChild("HumanoidRootPart") then continue end
+        
+        -- Verifica o Nível do Jogador de forma segura
+        local leaderstats = player:FindFirstChild("Data") or player:FindFirstChild("leaderstats")
+        local playerLevel = 10
+        if leaderstats and leaderstats:FindFirstChild("Level") then
+            playerLevel = leaderstats.Level.Value
+        end
+        
+        if playerLevel < 30 then
+            -- Lógica de Farm na Jungle (Monkeys, Gorillas e Gorilla King)
+            local target = getTargetByLevel(playerLevel)
+            
+            if target and target:FindFirstChild("HumanoidRootPart") then
+                -- Posiciona nas costas do mob para evitar dano direto
+                local farmPos = target.HumanoidRootPart.CFrame * CFrame.new(0, 5, 4)
+                tweenTo(farmPos.Position)
+                
+                if target:FindFirstChild("Humanoid") and target.Humanoid.Health > 0 then
+                    char.HumanoidRootPart.CFrame = CFrame.new(char.HumanoidRootPart.Position, target.HumanoidRootPart.Position)
+                    autoAttackAndSkills()
+                end
+            else
+                -- Se não achar nenhum mob vivo, aguarda próximo ao centro da Jungle
+                tweenTo(junglePos)
+                task.wait(1)
+            end
+        else
+            -- Chegou ao Level 30 - Vai para a próxima ilha (Pirate Village)
+            print("Level 30 alcançado! Indo para a Pirate Village...")
+            tweenTo(nextIslandPos)
+            _G.AutoFarm = false -- Desliga o script ao chegar na nova ilha
+        end
+    end
+end)
