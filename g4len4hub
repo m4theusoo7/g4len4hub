@@ -1,96 +1,103 @@
 -- ==========================================
--- MAPEAMENTO INTELIGENTE POR ZONA DE FARM
--- Agrupa Ilha -> NPC de Missão -> Inimigos
+-- SCANNER GLOBAL DO SEA 1 - OMEGA CORE
+-- Mapeia: Ilha -> NPC Missão -> Mobs
 -- ==========================================
 
 local workspace = game:GetService("Workspace")
 
-local function getPosition(obj)
-    if obj:IsA("Model") and obj.PrimaryPart then
-        return obj.PrimaryPart.Position
-    elseif obj:IsA("Model") and obj:FindFirstChild("HumanoidRootPart") then
-        return obj.HumanoidRootPart.Position
-    elseif obj:IsA("BasePart") then
-        return obj.Position
-    end
+-- Função para pegar a posição exata de um objeto
+local function getPos(obj)
+    if obj:FindFirstChild("HumanoidRootPart") then return obj.HumanoidRootPart.Position end
+    if obj:IsA("Model") and obj.PrimaryPart then return obj.PrimaryPart.Position end
+    if obj:IsA("BasePart") then return obj.Position end
     return nil
 end
 
 print("\n=======================================================")
-print("🗺️ INICIANDO MAPEAMENTO DE ILHAS E ZONAS DE FARM 🗺️")
+print("🌍 INICIANDO MAPEAMENTO GLOBAL DO SEA 1 🌍")
 print("=======================================================\n")
 
--- 1. Cria uma lista de "Zonas" baseadas nos NPCs de Missão
-local zonasDeFarm = {}
+local ilhas = {}
 
-if workspace:FindFirstChild("NPCs") then
-    for _, npc in pairs(workspace.NPCs:GetChildren()) do
-        -- Filtra NPCs que dão missão (geralmente têm "Quest" no nome)
-        if string.find(string.lower(npc.Name), "quest") then
-            local pos = getPosition(npc)
-            if pos then
-                table.insert(zonasDeFarm, {
-                    npcNome = npc.Name,
-                    posicao = pos,
-                    inimigos = {}
-                })
-            end
+-- 1. Encontrar todos os NPCs de Missão (Eles definem onde é a ilha)
+for _, npc in pairs(workspace.NPCs:GetChildren()) do
+    local nomeLower = string.lower(npc.Name)
+    -- Procura por NPCs que entregam missões (Geralmente têm "Quest" no nome)
+    if string.find(nomeLower, "quest") then
+        local pos = getPos(npc)
+        if pos then
+            -- Limpa o nome para ficar mais bonito na tabela
+            local nomeLimpo = npc.Name:gsub(" Quest Giver", ""):gsub("Quest Giver", ""):gsub("Quest", "")
+            if nomeLimpo == "" or nomeLimpo == " " then nomeLimpo = npc.Name end
+            
+            table.insert(ilhas, {
+                NomeIlha = nomeLimpo,
+                NPCMissao = npc.Name,
+                PosMissao = pos,
+                Inimigos = {}
+            })
         end
     end
 end
 
--- 2. Associa os Inimigos spawnados à Ilha/Zona mais próxima
+-- 2. Mapear Inimigos e atrelar à Ilha correspondente
 if workspace:FindFirstChild("Enemies") then
-    for _, inimigo in pairs(workspace.Enemies:GetChildren()) do
-        local posInimigo = getPosition(inimigo)
-        
-        if posInimigo then
-            local zonaMaisProxima = nil
-            local menorDistancia = math.huge
+    for _, mob in pairs(workspace.Enemies:GetChildren()) do
+        local posMob = getPos(mob)
+        if posMob then
+            local ilhaMaisProxima = nil
+            local menorDist = 1500 -- Raio máximo de 1500 studs para pertencer à mesma ilha
             
-            -- Procura qual NPC de Missão está mais perto deste inimigo
-            for _, zona in pairs(zonasDeFarm) do
-                local distancia = (zona.posicao - posInimigo).Magnitude
-                
-                -- Se estiver a menos de 1000 studs, consideramos que pertence à mesma ilha
-                if distancia < 1000 and distancia < menorDistancia then
-                    menorDistancia = distancia
-                    zonaMaisProxima = zona
+            -- Descobre de qual ilha este monstro é
+            for _, ilha in pairs(ilhas) do
+                local dist = (ilha.PosMissao - posMob).Magnitude
+                if dist < menorDist then
+                    menorDist = dist
+                    ilhaMaisProxima = ilha
                 end
             end
             
-            -- Adiciona o inimigo à lista daquela ilha
-            if zonaMaisProxima then
-                if not zonaMaisProxima.inimigos[inimigo.Name] then
-                    zonaMaisProxima.inimigos[inimigo.Name] = {}
+            if ilhaMaisProxima then
+                -- Agrupa por nome do monstro
+                if not ilhaMaisProxima.Inimigos[mob.Name] then
+                    ilhaMaisProxima.Inimigos[mob.Name] = {}
                 end
-                table.insert(zonaMaisProxima.inimigos[inimigo.Name], posInimigo)
+                table.insert(ilhaMaisProxima.Inimigos[mob.Name], posMob)
             end
         end
     end
 end
 
--- 3. Imprime os resultados organizados no Console (F9)
-for _, zona in pairs(zonasDeFarm) do
-    print(string.format("🏝️ ZONA / ILHA: Base do [%s]", zona.npcNome))
-    print(string.format("📍 NPC de Missão: Vector3.new(%.1f, %.1f, %.1f)", zona.posicao.X, zona.posicao.Y, zona.posicao.Z))
-    
-    local temInimigo = false
-    for nomeInimigo, posicoes in pairs(zona.inimigos) do
-        temInimigo = true
-        print(string.format("   ⚔️ Inimigo da Ilha: %s (Encontrados: %d)", nomeInimigo, #posicoes))
-        
-        -- Mostra as coordenadas de até 3 inimigos desse tipo para não floodar o console inteiro
-        local limite = math.min(3, #posicoes)
-        for i = 1, limite do
-            print(string.format("      -> Posição %d: Vector3.new(%.1f, %.1f, %.1f)", i, posicoes[i].X, posicoes[i].Y, posicoes[i].Z))
-        end
-    end
-    
-    if not temInimigo then
-        print("   ⚠️ Nenhum inimigo vivo/spawnado perto deste NPC no momento.")
-    end
-    print("-------------------------------------------------------")
-end
+-- 3. Gerar o Código no Console (Formato Tabela Lua)
+print("📋 RESULTADO DA VARREDURA (Copie e cole no seu OmegaCore):")
+print("local Sea1Data = {")
 
-print("\n✅ VARREDURA ESTRUTURADA CONCLUÍDA! (Abra o F9 para ler) ✅")
+for _, ilha in pairs(ilhas) do
+    print(string.format('    ["%s"] = {', ilha.NomeIlha))
+    print(string.format('        PosicaoIlha = Vector3.new(%.1f, %.1f, %.1f), -- Centro da Ilha', ilha.PosMissao.X, ilha.PosMissao.Y, ilha.PosMissao.Z))
+    print(string.format('        NPC_Missao = "%s",', ilha.NPCMissao))
+    print(string.format('        Pos_Missao = Vector3.new(%.1f, %.1f, %.1f),', ilha.PosMissao.X, ilha.PosMissao.Y, ilha.PosMissao.Z))
+    print('        Mobs = {')
+    
+    local temMob = false
+    for nomeMob, posicoes in pairs(ilha.Inimigos) do
+        temMob = true
+        print(string.format('            ["%s"] = {', nomeMob))
+        
+        -- Mostra até 3 coordenadas de spawn desse monstro para não floodar
+        local max = math.min(3, #posicoes)
+        for i = 1, max do
+            print(string.format('                Vector3.new(%.1f, %.1f, %.1f),', posicoes[i].X, posicoes[i].Y, posicoes[i].Z))
+        end
+        print('            },')
+    end
+    
+    if not temMob then
+        print('            -- [AVISO]: Nenhum mob spawnado perto deste NPC durante a varredura!')
+    end
+    
+    print('        }')
+    print('    },')
+end
+print("}")
+print("\n✅ VARREDURA CONCLUÍDA! Abra o F9 e suba o terminal para ver tudo. ✅")
