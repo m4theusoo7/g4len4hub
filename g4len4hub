@@ -105,118 +105,177 @@ task.spawn(function()
     end
 end)
 -- ==========================================
--- SCRIPT AUTO FARM (JUNGLE: LVL 10 AO 30)
--- Otimizado para Delta Executor
+-- AUTO FARM JUNGLE (LEVEL 10 AO 30) + AUTO SKILL
 -- ==========================================
 
 local player = game.Players.LocalPlayer
-local vim = game:GetService("VirtualInputManager")
+local rs = game:GetService("RunService")
 local ts = game:GetService("TweenService")
-local runService = game:GetService("RunService")
+local vu = game:GetService("VirtualUser")
+local vim = game:GetService("VirtualInputManager")
 
-_G.AutoFarm = true
+local _G = {
+    AutoFarm = true,
+    Distance = 300, -- Velocidade do voo (Tween)
+}
 
--- Coordenadas e posições na Jungle
-local junglePos = Vector3.new(-1246, 15, 1551) -- Centro da Jungle
-local nextIslandPos = Vector3.new(1137, 17, 4345) -- Coordenada aproximada da Pirate Village (Próxima ilha)
+-- Coordenadas Fornecidas:
+local coords = {
+    ProximaIlha = Vector3.new(-1141.2, 4.8, 3828.3),
+    NPCQuest = Vector3.new(-1255.4, 11.8, 2154.2), -- Cabana Principal
+    MonkeySpawn = Vector3.new(-1445.8, 50.8, 48.2),
+    GorillaSpawn = Vector3.new(-1236.1, 6.2, 452.1),
+    GorillaKingSpawn = Vector3.new(-1135.2, 23.9, 412.6)
+}
 
--- Função de movimentação segura (Tween)
+-- ANTI-AFK: Previne que o Roblox desconecte
+player.Idled:Connect(function()
+    vu:CaptureController()
+    vu:ClickButton2(Vector2.new())
+end)
+
+-- FUNÇÃO: Retorna o Nível Atual
+local function getLevel()
+    return player.Data.Level.Value
+end
+
+-- FUNÇÃO: Equipar Arma (Melee, Sword ou Blox Fruit)
+local function equipWeapon()
+    for _, tool in pairs(player.Backpack:GetChildren()) do
+        if tool:IsA("Tool") and (tool.ToolTip == "Melee" or tool.ToolTip == "Sword" or tool.ToolTip == "Blox Fruit") then
+            player.Character.Humanoid:EquipTool(tool)
+            break
+        end
+    end
+end
+
+-- FUNÇÃO: Movimentação suave (Tween) para evitar kick do Anti-Cheat
 local function tweenTo(targetPos)
-    local char = player.Character
-    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+    local char = player.Character or player.CharacterAdded:Wait()
+    local hrp = char:WaitForChild("HumanoidRootPart")
+    local distance = (hrp.Position - targetPos).Magnitude
     
-    local distance = (char.HumanoidRootPart.Position - targetPos).Magnitude
-    local speed = 300 -- Velocidade do Tween
-    local timeToReach = distance / speed
-    
-    local tweenInfo = TweenInfo.new(timeToReach, Enum.EasingStyle.Linear)
-    local tween = ts:Create(char.HumanoidRootPart, tweenInfo, {CFrame = CFrame.new(targetPos)})
+    -- Se estiver perto, só usa CFrame direto para ser mais rápido
+    if distance < 15 then
+        hrp.CFrame = CFrame.new(targetPos)
+        return
+    end
+
+    local info = TweenInfo.new(distance / _G.Distance, Enum.EasingStyle.Linear)
+    local tween = ts:Create(hrp, info, {CFrame = CFrame.new(targetPos)})
     tween:Play()
     tween.Completed:Wait()
 end
 
--- Função para usar Skills e Ataque Básico
-local function autoAttackAndSkills()
-    vim:SendMouseButtonEvent(0, 0, 0, true, game, 0)
-    vim:SendMouseButtonEvent(0, 0, 0, false, game, 0)
-    
-    local keys = {Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C, Enum.KeyCode.V}
-    for _, key in ipairs(keys) do
-        vim:SendKeyEvent(true, key, false, game)
-        task.wait(0.1)
-        vim:SendKeyEvent(false, key, false, game)
+-- FUNÇÃO: Verificar se já possui missão ativa
+local function hasQuest()
+    local questGui = player.PlayerGui.Main.Quest
+    return questGui.Visible
+end
+
+-- FUNÇÃO: Pegar Missão via RemoteEvent
+local function getQuest(questName, questNum)
+    if not hasQuest() then
+        -- Vai até o NPC
+        tweenTo(coords.NPCQuest)
+        task.wait(0.5)
+        -- Envia o comando para o servidor te dar a missão
+        game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("StartQuest", questName, questNum)
+        task.wait(1) -- Aguarda a interface atualizar
     end
 end
 
--- Função para encontrar o inimigo correto baseado no nível do jogador na Jungle
-local function getTargetByLevel(playerLevel)
-    local targetName = "Monkey"
-    
-    if playerLevel >= 15 then
-        targetName = "Gorilla"
-    end
-    
-    -- Prioridade especial para o Boss Gorilla King se o jogador tiver level 15+ e ele estiver vivo
-    if playerLevel >= 15 then
-        if workspace:FindFirstChild("Enemies") then
-            for _, obj in pairs(workspace.Enemies:GetChildren()) do
-                if obj.Name == "Gorilla King" and obj:FindFirstChild("Humanoid") and obj.Humanoid.Health > 0 then
-                    return obj
-                end
-            end
-        end
-    end
-
-    -- Procura o inimigo comum designado
-    if workspace:FindFirstChild("Enemies") then
-        for _, obj in pairs(workspace.Enemies:GetChildren()) do
-            if obj.Name == targetName and obj:FindFirstChild("Humanoid") and obj.Humanoid.Health > 0 then
-                return obj
-            end
-        end
-    end
-    
-    return nil
+-- FUNÇÕES DE COMBATE: Ataque e Skills
+local function autoAttack()
+    vu:CaptureController()
+    vu:ClickButton1(Vector2.new(800, 800))
 end
 
--- Loop Principal
+local function useSkills()
+    local skills = {"Z", "X", "C", "V"}
+    for _, key in ipairs(skills) do
+        vim:SendKeyEvent(true, Enum.KeyCode[key], false, game)
+        task.wait(0.05)
+        vim:SendKeyEvent(false, Enum.KeyCode[key], false, game)
+    end
+end
+
+-- FUNÇÃO PRINCIPAL: Lógica de travar no inimigo e bater
+local function farmEnemy(enemyName, fallbackPos)
+    equipWeapon()
+    
+    local target = nil
+    -- Procura o inimigo no workspace
+    for _, v in pairs(workspace.Enemies:GetChildren()) do
+        if v.Name == enemyName and v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 then
+            target = v
+            break
+        end
+    end
+
+    local char = player.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+    local hrp = char.HumanoidRootPart
+
+    if target and target:FindFirstChild("HumanoidRootPart") then
+        -- Trava o personagem nas costas do inimigo (evita apanhar)
+        hrp.CFrame = target.HumanoidRootPart.CFrame * CFrame.new(0, 2, 3)
+        autoAttack()
+        useSkills()
+    else
+        -- Se não achou o inimigo, vai para o respawn dele esperar
+        tweenTo(fallbackPos)
+    end
+end
+-- ==========================================
+-- LOOP PRINCIPAL DO SCRIPT
+-- ==========================================
 task.spawn(function()
     while _G.AutoFarm do
         task.wait()
         
-        local char = player.Character
-        if not char or not char:FindFirstChild("HumanoidRootPart") then continue end
+        local level = getLevel()
         
-        -- Verifica o Nível do Jogador de forma segura
-        local leaderstats = player:FindFirstChild("Data") or player:FindFirstChild("leaderstats")
-        local playerLevel = 10
-        if leaderstats and leaderstats:FindFirstChild("Level") then
-            playerLevel = leaderstats.Level.Value
-        end
-        
-        if playerLevel < 30 then
-            -- Lógica de Farm na Jungle (Monkeys, Gorillas e Gorilla King)
-            local target = getTargetByLevel(playerLevel)
+        -- Condição 1: Nível 30+ -> Ir para próxima Ilha (Vila Pirata)
+        if level >= 30 then
+            print("Level 30 atingido! Indo para as coordenadas da próxima ilha...")
+            tweenTo(coords.ProximaIlha)
+            _G.AutoFarm = false -- Desliga o farm pois o objetivo da ilha acabou
+            break
             
-            if target and target:FindFirstChild("HumanoidRootPart") then
-                -- Posiciona nas costas do mob para evitar dano direto
-                local farmPos = target.HumanoidRootPart.CFrame * CFrame.new(0, 5, 4)
-                tweenTo(farmPos.Position)
-                
-                if target:FindFirstChild("Humanoid") and target.Humanoid.Health > 0 then
-                    char.HumanoidRootPart.CFrame = CFrame.new(char.HumanoidRootPart.Position, target.HumanoidRootPart.Position)
-                    autoAttackAndSkills()
-                end
-            else
-                -- Se não achar nenhum mob vivo, aguarda próximo ao centro da Jungle
-                tweenTo(junglePos)
-                task.wait(1)
+        -- Condição 2: Nível 10 ao 14 -> Farmar Monkeys
+        elseif level >= 10 and level <= 14 then
+            getQuest("JungleQuest", 1)
+            if hasQuest() then
+                farmEnemy("Monkey", coords.MonkeySpawn)
             end
-        else
-            -- Chegou ao Level 30 - Vai para a próxima ilha (Pirate Village)
-            print("Level 30 alcançado! Indo para a Pirate Village...")
-            tweenTo(nextIslandPos)
-            _G.AutoFarm = false -- Desliga o script ao chegar na nova ilha
+            
+        -- Condição 3: Nível 15 ao 29 -> Farmar Gorillas (E King no lv 20)
+        elseif level >= 15 and level <= 29 then
+            -- Se for nível 20+, tenta verificar se o King está vivo e pegar a missão dele
+            if level >= 20 then
+                local kingAlive = false
+                for _, v in pairs(workspace.Enemies:GetChildren()) do
+                    if v.Name == "Gorilla King" and v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 then
+                        kingAlive = true
+                        break
+                    end
+                end
+                
+                if kingAlive then
+                    getQuest("JungleQuest", 3)
+                    if hasQuest() then
+                        farmEnemy("Gorilla King", coords.GorillaKingSpawn)
+                    end
+                    continue -- Pula para o próximo ciclo para focar no Boss
+                end
+            end
+            
+            -- Se o boss não estiver vivo ou for level 15-19, farma Gorilla normal
+            getQuest("JungleQuest", 2)
+            if hasQuest() then
+                farmEnemy("Gorilla", coords.GorillaSpawn)
+            end
         end
     end
 end)
