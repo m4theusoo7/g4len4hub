@@ -1,16 +1,16 @@
 -- ==========================================
--- SCRIPT AUTO FARM (LVL 1 AO 10) -> JUNGLE
+-- SCRIPT AUTO FARM C/ MISSÃO (LVL 1 AO 10) -> JUNGLE
 -- Otimizado para Delta Executor
 -- ==========================================
 
 local player = game.Players.LocalPlayer
 local vim = game:GetService("VirtualInputManager")
 local ts = game:GetService("TweenService")
-local runService = game:GetService("RunService")
+local rs = game:GetService("ReplicatedStorage")
 
 _G.AutoFarm = true
 
--- Coordenadas extraídas da varredura (Bandits)
+-- Coordenadas extraídas da sua varredura (Bandits)
 local banditSpawns = {
     Vector3.new(1000.87, 13.18, 1568.19),
     Vector3.new(922.15, 13.18, 1528.03),
@@ -66,6 +66,28 @@ local function getClosestBandit()
     return nil
 end
 
+-- Verifica se a interface de Quest está ativa na tela do jogador
+local function hasQuest()
+    local gui = player.PlayerGui:FindFirstChild("Main")
+    if gui and gui:FindFirstChild("Quest") then
+        return gui.Quest.Visible
+    end
+    return false
+end
+
+-- Função para pegar a Missão dos Bandits via Remote Event
+local function takeQuest()
+    -- Voa para perto do Quest Giver por segurança (usando a coordenada que você escaneou)
+    tweenTo(Vector3.new(1059.3, 16.1, 1549.2)) 
+    
+    local args = {
+        [1] = "StartQuest",
+        [2] = "BanditQuest1",
+        [3] = 1
+    }
+    rs.Remotes.CommF_:InvokeServer(unpack(args))
+end
+
 -- Loop Principal
 task.spawn(function()
     while _G.AutoFarm do
@@ -74,33 +96,38 @@ task.spawn(function()
         local char = player.Character
         if not char or not char:FindFirstChild("HumanoidRootPart") then continue end
         
-        -- Verifica o Nível do Jogador
         local playerLevel = player.Data.Level.Value
         
         if playerLevel < 10 then
-            -- Lógica de Farm nos Bandits
-            local target = getClosestBandit()
-            
-            if target and target:FindFirstChild("HumanoidRootPart") then
-                -- Voa para trás das costas do Bandit para não tomar dano
-                local farmPos = target.HumanoidRootPart.CFrame * CFrame.new(0, 5, 4)
-                tweenTo(farmPos.Position)
-                
-                -- Fica batendo e soltando skill enquanto o bicho estiver vivo
-                if target.Humanoid.Health > 0 then
-                    char.HumanoidRootPart.CFrame = CFrame.new(char.HumanoidRootPart.Position, target.HumanoidRootPart.Position)
-                    autoAttackAndSkills()
-                end
+            -- Verifica se TEM a missão, caso não, ele pega
+            if not hasQuest() then
+                takeQuest()
+                task.wait(0.5) -- Pausa rápida para a missão registrar
             else
-                -- Se não achar nenhum vivo, voa para o primeiro ponto de spawn mapeado e aguarda
-                tweenTo(banditSpawns[1])
-                task.wait(1)
+                -- Lógica de Farm nos Bandits (só executa se já tiver com a missão)
+                local target = getClosestBandit()
+                
+                if target and target:FindFirstChild("HumanoidRootPart") then
+                    -- Voa para trás das costas do Bandit para não tomar dano
+                    local farmPos = target.HumanoidRootPart.CFrame * CFrame.new(0, 5, 4)
+                    tweenTo(farmPos.Position)
+                    
+                    -- Bate e solta skill enquanto o bicho estiver vivo
+                    if target.Humanoid.Health > 0 then
+                        char.HumanoidRootPart.CFrame = CFrame.new(char.HumanoidRootPart.Position, target.HumanoidRootPart.Position)
+                        autoAttackAndSkills()
+                    end
+                else
+                    -- Se não achar nenhum vivo, voa para o primeiro ponto de spawn e aguarda
+                    tweenTo(banditSpawns[1])
+                    task.wait(1)
+                end
             end
         else
             -- Chegou ao Level 10 - Vai para a Jungle
             print("Level 10 alcançado! Indo para a Jungle...")
             tweenTo(junglePos)
-            _G.AutoFarm = false -- Desliga o loop para você pegar a quest dos macacos manualmente
+            _G.AutoFarm = false -- Desliga o loop para você continuar manualmente na Jungle
         end
     end
 end)
