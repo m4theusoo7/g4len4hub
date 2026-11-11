@@ -1,168 +1,106 @@
--- =====================================================================
--- OmegaCore Sea 1: Correção de Ataque e Habilidades (Delta Executor)
--- =====================================================================
+-- ==========================================
+-- SCRIPT AUTO FARM (LVL 1 AO 10) -> JUNGLE
+-- Otimizado para Delta Executor
+-- ==========================================
 
-local Players = game:GetService("Players")
-local Workspace = game:GetService("Workspace")
-local TweenService = game:GetService("TweenService")
-local VirtualUser = game:GetService("VirtualUser")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local LocalPlayer = Players.LocalPlayer
+local player = game.Players.LocalPlayer
+local vim = game:GetService("VirtualInputManager")
+local ts = game:GetService("TweenService")
+local runService = game:GetService("RunService")
 
-getgenv().OmegaConfig = {
-    AutoFarm = true,
-    WeaponType = "Melee", -- Mude para "Sword" ou "Blox Fruit" se preferir
-    CurrentIsland = nil,
-    TargetMob = nil,
-    LastQuestCheck = 0
+_G.AutoFarm = true
+
+-- Coordenadas extraídas da varredura (Bandits)
+local banditSpawns = {
+    Vector3.new(1000.87, 13.18, 1568.19),
+    Vector3.new(922.15, 13.18, 1528.03),
+    Vector3.new(1310.66, 13.47, 1593.06),
+    Vector3.new(928.00, 13.18, 1597.26),
+    Vector3.new(1280.75, 13.47, 1528.91),
+    Vector3.new(1254.71, 13.18, 1623.05),
+    Vector3.new(1203.57, 13.18, 1563.34),
+    Vector3.new(1147.22, 13.18, 1676.80),
+    Vector3.new(1210.01, 13.18, 1673.53),
+    Vector3.new(1114.26, 13.18, 1590.18)
 }
 
--- Mapeamento do Sea 1
-local Sea1Islands = {
-    {Name = "Starter", MinLevel = 1, MaxLevel = 10, MobName = "Bandit", QuestName = "BanditQuest1", Spawn = Vector3.new(1062, 16, 1349)},
-    {Name = "Jungle", MinLevel = 10, MaxLevel = 30, MobName = "Monkey", QuestName = "JungleQuest", Spawn = Vector3.new(-1598, 36, 153)},
-    {Name = "Pirate Village", MinLevel = 30, MaxLevel = 60, MobName = "Pirate", QuestName = "PirateQuest", Spawn = Vector3.new(-1139, 4, 3824)},
-    {Name = "Desert", MinLevel = 60, MaxLevel = 90, MobName = "Desert Bandit", QuestName = "DesertQuest", Spawn = Vector3.new(944, 6, 4377)},
-    {Name = "Snow Village", MinLevel = 90, MaxLevel = 120, MobName = "Snow Trooper", QuestName = "SnowQuest", Spawn = Vector3.new(1389, 87, -1299)},
-    {Name = "Marine Fortress", MinLevel = 120, MaxLevel = 150, MobName = "Chief Petty Officer", QuestName = "MarineQuest", Spawn = Vector3.new(-4884, 21, 4323)},
-    {Name = "Skypiea", MinLevel = 150, MaxLevel = 190, MobName = "Skypiea Guard", QuestName = "SkyQuest", Spawn = Vector3.new(-4842, 717, -2623)},
-    {Name = "Prison", MinLevel = 190, MaxLevel = 275, MobName = "Prisoner", QuestName = "PrisonerQuest", Spawn = Vector3.new(4875, 5, 734)},
-    {Name = "Colosseum", MinLevel = 275, MaxLevel = 300, MobName = "Toga Warrior", QuestName = "ColosseumQuest", Spawn = Vector3.new(-1580, 7, -2990)},
-    {Name = "Magma Village", MinLevel = 300, MaxLevel = 375, MobName = "Military Spy", QuestName = "MagmaQuest", Spawn = Vector3.new(-5315, 12, 8515)},
-    {Name = "Underwater City", MinLevel = 375, MaxLevel = 450, MobName = "Fishman Warrior", QuestName = "FishmanQuest", Spawn = Vector3.new(6112, 18, 1567)},
-    {Name = "Fountain City", MinLevel = 450, MaxLevel = 700, MobName = "Galley Pirate", QuestName = "FountainQuest", Spawn = Vector3.new(5247, 38, 4048)}
-}
+local junglePos = Vector3.new(-1246, 15, 1551) -- Coordenada padrão da Jungle
 
--- Anti-AFK
-LocalPlayer.Idled:Connect(function()
-    VirtualUser:CaptureController()
-    VirtualUser:ClickButton2(Vector2.new())
-end)
+-- Função de movimentação segura (Tween)
+local function tweenTo(targetPos)
+    local char = player.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+    
+    local distance = (char.HumanoidRootPart.Position - targetPos).Magnitude
+    local speed = 300 -- Velocidade do Tween
+    local timeToReach = distance / speed
+    
+    local tweenInfo = TweenInfo.new(timeToReach, Enum.EasingStyle.Linear)
+    local tween = ts:Create(char.HumanoidRootPart, tweenInfo, {CFrame = CFrame.new(targetPos)})
+    tween:Play()
+    tween.Completed:Wait()
+end
 
-local function ScanAndGetIsland()
-    local playerLevel = 1
-    pcall(function() playerLevel = LocalPlayer.Data.Level.Value end)
-    for _, island in ipairs(Sea1Islands) do
-        if playerLevel >= island.MinLevel and playerLevel <= island.MaxLevel then
-            getgenv().OmegaConfig.CurrentIsland = island
-            getgenv().OmegaConfig.TargetMob = island.MobName
-            return island
+-- Função para usar Skills e Ataque Básico
+local function autoAttackAndSkills()
+    -- Clica para atacar
+    vim:SendMouseButtonEvent(0, 0, 0, true, game, 0)
+    vim:SendMouseButtonEvent(0, 0, 0, false, game, 0)
+    
+    -- Ativa as skills Z, X, C, V
+    local keys = {Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C, Enum.KeyCode.V}
+    for _, key in ipairs(keys) do
+        vim:SendKeyEvent(true, key, false, game)
+        task.wait(0.1)
+        vim:SendKeyEvent(false, key, false, game)
+    end
+end
+
+-- Função para encontrar um Bandit vivo perto das coordenadas mapeadas
+local function getClosestBandit()
+    for _, obj in pairs(workspace.Enemies:GetChildren()) do
+        if obj.Name == "Bandit" and obj:FindFirstChild("Humanoid") and obj.Humanoid.Health > 0 then
+            return obj
         end
     end
-    return Sea1Islands[1]
-end
-
-local function TweenTo(targetPos)
-    local char = LocalPlayer.Character
-    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
-    local hrp = char.HumanoidRootPart
-    local distance = (targetPos - hrp.Position).Magnitude
-    local speed = 310
-    local tween = TweenService:Create(hrp, TweenInfo.new(distance / speed, Enum.EasingStyle.Linear), {CFrame = CFrame.new(targetPos)})
-    tween:Play()
-end
-
--- FUNÇÃO CORRIGIDA: Força o equipamento da arma no inventário
-local function EquipWeapon()
-    pcall(function()
-        local backpack = LocalPlayer.Backpack
-        local char = LocalPlayer.Character
-        if not char then return end
-        
-        -- Verifica se já tem algo na mão
-        local currentTool = char:FindFirstChildOfClass("Tool")
-        if not currentTool then
-            for _, tool in ipairs(backpack:GetChildren()) do
-                if tool:IsA("Tool") then
-                    if tool.ToolTip == getgenv().OmegaConfig.WeaponType or tool.Name:find("Combat") or tool.Name:find("Melee") or #backpack:GetChildren() > 0 then
-                        local humanoid = char:FindFirstChildOfClass("Humanoid")
-                        if humanoid then
-                            humanoid:EquipTool(tool)
-                            break
-                        end
-                    end
-                end
-            end
-        end
-    end)
-end
-
-local function TriggerQuestRemotely()
-    if tick() - getgenv().OmegaConfig.LastQuestCheck < 15 then return end
-    getgenv().OmegaConfig.LastQuestCheck = tick()
-    pcall(function()
-        local island = getgenv().OmegaConfig.CurrentIsland
-        if not island then return end
-        local commF = ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("CommF_")
-        if commF then
-            commF:InvokeServer("StartQuest", island.QuestName, 1)
-        end
-    end)
-end
-
--- Disparo de Habilidades Seguro via VirtualUser
-local function UseSkills()
-    pcall(function()
-        local vim = game:GetService("VirtualInputManager")
-        local keys = {Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C, Enum.KeyCode.V}
-        for _, key in ipairs(keys) do
-            vim:SendKeyEvent(true, key, false, game)
-            task.wait(0.05)
-            vim:SendKeyEvent(false, key, false, game)
-            task.wait(0.08)
-        end
-    end)
+    return nil
 end
 
 -- Loop Principal
 task.spawn(function()
-    while task.wait(0.3) do
-        if getgenv().OmegaConfig.AutoFarm then
-            local island = ScanAndGetIsland()
-            TriggerQuestRemotely()
-            EquipWeapon() -- Garante que a arma está sempre equipada
+    while _G.AutoFarm do
+        task.wait()
+        
+        local char = player.Character
+        if not char or not char:FindFirstChild("HumanoidRootPart") then continue end
+        
+        -- Verifica o Nível do Jogador
+        local playerLevel = player.Data.Level.Value
+        
+        if playerLevel < 10 then
+            -- Lógica de Farm nos Bandits
+            local target = getClosestBandit()
             
-            local char = LocalPlayer.Character
-            if char and char:FindFirstChild("HumanoidRootPart") then
-                local hrp = char.HumanoidRootPart
-                local targetFound = false
+            if target and target:FindFirstChild("HumanoidRootPart") then
+                -- Voa para trás das costas do Bandit para não tomar dano
+                local farmPos = target.HumanoidRootPart.CFrame * CFrame.new(0, 5, 4)
+                tweenTo(farmPos.Position)
                 
-                local enemiesFolder = Workspace:FindFirstChild("Enemies")
-                if enemiesFolder then
-                    for _, enemy in ipairs(enemiesFolder:GetChildren()) do
-                        if enemy.Name == getgenv().OmegaConfig.TargetMob then
-                            local enemyHRP = enemy:FindFirstChild("HumanoidRootPart")
-                            local enemyHum = enemy:FindFirstChild("Humanoid")
-                            
-                            if enemyHRP and enemyHum and enemyHum.Health > 0 then
-                                targetFound = true
-                                local combatPos = enemyHRP.Position + Vector3.new(0, 25, 0)
-                                
-                                if (hrp.Position - combatPos).Magnitude > 12 then
-                                    TweenTo(combatPos)
-                                else
-                                    hrp.CFrame = CFrame.new(combatPos)
-                                    
-                                    -- Ataque básico contínuo otimizado para mobile
-                                    VirtualUser:Button1Down(Vector2.new(0,0), Workspace.CurrentCamera.CFrame)
-                                    
-                                    -- Executa as skills Z, X, C, V
-                                    UseSkills()
-                                end
-                                break
-                            end
-                        end
-                    end
+                -- Fica batendo e soltando skill enquanto o bicho estiver vivo
+                if target.Humanoid.Health > 0 then
+                    char.HumanoidRootPart.CFrame = CFrame.new(char.HumanoidRootPart.Position, target.HumanoidRootPart.Position)
+                    autoAttackAndSkills()
                 end
-                
-                if not targetFound and island and island.Spawn then
-                    if (hrp.Position - island.Spawn).Magnitude > 20 then
-                        TweenTo(island.Spawn)
-                    end
-                end
+            else
+                -- Se não achar nenhum vivo, voa para o primeiro ponto de spawn mapeado e aguarda
+                tweenTo(banditSpawns[1])
+                task.wait(1)
             end
+        else
+            -- Chegou ao Level 10 - Vai para a Jungle
+            print("Level 10 alcançado! Indo para a Jungle...")
+            tweenTo(junglePos)
+            _G.AutoFarm = false -- Desliga o loop para você pegar a quest dos macacos manualmente
         end
     end
 end)
-
-print("OmegaCore: Sistema de Ataque e Equipamento de Armas Corrigido!")
