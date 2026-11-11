@@ -1,8 +1,10 @@
 -- ==========================================
--- SCANNER GLOBAL DE COORDENADAS - BLOX FRUITS
+-- MAPEAMENTO INTELIGENTE POR ZONA DE FARM
+-- Agrupa Ilha -> NPC de Missão -> Inimigos
 -- ==========================================
 
--- Função para extrair a posição real de qualquer objeto
+local workspace = game:GetService("Workspace")
+
 local function getPosition(obj)
     if obj:IsA("Model") and obj.PrimaryPart then
         return obj.PrimaryPart.Position
@@ -10,68 +12,85 @@ local function getPosition(obj)
         return obj.HumanoidRootPart.Position
     elseif obj:IsA("BasePart") then
         return obj.Position
-    else
-        -- Tenta achar alguma peça física dentro do modelo caso não tenha RootPart
-        for _, child in pairs(obj:GetDescendants()) do
-            if child:IsA("BasePart") then
-                return child.Position
-            end
-        end
     end
     return nil
 end
 
--- Função para ler e imprimir os diretórios
-local function scanDirectory(directory, categoryName)
-    if not directory then return end
-    
-    print("\n==================================")
-    print("📍 MAPEANDO: " .. string.upper(categoryName))
-    print("==================================")
-    
-    local count = 0
-    for _, obj in pairs(directory:GetChildren()) do
-        local pos = getPosition(obj)
-        if pos then
-            -- Formata a saída para facilitar copiar e colar no seu script de farm
-            print(string.format("[%s] Nome: %s | Pos: Vector3.new(%.1f, %.1f, %.1f)", categoryName, obj.Name, pos.X, pos.Y, pos.Z))
-            count = count + 1
-        end
-    end
-    print("-> Total encontrado em " .. categoryName .. ": " .. count)
-end
+print("\n=======================================================")
+print("🗺️ INICIANDO MAPEAMENTO DE ILHAS E ZONAS DE FARM 🗺️")
+print("=======================================================\n")
 
-print("\n\n=== INICIANDO VARREDURA COMPLETA DO SERVIDOR ===")
+-- 1. Cria uma lista de "Zonas" baseadas nos NPCs de Missão
+local zonasDeFarm = {}
 
--- 1. Estruturas das Ilhas (Ficam na pasta Map)
-if workspace:FindFirstChild("Map") then
-    scanDirectory(workspace.Map, "Ilhas e Estruturas")
-end
-
--- 2. NPCs (Quest Givers, Vendedores de Barco, Sword Dealers)
 if workspace:FindFirstChild("NPCs") then
-    scanDirectory(workspace.NPCs, "NPCs")
-end
-
--- 3. Inimigos (Bandits, Bosses, Monkeys, etc)
-if workspace:FindFirstChild("Enemies") then
-    scanDirectory(workspace.Enemies, "Inimigos")
-end
-
--- 4. Baús (Ficam soltos no workspace, precisam ser filtrados pelo nome)
-print("\n==================================")
-print("📍 MAPEANDO: BAÚS (CHESTS)")
-print("==================================")
-local chestCount = 0
-for _, obj in pairs(workspace:GetChildren()) do
-    if string.find(obj.Name, "Chest") then
-        local pos = getPosition(obj)
-        if pos then
-            print(string.format("[Baú] Tipo: %s | Pos: Vector3.new(%.1f, %.1f, %.1f)", obj.Name, pos.X, pos.Y, pos.Z))
-            chestCount = chestCount + 1
+    for _, npc in pairs(workspace.NPCs:GetChildren()) do
+        -- Filtra NPCs que dão missão (geralmente têm "Quest" no nome)
+        if string.find(string.lower(npc.Name), "quest") then
+            local pos = getPosition(npc)
+            if pos then
+                table.insert(zonasDeFarm, {
+                    npcNome = npc.Name,
+                    posicao = pos,
+                    inimigos = {}
+                })
+            end
         end
     end
 end
-print("-> Total de Baús encontrados no momento: " .. chestCount)
 
-print("\n=== VARREDURA CONCLUÍDA! ROLE O CONSOLE PARA CIMA PARA VER TUDO ===")
+-- 2. Associa os Inimigos spawnados à Ilha/Zona mais próxima
+if workspace:FindFirstChild("Enemies") then
+    for _, inimigo in pairs(workspace.Enemies:GetChildren()) do
+        local posInimigo = getPosition(inimigo)
+        
+        if posInimigo then
+            local zonaMaisProxima = nil
+            local menorDistancia = math.huge
+            
+            -- Procura qual NPC de Missão está mais perto deste inimigo
+            for _, zona in pairs(zonasDeFarm) do
+                local distancia = (zona.posicao - posInimigo).Magnitude
+                
+                -- Se estiver a menos de 1000 studs, consideramos que pertence à mesma ilha
+                if distancia < 1000 and distancia < menorDistancia then
+                    menorDistancia = distancia
+                    zonaMaisProxima = zona
+                end
+            end
+            
+            -- Adiciona o inimigo à lista daquela ilha
+            if zonaMaisProxima then
+                if not zonaMaisProxima.inimigos[inimigo.Name] then
+                    zonaMaisProxima.inimigos[inimigo.Name] = {}
+                end
+                table.insert(zonaMaisProxima.inimigos[inimigo.Name], posInimigo)
+            end
+        end
+    end
+end
+
+-- 3. Imprime os resultados organizados no Console (F9)
+for _, zona in pairs(zonasDeFarm) do
+    print(string.format("🏝️ ZONA / ILHA: Base do [%s]", zona.npcNome))
+    print(string.format("📍 NPC de Missão: Vector3.new(%.1f, %.1f, %.1f)", zona.posicao.X, zona.posicao.Y, zona.posicao.Z))
+    
+    local temInimigo = false
+    for nomeInimigo, posicoes in pairs(zona.inimigos) do
+        temInimigo = true
+        print(string.format("   ⚔️ Inimigo da Ilha: %s (Encontrados: %d)", nomeInimigo, #posicoes))
+        
+        -- Mostra as coordenadas de até 3 inimigos desse tipo para não floodar o console inteiro
+        local limite = math.min(3, #posicoes)
+        for i = 1, limite do
+            print(string.format("      -> Posição %d: Vector3.new(%.1f, %.1f, %.1f)", i, posicoes[i].X, posicoes[i].Y, posicoes[i].Z))
+        end
+    end
+    
+    if not temInimigo then
+        print("   ⚠️ Nenhum inimigo vivo/spawnado perto deste NPC no momento.")
+    end
+    print("-------------------------------------------------------")
+end
+
+print("\n✅ VARREDURA ESTRUTURADA CONCLUÍDA! (Abra o F9 para ler) ✅")
