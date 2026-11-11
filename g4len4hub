@@ -1,140 +1,106 @@
--- =========================================================
--- OMEGACORE SEA 1 - AUTO FARM DEFINITIVO (NÍVEL 1 AO 10)
--- Foco: Estabilidade no Delta Executor & Combate Real
--- =========================================================
+-- ==========================================
+-- SCRIPT AUTO FARM (LVL 1 AO 10) -> JUNGLE
+-- Otimizado para Delta Executor
+-- ==========================================
 
-local Players = game:GetService("Players")
-local TweenService = game:GetService("TweenService")
-local RunService = game:GetService("RunService")
-local VirtualUser = game:GetService("VirtualUser")
+local player = game.Players.LocalPlayer
+local vim = game:GetService("VirtualInputManager")
+local ts = game:GetService("TweenService")
+local runService = game:GetService("RunService")
 
-local Player = Players.LocalPlayer
+_G.AutoFarm = true
 
-getgenv().AutoFarm = true
-getgenv().MeleeWeapon = "Combat" -- Altere para a arma/estilo que estiver usando
+-- Coordenadas extraídas da varredura (Bandits)
+local banditSpawns = {
+    Vector3.new(1000.87, 13.18, 1568.19),
+    Vector3.new(922.15, 13.18, 1528.03),
+    Vector3.new(1310.66, 13.47, 1593.06),
+    Vector3.new(928.00, 13.18, 1597.26),
+    Vector3.new(1280.75, 13.47, 1528.91),
+    Vector3.new(1254.71, 13.18, 1623.05),
+    Vector3.new(1203.57, 13.18, 1563.34),
+    Vector3.new(1147.22, 13.18, 1676.80),
+    Vector3.new(1210.01, 13.18, 1673.53),
+    Vector3.new(1114.26, 13.18, 1590.18)
+}
 
--- Coordenadas validadas no console do Sea 1 (Starter Island)
-local NPC_Position = CFrame.new(1062.8, 16.5, 1546.5)
-local QuestName = "BanditQuest1"
-local QuestLevel = 1
-local TargetMobName = "Bandit"
+local junglePos = Vector3.new(-1246, 15, 1551) -- Coordenada padrão da Jungle
 
--- 1. Sistema de Noclip para o voo não colidir com o cenário
-RunService.Stepped:Connect(function()
-    if getgenv().AutoFarm then
-        local char = Player.Character
-        if char then
-            for _, part in ipairs(char:GetDescendants()) do
-                if part:IsA("BasePart") and part.CanCollide then
-                    part.CanCollide = false
-                end
-            end
-            if char:FindFirstChild("HumanoidRootPart") then
-                char.HumanoidRootPart.Velocity = Vector3.new(0, 0, 0)
-            end
+-- Função de movimentação segura (Tween)
+local function tweenTo(targetPos)
+    local char = player.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+    
+    local distance = (char.HumanoidRootPart.Position - targetPos).Magnitude
+    local speed = 300 -- Velocidade do Tween
+    local timeToReach = distance / speed
+    
+    local tweenInfo = TweenInfo.new(timeToReach, Enum.EasingStyle.Linear)
+    local tween = ts:Create(char.HumanoidRootPart, tweenInfo, {CFrame = CFrame.new(targetPos)})
+    tween:Play()
+    tween.Completed:Wait()
+end
+
+-- Função para usar Skills e Ataque Básico
+local function autoAttackAndSkills()
+    -- Clica para atacar
+    vim:SendMouseButtonEvent(0, 0, 0, true, game, 0)
+    vim:SendMouseButtonEvent(0, 0, 0, false, game, 0)
+    
+    -- Ativa as skills Z, X, C, V
+    local keys = {Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C, Enum.KeyCode.V}
+    for _, key in ipairs(keys) do
+        vim:SendKeyEvent(true, key, false, game)
+        task.wait(0.1)
+        vim:SendKeyEvent(false, key, false, game)
+    end
+end
+
+-- Função para encontrar um Bandit vivo perto das coordenadas mapeadas
+local function getClosestBandit()
+    for _, obj in pairs(workspace.Enemies:GetChildren()) do
+        if obj.Name == "Bandit" and obj:FindFirstChild("Humanoid") and obj.Humanoid.Health > 0 then
+            return obj
         end
     end
-end)
-
--- 2. Função de Movimentação Suave (Tween)
-local function MoveTo(targetCFrame)
-    local char = Player.Character
-    if char and char:FindFirstChild("HumanoidRootPart") then
-        local hrp = char.HumanoidRootPart
-        local distance = (hrp.Position - targetCFrame.Position).Magnitude
-        local speed = 250 -- Velocidade segura para o Delta
-        local info = TweenInfo.new(distance / speed, Enum.EasingStyle.Linear)
-        local tween = TweenService:Create(hrp, info, {CFrame = targetCFrame})
-        tween:Play()
-        return tween
-    end
+    return nil
 end
 
--- 3. Função de Ataque Direto (Simulação Humana)
-local function AttackTarget()
-    pcall(function()
-        VirtualUser:CaptureController()
-        VirtualUser:Button1Down(Vector2.new(0, 0))
-    end)
-end
-
--- 4. Garantir que a arma/estilo esteja equipada
-local function CheckWeapon()
-    local char = Player.Character
-    if char and not char:FindFirstChild(getgenv().MeleeWeapon) then
-        local tool = Player.Backpack:FindFirstChild(getgenv().MeleeWeapon)
-        if tool and char:FindFirstChild("Humanoid") then
-            char.Humanoid:EquipTool(tool)
-        end
-    end
-end
-
--- =========================================================
--- LOOP DE EXECUÇÃO PRINCIPAL
--- =========================================================
+-- Loop Principal
 task.spawn(function()
-    while task.wait(0.1) do
-        if not getgenv().AutoFarm then break end
+    while _G.AutoFarm do
+        task.wait()
         
-        pcall(function()
-            local playerGui = Player:FindFirstChild("PlayerGui")
-            if not playerGui then return end
+        local char = player.Character
+        if not char or not char:FindFirstChild("HumanoidRootPart") then continue end
+        
+        -- Verifica o Nível do Jogador
+        local playerLevel = player.Data.Level.Value
+        
+        if playerLevel < 10 then
+            -- Lógica de Farm nos Bandits
+            local target = getClosestBandit()
             
-            local mainGui = playerGui:FindFirstChild("Main")
-            if not mainGui then return end
-            
-            local questFrame = mainGui:FindFirstChild("Quest")
-            local hasActiveQuest = questFrame and questFrame.Visible
-            
-            -- CASO A: NÃO TEM QUEST ATIVA -> VAI ATÉ O NPC PEGAR
-            if not hasActiveQuest then
-                local hrp = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
-                if hrp then
-                    if (hrp.Position - NPC_Position.Position).Magnitude > 10 then
-                        MoveTo(NPC_Position)
-                    else
-                        game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("StartQuest", QuestName, QuestLevel)
-                        task.wait(0.5)
-                    end
-                end
+            if target and target:FindFirstChild("HumanoidRootPart") then
+                -- Voa para trás das costas do Bandit para não tomar dano
+                local farmPos = target.HumanoidRootPart.CFrame * CFrame.new(0, 5, 4)
+                tweenTo(farmPos.Position)
                 
-            -- CASO B: TEM QUEST ATIVA -> LOCALIZA O BANDIT E ATaca
+                -- Fica batendo e soltando skill enquanto o bicho estiver vivo
+                if target.Humanoid.Health > 0 then
+                    char.HumanoidRootPart.CFrame = CFrame.new(char.HumanoidRootPart.Position, target.HumanoidRootPart.Position)
+                    autoAttackAndSkills()
+                end
             else
-                CheckWeapon()
-                
-                local closestMob = nil
-                local shortestDistance = math.huge
-                
-                -- Varre os models no workspace procurando os Bandits ativos
-                for _, obj in ipairs(workspace:GetChildren()) do
-                    if obj.Name == TargetMobName and obj:FindFirstChild("Humanoid") and obj:FindFirstChild("HumanoidRootPart") then
-                        local hum = obj.Humanoid
-                        if hum.Health > 0 then
-                            local hrp = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
-                            if hrp then
-                                local dist = (hrp.Position - obj.HumanoidRootPart.Position).Magnitude
-                                if dist < shortestDistance then
-                                    shortestDistance = dist
-                                    closestMob = obj
-                                end
-                            end
-                        end
-                    end
-                end
-                
-                -- Se encontrou um mob válido, vai até ele e ataca
-                if closestMob and closestMob:FindFirstChild("HumanoidRootPart") then
-                    local mobHRP = closestMob.HumanoidRootPart
-                    -- Posiciona logo acima/atrás do mob para evitar dano
-                    local targetCFrame = mobHRP.CFrame * CFrame.new(0, 4, 3) * CFrame.Angles(math.rad(-30), 0, 0)
-                    
-                    MoveTo(targetCFrame)
-                    
-                    if (Player.Character.HumanoidRootPart.Position - mobHRP.Position).Magnitude < 20 then
-                        AttackTarget()
-                    end
-                end
+                -- Se não achar nenhum vivo, voa para o primeiro ponto de spawn mapeado e aguarda
+                tweenTo(banditSpawns[1])
+                task.wait(1)
             end
-        end)
+        else
+            -- Chegou ao Level 10 - Vai para a Jungle
+            print("Level 10 alcançado! Indo para a Jungle...")
+            tweenTo(junglePos)
+            _G.AutoFarm = false -- Desliga o loop para você pegar a quest dos macacos manualmente
+        end
     end
 end)
