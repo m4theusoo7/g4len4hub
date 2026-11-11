@@ -1,6 +1,6 @@
 -- ==========================================
--- SCRIPT AUTO FARM C/ MISSÃO (LVL 1 AO 10) 
--- Fix: Anti-Travamento (Sem Yield e com Pcall)
+-- SCRIPT AUTO FARM (LVL 1 AO 10) + QUEST
+-- Versão Estável (Baseada no Farm que funcionou)
 -- ==========================================
 
 local player = game.Players.LocalPlayer
@@ -10,7 +10,7 @@ local rs = game:GetService("ReplicatedStorage")
 
 _G.AutoFarm = true
 
--- Coordenadas
+-- Coordenadas 
 local banditSpawns = {
     Vector3.new(1000.87, 13.18, 1568.19),
     Vector3.new(922.15, 13.18, 1528.03),
@@ -18,37 +18,35 @@ local banditSpawns = {
     Vector3.new(928.00, 13.18, 1597.26)
 }
 
-local junglePos = CFrame.new(-1246, 15, 1551)
+local junglePos = Vector3.new(-1246, 15, 1551)
 local questGiverPos = Vector3.new(1060, 16.5, 1549)
 
--- Variável para controlar o Tween atual
-local currentTween = nil
-
+-- Tween com Sistema de Timeout (Impede que o script trave se bater numa parede)
 local function tweenTo(targetPos)
     local char = player.Character
     if not char or not char:FindFirstChild("HumanoidRootPart") then return end
     
-    local distance = (char.HumanoidRootPart.Position - targetPos).Magnitude
-    if distance < 3 then return end -- Já está no local
+    local hrp = char.HumanoidRootPart
+    local distance = (hrp.Position - targetPos).Magnitude
+    if distance < 5 then return end -- Já está no local
     
     local speed = 300
     local timeToReach = distance / speed
     
-    -- Cancela o tween anterior se houver
-    if currentTween then currentTween:Cancel() end
-    
     local tweenInfo = TweenInfo.new(timeToReach, Enum.EasingStyle.Linear)
-    currentTween = ts:Create(char.HumanoidRootPart, tweenInfo, {CFrame = CFrame.new(targetPos)})
-    currentTween:Play()
+    local tween = ts:Create(hrp, tweenInfo, {CFrame = CFrame.new(targetPos)})
+    tween:Play()
+    
+    -- Aguarda o Tween terminar ou bater o tempo limite de segurança
+    local timeout = tick() + timeToReach + 0.5
+    repeat 
+        task.wait() 
+    until (hrp.Position - targetPos).Magnitude < 5 or tick() > timeout or not _G.AutoFarm
+    
+    tween:Cancel()
 end
 
-local function cancelTween()
-    if currentTween then
-        currentTween:Cancel()
-        currentTween = nil
-    end
-end
-
+-- Ataques e Skills
 local function autoAttackAndSkills()
     vim:SendMouseButtonEvent(0, 0, 0, true, game, 0)
     vim:SendMouseButtonEvent(0, 0, 0, false, game, 0)
@@ -61,85 +59,67 @@ local function autoAttackAndSkills()
     end
 end
 
+-- Encontra o Bandit vivo
 local function getClosestBandit()
-    local closest = nil
-    local shortestDist = math.huge
-    local char = player.Character
-    if not char or not char:FindFirstChild("HumanoidRootPart") then return nil end
-    
     for _, obj in pairs(workspace.Enemies:GetChildren()) do
-        if obj.Name == "Bandit" and obj:FindFirstChild("Humanoid") and obj.Humanoid.Health > 0 and obj:FindFirstChild("HumanoidRootPart") then
-            local dist = (char.HumanoidRootPart.Position - obj.HumanoidRootPart.Position).Magnitude
-            if dist < shortestDist then
-                shortestDist = dist
-                closest = obj
-            end
+        if obj.Name == "Bandit" and obj:FindFirstChild("Humanoid") and obj.Humanoid.Health > 0 then
+            return obj
         end
     end
-    return closest
+    return nil
 end
 
-local function hasQuest()
-    local mainGui = player.PlayerGui:FindFirstChild("Main")
-    if mainGui then
-        local quest = mainGui:FindFirstChild("Quest")
-        if quest and quest.Visible then
-            return true
-        end
-    end
-    return false
-end
-
--- Loop Principal Seguro
+-- Loop Principal
 task.spawn(function()
     while _G.AutoFarm do
-        task.wait(0.1) -- Evita crash de FPS no executor
+        task.wait()
         
-        -- O pcall impede que o script desligue se um bicho morrer do nada
+        -- O pcall impede erros aleatórios de pararem o script
         pcall(function()
             local char = player.Character
             if not char or not char:FindFirstChild("HumanoidRootPart") then return end
-            local hrp = char.HumanoidRootPart
+            
             local playerLevel = player.Data.Level.Value
             
             if playerLevel < 10 then
-                if not hasQuest() then
-                    -- 1. FASE DE MISSÃO
-                    if (hrp.Position - questGiverPos).Magnitude > 8 then
-                        tweenTo(questGiverPos)
-                    else
-                        cancelTween()
-                        -- task.spawn evita que o InvokeServer trave o seu Executor
-                        task.spawn(function()
-                            rs.Remotes.CommF_:InvokeServer("StartQuest", "BanditQuest1", 1)
-                        end)
-                        task.wait(1)
-                    end
+                -- Verifica se a interface de Quest está visível de forma segura
+                local hasQuest = false
+                if player.PlayerGui:FindFirstChild("Main") and player.PlayerGui.Main:FindFirstChild("Quest") then
+                    hasQuest = player.PlayerGui.Main.Quest.Visible
+                end
+                
+                if not hasQuest then
+                    -- FASE 1: PEGAR MISSÃO
+                    tweenTo(questGiverPos)
+                    task.wait(0.2)
+                    
+                    -- task.spawn envia o pedido da missão sem pausar o resto do código
+                    task.spawn(function()
+                        rs.Remotes.CommF_:InvokeServer("StartQuest", "BanditQuest1", 1)
+                    end)
+                    task.wait(1) -- Aguarda um segundo para a missão aparecer na ecrã
                 else
-                    -- 2. FASE DE FARM
+                    -- FASE 2: FARMAR (Exatamente a lógica que estava a funcionar)
                     local target = getClosestBandit()
                     
                     if target and target:FindFirstChild("HumanoidRootPart") then
                         local farmPos = target.HumanoidRootPart.CFrame * CFrame.new(0, 5, 4)
+                        tweenTo(farmPos.Position)
                         
-                        if (hrp.Position - farmPos.Position).Magnitude > 8 then
-                            tweenTo(farmPos.Position)
-                        else
-                            cancelTween() -- Chegou no bicho, para o tween
-                            if target.Humanoid.Health > 0 then
-                                hrp.CFrame = farmPos -- Trava nas costas do bicho
-                                autoAttackAndSkills()
-                            end
+                        if target.Humanoid.Health > 0 then
+                            char.HumanoidRootPart.CFrame = CFrame.new(char.HumanoidRootPart.Position, target.HumanoidRootPart.Position)
+                            autoAttackAndSkills()
                         end
                     else
-                        tweenTo(banditSpawns[1]) -- Vai pro meio se não achar bicho
+                        -- Se não achar Bandit, vai para o meio dos spawns aguardar
+                        tweenTo(banditSpawns[1])
+                        task.wait(1)
                     end
                 end
             else
-                -- 3. VAI PARA A JUNGLE
-                cancelTween()
-                print("Level 10 alcançado! Teleportando para a Jungle...")
-                hrp.CFrame = junglePos
+                -- FASE 3: IR PARA A JUNGLE
+                print("Level 10 alcançado! A viajar para a Jungle...")
+                tweenTo(junglePos)
                 _G.AutoFarm = false 
             end
         end)
