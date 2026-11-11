@@ -1,7 +1,10 @@
 -- ==========================================================
--- OMEGACORE: AUTO-FARM JUNGLE (COM SKILLS E FAST ATTACK)
+-- OMEGACORE: AUTO-FARM JUNGLE (FIX DE ATAQUE)
 -- ==========================================================
-getgenv().AutoFarm = true -- Mude para false para parar o script
+getgenv().AutoFarm = true 
+
+-- COLOQUE O NOME EXATO DA SUA ARMA AQUI (Ex: "Combat", "Katana", "Ice-Ice")
+local NomeDaArma = "Combat" 
 
 local Players = game:GetService("Players")
 local Player = Players.LocalPlayer
@@ -10,14 +13,12 @@ local VirtualUser = game:GetService("VirtualUser")
 local VIM = game:GetService("VirtualInputManager")
 local RunService = game:GetService("RunService")
 
--- Anti-AFK (Evita desconexão)
 Player.Idled:Connect(function()
     VirtualUser:Button2Down(Vector2.new(0,0),workspace.CurrentCamera.CFrame)
     task.wait(1)
     VirtualUser:Button2Up(Vector2.new(0,0),workspace.CurrentCamera.CFrame)
 end)
 
--- Noclip (Atravessar paredes/árvores enquanto o AutoFarm estiver ligado)
 RunService.Stepped:Connect(function()
     if getgenv().AutoFarm and Player.Character then
         for _, part in pairs(Player.Character:GetDescendants()) do
@@ -28,9 +29,7 @@ RunService.Stepped:Connect(function()
     end
 end)
 
--- A Tabela de Coordenadas
 local JungleConfig = {
-    QuestNPC = { Position = Vector3.new(-1680, 48, 175) },
     Mobs = {
         Monkey = { LevelReq = 10, Position = Vector3.new(-1479, 29, 319), Name = "Monkey" },
         Gorilla = { LevelReq = 15, Position = Vector3.new(-1402, 26, -464), Name = "Gorilla" },
@@ -38,7 +37,6 @@ local JungleConfig = {
     }
 }
 
--- Teleporte Suave (Tween)
 local function TweenTo(targetPos)
     local char = Player.Character
     if not char or not char:FindFirstChild("HumanoidRootPart") then return end
@@ -48,44 +46,41 @@ local function TweenTo(targetPos)
     local speed = 300 
     
     local tweenInfo = TweenInfo.new(distance / speed, Enum.EasingStyle.Linear)
-    -- Fica um pouco acima e atrás do inimigo para não apanhar tanto
+    -- Fica um pouco acima para o inimigo não acertar você tão fácil
     local tween = TweenService:Create(hrp, tweenInfo, {CFrame = CFrame.new(targetPos + Vector3.new(0, 8, 0))}) 
     
     tween:Play()
     return tween
 end
 
--- Função para Equipar a Arma
+-- Novo sistema de Equipar (Garante que a arma vai pra mão)
 local function EquipWeapon()
-    for _, tool in pairs(Player.Backpack:GetChildren()) do
-        if tool:IsA("Tool") and tool.ToolTip == "Melee" then -- Mude "Melee" para "Sword" ou "Blox Fruit" se precisar
-            Player.Character.Humanoid:EquipTool(tool)
-        end
-    end
-end
-
--- Fast Attack (Ataque ultra rápido sem depender de clique na tela)
-local function FastAttack()
     local char = Player.Character
-    if char then
-        local tool = char:FindFirstChildOfClass("Tool")
-        if tool then
-            tool:Activate()
-        end
+    local backpack = Player.Backpack
+    if not char then return end
+
+    local weapon = backpack:FindFirstChild(NomeDaArma)
+    if weapon then
+        char.Humanoid:EquipTool(weapon)
     end
 end
 
--- Auto Skills (Z, X, C, V)
+-- Novo sistema de Ataque (Simula um toque real na tela do celular)
+local function FastAttack()
+    VIM:SendMouseButtonEvent(0, 0, 0, true, game, 1) -- Pressiona a tela
+    task.wait(0.05)
+    VIM:SendMouseButtonEvent(0, 0, 0, false, game, 1) -- Solta a tela
+end
+
 local function AutoSkills()
     local keys = {Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C, Enum.KeyCode.V}
     for _, key in ipairs(keys) do
         VIM:SendKeyEvent(true, key, false, game)
-        task.wait(0.05) -- Pequeno delay para o jogo registrar o botão
+        task.wait(0.05)
         VIM:SendKeyEvent(false, key, false, game)
     end
 end
 
--- Determina qual inimigo farmar
 local function GetTargetMob()
     local myLevel = Player.Data.Level.Value
     if myLevel >= 20 then
@@ -97,7 +92,6 @@ local function GetTargetMob()
     end
 end
 
--- Loop Principal do Auto-Farm
 task.spawn(function()
     while task.wait() do
         if not getgenv().AutoFarm then break end
@@ -115,9 +109,10 @@ task.spawn(function()
                 local enemyPos = targetEnemy.HumanoidRootPart.Position
                 TweenTo(enemyPos)
                 
-                -- Trava a câmera/personagem olhando para o inimigo (Garante que a skill acerte)
+                -- Olha pro inimigo
                 char.HumanoidRootPart.CFrame = CFrame.new(char.HumanoidRootPart.Position, enemyPos)
                 
+                -- Bate e lança skill
                 FastAttack()
                 AutoSkills()
             else
@@ -126,9 +121,3 @@ task.spawn(function()
         end)
     end
 end)
-
-game.StarterGui:SetCore("SendNotification", {
-    Title = "OmegaCore",
-    Text = "Auto-Farm Jungle com Skills Iniciado!",
-    Duration = 5
-})
