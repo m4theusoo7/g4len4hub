@@ -1,6 +1,6 @@
 -- ==========================================
 -- OMEGA CORE: AUTO FARM SEA 1 (LVL 1 AO 700)
--- FIX: Congelamento após pegar missão + NoClip
+-- FIX: Anti-Trava de NPC após aceitar missão
 -- ==========================================
 
 local player = game.Players.LocalPlayer
@@ -14,7 +14,7 @@ _G.AutoFarm = true
 local currentTween = nil
 local currentTweenTarget = nil
 
--- 1. SISTEMA NOCLIP (Atravessar paredes para não travar no cenário)
+-- 1. SISTEMA NOCLIP (Atravessar paredes)
 task.spawn(function()
     runService.Stepped:Connect(function()
         if _G.AutoFarm and player.Character then
@@ -27,7 +27,7 @@ task.spawn(function()
     end)
 end)
 
--- 2. BASE DE DADOS DAS MISSÕES DO SEA 1
+-- 2. BASE DE DADOS DE MISSÕES DO SEA 1
 local Sea1Guide = {
     {min = 1,   max = 9,   npc = "Bandit Quest Giver", quest = "BanditQuest1", num = 1, mob = "Bandit"},
     {min = 10,  max = 14,  npc = "Jungle Quest Giver", quest = "JungleQuest", num = 1, mob = "Monkey"},
@@ -64,22 +64,20 @@ local function getQuestData(level)
     return Sea1Guide[#Sea1Guide]
 end
 
--- 3. SISTEMA DE VOO SEGURO (Com Anti-Travamento)
+-- 3. SISTEMA DE VOO SEGURO
 local function tweenTo(targetPos)
     local char = player.Character
     if not char or not char:FindFirstChild("HumanoidRootPart") then return end
     local hrp = char.HumanoidRootPart
     
-    -- [A CORREÇÃO ESTÁ AQUI]: Evita que o Tween fique reiniciando infinitamente
     if currentTween and currentTweenTarget and (currentTweenTarget - targetPos).Magnitude < 15 then
-        return -- O boneco já está voando para essa área, não faz nada!
+        return 
     end
 
     local distance = (hrp.Position - targetPos).Magnitude
     if distance < 5 then return end
     
-    currentTweenTarget = targetPos -- Salva o destino atual
-    
+    currentTweenTarget = targetPos 
     local speed = 300
     local timeToReach = distance / speed
     local tweenInfo = TweenInfo.new(timeToReach, Enum.EasingStyle.Linear)
@@ -97,7 +95,7 @@ local function cancelTween()
     end
 end
 
--- 4. ATAQUES E SKILLS
+-- 4. COMBATE AUTOMÁTICO
 local function autoAttackAndSkills()
     vim:SendMouseButtonEvent(0, 0, 0, true, game, 0)
     vim:SendMouseButtonEvent(0, 0, 0, false, game, 0)
@@ -110,7 +108,7 @@ local function autoAttackAndSkills()
     end
 end
 
--- 5. VARREDURA DE NPCS E MOBS
+-- 5. LOCALIZADORES
 local function findNPC(npcName)
     if workspace:FindFirstChild("NPCs") then
         for _, npc in pairs(workspace.NPCs:GetChildren()) do
@@ -148,7 +146,7 @@ local function hasQuest()
     return false
 end
 
--- 6. LOOP PRINCIPAL (CÉREBRO DO SCRIPT)
+-- 6. LOOP PRINCIPAL DO OMEGA CORE
 task.spawn(function()
     while _G.AutoFarm do
         task.wait(0.1)
@@ -167,43 +165,43 @@ task.spawn(function()
             end
             
             local questData = getQuestData(myLevel)
-            local npcPos = findNPC(questData.npc)
-            if not npcPos then return end
             
             if not hasQuest() then
-                -- FASE 1: PEGAR MISSÃO
-                if (hrp.Position - npcPos).Magnitude > 10 then
-                    tweenTo(npcPos)
-                else
+                -- PEGA A MISSÃO DE FORMA RÁPIDA E JOGA O AVATAR PARA CIMA (Evita travar no NPC)
+                local npcPos = findNPC(questData.npc)
+                if npcPos then
                     cancelTween()
-                    task.spawn(function()
-                        rs.Remotes.CommF_:InvokeServer("StartQuest", questData.quest, questData.num)
-                    end)
-                    task.wait(0.5)
+                    -- Teleporta bem rápido para o NPC, aceita e já joga o avatar 30 studs para cima
+                    hrp.CFrame = CFrame.new(npcPos + Vector3.new(0, 2, 0))
+                    task.wait(0.1)
+                    rs.Remotes.CommF_:InvokeServer("StartQuest", questData.quest, questData.num)
+                    hrp.CFrame = CFrame.new(npcPos + Vector3.new(0, 30, 0)) -- Joga para cima instantaneamente
+                    task.wait(0.3)
                 end
             else
-                -- FASE 2: MATAR O MONSTRO
+                -- FARM DIRETO DOS MONSTROS
                 local targetMob = scanForMob(questData.mob)
                 
                 if targetMob then
-                    -- Calcula a posição nas costas do monstro
                     local farmPos = targetMob.HumanoidRootPart.CFrame * CFrame.new(0, 5, 4)
                     
                     if (hrp.Position - farmPos.Position).Magnitude > 12 then
                         tweenTo(farmPos.Position)
                     else
                         cancelTween()
-                        -- Trava nas costas e bate
                         if targetMob.Humanoid.Health > 0 then
                             hrp.CFrame = farmPos 
                             autoAttackAndSkills()
                         end
                     end
                 else
-                    -- Se a missão tá ativa mas não achou o monstro, fica no ar perto do NPC esperando dar spawn
-                    local waitPos = npcPos + Vector3.new(0, 50, 0)
-                    if (hrp.Position - waitPos).Magnitude > 15 then
-                        tweenTo(waitPos)
+                    -- Se não houver monstros, paira no ar acima da ilha
+                    local islandPos = findNPC(questData.npc)
+                    if islandPos then
+                        local waitPos = islandPos + Vector3.new(0, 100, 0)
+                        if (hrp.Position - waitPos).Magnitude > 30 then
+                            tweenTo(waitPos)
+                        end
                     end
                 end
             end
