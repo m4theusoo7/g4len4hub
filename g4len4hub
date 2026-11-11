@@ -1,127 +1,77 @@
 -- ==========================================
--- SCRIPT AUTO FARM (LVL 1 AO 10) + QUEST
--- Versão Estável (Baseada no Farm que funcionou)
+-- SCANNER GLOBAL DE COORDENADAS - BLOX FRUITS
 -- ==========================================
 
-local player = game.Players.LocalPlayer
-local vim = game:GetService("VirtualInputManager")
-local ts = game:GetService("TweenService")
-local rs = game:GetService("ReplicatedStorage")
-
-_G.AutoFarm = true
-
--- Coordenadas 
-local banditSpawns = {
-    Vector3.new(1000.87, 13.18, 1568.19),
-    Vector3.new(922.15, 13.18, 1528.03),
-    Vector3.new(1310.66, 13.47, 1593.06),
-    Vector3.new(928.00, 13.18, 1597.26)
-}
-
-local junglePos = Vector3.new(-1246, 15, 1551)
-local questGiverPos = Vector3.new(1060, 16.5, 1549)
-
--- Tween com Sistema de Timeout (Impede que o script trave se bater numa parede)
-local function tweenTo(targetPos)
-    local char = player.Character
-    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
-    
-    local hrp = char.HumanoidRootPart
-    local distance = (hrp.Position - targetPos).Magnitude
-    if distance < 5 then return end -- Já está no local
-    
-    local speed = 300
-    local timeToReach = distance / speed
-    
-    local tweenInfo = TweenInfo.new(timeToReach, Enum.EasingStyle.Linear)
-    local tween = ts:Create(hrp, tweenInfo, {CFrame = CFrame.new(targetPos)})
-    tween:Play()
-    
-    -- Aguarda o Tween terminar ou bater o tempo limite de segurança
-    local timeout = tick() + timeToReach + 0.5
-    repeat 
-        task.wait() 
-    until (hrp.Position - targetPos).Magnitude < 5 or tick() > timeout or not _G.AutoFarm
-    
-    tween:Cancel()
-end
-
--- Ataques e Skills
-local function autoAttackAndSkills()
-    vim:SendMouseButtonEvent(0, 0, 0, true, game, 0)
-    vim:SendMouseButtonEvent(0, 0, 0, false, game, 0)
-    
-    local keys = {Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C, Enum.KeyCode.V}
-    for _, key in ipairs(keys) do
-        vim:SendKeyEvent(true, key, false, game)
-        task.wait(0.05)
-        vim:SendKeyEvent(false, key, false, game)
-    end
-end
-
--- Encontra o Bandit vivo
-local function getClosestBandit()
-    for _, obj in pairs(workspace.Enemies:GetChildren()) do
-        if obj.Name == "Bandit" and obj:FindFirstChild("Humanoid") and obj.Humanoid.Health > 0 then
-            return obj
+-- Função para extrair a posição real de qualquer objeto
+local function getPosition(obj)
+    if obj:IsA("Model") and obj.PrimaryPart then
+        return obj.PrimaryPart.Position
+    elseif obj:IsA("Model") and obj:FindFirstChild("HumanoidRootPart") then
+        return obj.HumanoidRootPart.Position
+    elseif obj:IsA("BasePart") then
+        return obj.Position
+    else
+        -- Tenta achar alguma peça física dentro do modelo caso não tenha RootPart
+        for _, child in pairs(obj:GetDescendants()) do
+            if child:IsA("BasePart") then
+                return child.Position
+            end
         end
     end
     return nil
 end
 
--- Loop Principal
-task.spawn(function()
-    while _G.AutoFarm do
-        task.wait()
-        
-        -- O pcall impede erros aleatórios de pararem o script
-        pcall(function()
-            local char = player.Character
-            if not char or not char:FindFirstChild("HumanoidRootPart") then return end
-            
-            local playerLevel = player.Data.Level.Value
-            
-            if playerLevel < 10 then
-                -- Verifica se a interface de Quest está visível de forma segura
-                local hasQuest = false
-                if player.PlayerGui:FindFirstChild("Main") and player.PlayerGui.Main:FindFirstChild("Quest") then
-                    hasQuest = player.PlayerGui.Main.Quest.Visible
-                end
-                
-                if not hasQuest then
-                    -- FASE 1: PEGAR MISSÃO
-                    tweenTo(questGiverPos)
-                    task.wait(0.2)
-                    
-                    -- task.spawn envia o pedido da missão sem pausar o resto do código
-                    task.spawn(function()
-                        rs.Remotes.CommF_:InvokeServer("StartQuest", "BanditQuest1", 1)
-                    end)
-                    task.wait(1) -- Aguarda um segundo para a missão aparecer na ecrã
-                else
-                    -- FASE 2: FARMAR (Exatamente a lógica que estava a funcionar)
-                    local target = getClosestBandit()
-                    
-                    if target and target:FindFirstChild("HumanoidRootPart") then
-                        local farmPos = target.HumanoidRootPart.CFrame * CFrame.new(0, 5, 4)
-                        tweenTo(farmPos.Position)
-                        
-                        if target.Humanoid.Health > 0 then
-                            char.HumanoidRootPart.CFrame = CFrame.new(char.HumanoidRootPart.Position, target.HumanoidRootPart.Position)
-                            autoAttackAndSkills()
-                        end
-                    else
-                        -- Se não achar Bandit, vai para o meio dos spawns aguardar
-                        tweenTo(banditSpawns[1])
-                        task.wait(1)
-                    end
-                end
-            else
-                -- FASE 3: IR PARA A JUNGLE
-                print("Level 10 alcançado! A viajar para a Jungle...")
-                tweenTo(junglePos)
-                _G.AutoFarm = false 
-            end
-        end)
+-- Função para ler e imprimir os diretórios
+local function scanDirectory(directory, categoryName)
+    if not directory then return end
+    
+    print("\n==================================")
+    print("📍 MAPEANDO: " .. string.upper(categoryName))
+    print("==================================")
+    
+    local count = 0
+    for _, obj in pairs(directory:GetChildren()) do
+        local pos = getPosition(obj)
+        if pos then
+            -- Formata a saída para facilitar copiar e colar no seu script de farm
+            print(string.format("[%s] Nome: %s | Pos: Vector3.new(%.1f, %.1f, %.1f)", categoryName, obj.Name, pos.X, pos.Y, pos.Z))
+            count = count + 1
+        end
     end
-end)
+    print("-> Total encontrado em " .. categoryName .. ": " .. count)
+end
+
+print("\n\n=== INICIANDO VARREDURA COMPLETA DO SERVIDOR ===")
+
+-- 1. Estruturas das Ilhas (Ficam na pasta Map)
+if workspace:FindFirstChild("Map") then
+    scanDirectory(workspace.Map, "Ilhas e Estruturas")
+end
+
+-- 2. NPCs (Quest Givers, Vendedores de Barco, Sword Dealers)
+if workspace:FindFirstChild("NPCs") then
+    scanDirectory(workspace.NPCs, "NPCs")
+end
+
+-- 3. Inimigos (Bandits, Bosses, Monkeys, etc)
+if workspace:FindFirstChild("Enemies") then
+    scanDirectory(workspace.Enemies, "Inimigos")
+end
+
+-- 4. Baús (Ficam soltos no workspace, precisam ser filtrados pelo nome)
+print("\n==================================")
+print("📍 MAPEANDO: BAÚS (CHESTS)")
+print("==================================")
+local chestCount = 0
+for _, obj in pairs(workspace:GetChildren()) do
+    if string.find(obj.Name, "Chest") then
+        local pos = getPosition(obj)
+        if pos then
+            print(string.format("[Baú] Tipo: %s | Pos: Vector3.new(%.1f, %.1f, %.1f)", obj.Name, pos.X, pos.Y, pos.Z))
+            chestCount = chestCount + 1
+        end
+    end
+end
+print("-> Total de Baús encontrados no momento: " .. chestCount)
+
+print("\n=== VARREDURA CONCLUÍDA! ROLE O CONSOLE PARA CIMA PARA VER TUDO ===")
