@@ -1,84 +1,103 @@
 -- ==========================================
--- OMEGA CORE: AUTO FARM DIRETO (SEM MISSÃO)
--- Nível 1 ao 700 (Grind Bruto)
+-- OMEGA CORE: AUTO FARM SEA 1 (LVL 1 AO 700)
+-- FIX: Congelamento após pegar missão + NoClip
 -- ==========================================
 
 local player = game.Players.LocalPlayer
 local vim = game:GetService("VirtualInputManager")
 local ts = game:GetService("TweenService")
+local rs = game:GetService("ReplicatedStorage")
 local workspace = game:GetService("Workspace")
+local runService = game:GetService("RunService")
 
 _G.AutoFarm = true
 local currentTween = nil
+local currentTweenTarget = nil
 
--- 1. BASE DE DADOS (Limpa: Sem nomes de quests, usa o NPC apenas como GPS da Ilha)
+-- 1. SISTEMA NOCLIP (Atravessar paredes para não travar no cenário)
+task.spawn(function()
+    runService.Stepped:Connect(function()
+        if _G.AutoFarm and player.Character then
+            for _, v in pairs(player.Character:GetDescendants()) do
+                if v:IsA("BasePart") and v.CanCollide then
+                    v.CanCollide = false
+                end
+            end
+        end
+    end)
+end)
+
+-- 2. BASE DE DADOS DAS MISSÕES DO SEA 1
 local Sea1Guide = {
-    {min = 1,   max = 9,   npc = "Bandit Quest Giver", mob = "Bandit"},
-    {min = 10,  max = 14,  npc = "Jungle Quest Giver", mob = "Monkey"},
-    {min = 15,  max = 29,  npc = "Jungle Quest Giver", mob = "Gorilla"},
-    {min = 30,  max = 39,  npc = "Pirate Village Quest Giver", mob = "Pirate"},
-    {min = 40,  max = 59,  npc = "Pirate Village Quest Giver", mob = "Brute"},
-    {min = 60,  max = 74,  npc = "Desert Quest Giver", mob = "Desert Bandit"},
-    {min = 75,  max = 89,  npc = "Desert Quest Giver", mob = "Desert Officer"},
-    {min = 90,  max = 99,  npc = "Snow Quest Giver", mob = "Snow Bandit"},
-    {min = 100, max = 119, npc = "Snow Quest Giver", mob = "Snowman"},
-    {min = 120, max = 149, npc = "Marine Quest Giver", mob = "Chief Petty Officer"},
-    {min = 150, max = 174, npc = "Sky Quest Giver", mob = "Sky Bandit"},
-    {min = 175, max = 189, npc = "Sky Quest Giver", mob = "Dark Master"},
-    {min = 190, max = 209, npc = "Prison Quest Giver", mob = "Prisoner"},
-    {min = 210, max = 249, npc = "Prison Quest Giver", mob = "Dangerous Prisoner"},
-    {min = 250, max = 274, npc = "Colosseum Quest Giver", mob = "Toga Warrior"},
-    {min = 275, max = 299, npc = "Colosseum Quest Giver", mob = "Gladiator"},
-    {min = 300, max = 324, npc = "Magma Quest Giver", mob = "Military Soldier"},
-    {min = 325, max = 374, npc = "Magma Quest Giver", mob = "Military Spy"},
-    {min = 375, max = 399, npc = "Fishman Quest Giver", mob = "Fishman Warrior"},
-    {min = 400, max = 449, npc = "Fishman Quest Giver", mob = "Fishman Commando"},
-    {min = 450, max = 474, npc = "Sky Quest Giver", mob = "God's Guard"},
-    {min = 475, max = 524, npc = "Sky Quest Giver", mob = "Shanda"},
-    {min = 525, max = 549, npc = "Sky Quest Giver", mob = "Royal Squad"},
-    {min = 550, max = 624, npc = "Sky Quest Giver", mob = "Royal Soldier"},
-    {min = 625, max = 649, npc = "Fountain Quest Giver", mob = "Galley Pirate"},
-    {min = 650, max = 700, npc = "Fountain Quest Giver", mob = "Galley Captain"}
+    {min = 1,   max = 9,   npc = "Bandit Quest Giver", quest = "BanditQuest1", num = 1, mob = "Bandit"},
+    {min = 10,  max = 14,  npc = "Jungle Quest Giver", quest = "JungleQuest", num = 1, mob = "Monkey"},
+    {min = 15,  max = 29,  npc = "Jungle Quest Giver", quest = "JungleQuest", num = 2, mob = "Gorilla"},
+    {min = 30,  max = 39,  npc = "Pirate Village Quest Giver", quest = "BuggyQuest1", num = 1, mob = "Pirate"},
+    {min = 40,  max = 59,  npc = "Pirate Village Quest Giver", quest = "BuggyQuest1", num = 2, mob = "Brute"},
+    {min = 60,  max = 74,  npc = "Desert Quest Giver", quest = "DesertQuest", num = 1, mob = "Desert Bandit"},
+    {min = 75,  max = 89,  npc = "Desert Quest Giver", quest = "DesertQuest", num = 2, mob = "Desert Officer"},
+    {min = 90,  max = 99,  npc = "Snow Quest Giver", quest = "SnowQuest", num = 1, mob = "Snow Bandit"},
+    {min = 100, max = 119, npc = "Snow Quest Giver", quest = "SnowQuest", num = 2, mob = "Snowman"},
+    {min = 120, max = 149, npc = "Marine Quest Giver", quest = "MarineQuest2", num = 1, mob = "Chief Petty Officer"},
+    {min = 150, max = 174, npc = "Sky Quest Giver", quest = "SkyQuest", num = 1, mob = "Sky Bandit"},
+    {min = 175, max = 189, npc = "Sky Quest Giver", quest = "SkyQuest", num = 2, mob = "Dark Master"},
+    {min = 190, max = 209, npc = "Prison Quest Giver", quest = "PrisonQuest 1", num = 1, mob = "Prisoner"},
+    {min = 210, max = 249, npc = "Prison Quest Giver", quest = "PrisonQuest 1", num = 2, mob = "Dangerous Prisoner"},
+    {min = 250, max = 274, npc = "Colosseum Quest Giver", quest = "ColosseumQuest", num = 1, mob = "Toga Warrior"},
+    {min = 275, max = 299, npc = "Colosseum Quest Giver", quest = "ColosseumQuest", num = 2, mob = "Gladiator"},
+    {min = 300, max = 324, npc = "Magma Quest Giver", quest = "MagmaQuest", num = 1, mob = "Military Soldier"},
+    {min = 325, max = 374, npc = "Magma Quest Giver", quest = "MagmaQuest", num = 2, mob = "Military Spy"},
+    {min = 375, max = 399, npc = "Fishman Quest Giver", quest = "FishmanQuest", num = 1, mob = "Fishman Warrior"},
+    {min = 400, max = 449, npc = "Fishman Quest Giver", quest = "FishmanQuest", num = 2, mob = "Fishman Commando"},
+    {min = 450, max = 474, npc = "Sky Quest Giver", quest = "SkyExp1Quest", num = 1, mob = "God's Guard"},
+    {min = 475, max = 524, npc = "Sky Quest Giver", quest = "SkyExp1Quest", num = 2, mob = "Shanda"},
+    {min = 525, max = 549, npc = "Sky Quest Giver", quest = "SkyExp2Quest", num = 1, mob = "Royal Squad"},
+    {min = 550, max = 624, npc = "Sky Quest Giver", quest = "SkyExp2Quest", num = 2, mob = "Royal Soldier"},
+    {min = 625, max = 649, npc = "Fountain Quest Giver", quest = "FountainQuest", num = 1, mob = "Galley Pirate"},
+    {min = 650, max = 700, npc = "Fountain Quest Giver", quest = "FountainQuest", num = 2, mob = "Galley Captain"}
 }
 
-local function getMobData(level)
+local function getQuestData(level)
     for _, data in ipairs(Sea1Guide) do
-        if level >= data.min and level <= data.max then
-            return data
-        end
+        if level >= data.min and level <= data.max then return data end
     end
-    return Sea1Guide[#Sea1Guide] -- Continua no último se passar do 700
+    return Sea1Guide[#Sea1Guide]
 end
 
--- 2. SISTEMA DE MOVIMENTAÇÃO
+-- 3. SISTEMA DE VOO SEGURO (Com Anti-Travamento)
 local function tweenTo(targetPos)
     local char = player.Character
     if not char or not char:FindFirstChild("HumanoidRootPart") then return end
     local hrp = char.HumanoidRootPart
     
+    -- [A CORREÇÃO ESTÁ AQUI]: Evita que o Tween fique reiniciando infinitamente
+    if currentTween and currentTweenTarget and (currentTweenTarget - targetPos).Magnitude < 15 then
+        return -- O boneco já está voando para essa área, não faz nada!
+    end
+
     local distance = (hrp.Position - targetPos).Magnitude
     if distance < 5 then return end
     
-    local finalPos = targetPos
-    -- Voo seguro alto para evitar bater em montanhas ao mudar de ilha
-    if distance > 1000 then
-        finalPos = Vector3.new(targetPos.X, targetPos.Y + 300, targetPos.Z)
-    end
+    currentTweenTarget = targetPos -- Salva o destino atual
     
     local speed = 300
     local timeToReach = distance / speed
+    local tweenInfo = TweenInfo.new(timeToReach, Enum.EasingStyle.Linear)
     
     if currentTween then currentTween:Cancel() end
-    local tweenInfo = TweenInfo.new(timeToReach, Enum.EasingStyle.Linear)
-    currentTween = ts:Create(hrp, tweenInfo, {CFrame = CFrame.new(finalPos)})
+    currentTween = ts:Create(hrp, tweenInfo, {CFrame = CFrame.new(targetPos)})
     currentTween:Play()
 end
 
 local function cancelTween()
-    if currentTween then currentTween:Cancel(); currentTween = nil end
+    if currentTween then
+        currentTween:Cancel()
+        currentTween = nil
+        currentTweenTarget = nil
+    end
 end
 
--- 3. ATAQUES E SKILLS
+-- 4. ATAQUES E SKILLS
 local function autoAttackAndSkills()
     vim:SendMouseButtonEvent(0, 0, 0, true, game, 0)
     vim:SendMouseButtonEvent(0, 0, 0, false, game, 0)
@@ -91,9 +110,8 @@ local function autoAttackAndSkills()
     end
 end
 
--- 4. VARREDURA 
--- Usa o NPC apenas para saber onde é o centro da Ilha (quando ela ainda não carregou)
-local function getIslandGPS(npcName)
+-- 5. VARREDURA DE NPCS E MOBS
+local function findNPC(npcName)
     if workspace:FindFirstChild("NPCs") then
         for _, npc in pairs(workspace.NPCs:GetChildren()) do
             if string.find(string.lower(npc.Name), string.lower(npcName)) and npc:FindFirstChild("HumanoidRootPart") then
@@ -114,3 +132,81 @@ local function scanForMob(mobName)
         for _, mob in pairs(workspace.Enemies:GetChildren()) do
             if string.find(string.lower(mob.Name), string.lower(mobName)) and mob:FindFirstChild("Humanoid") and mob.Humanoid.Health > 0 and mob:FindFirstChild("HumanoidRootPart") then
                 local dist = (char.HumanoidRootPart.Position - mob.HumanoidRootPart.Position).Magnitude
+                if dist < shortestDist then
+                    shortestDist = dist
+                    closestMob = mob
+                end
+            end
+        end
+    end
+    return closestMob
+end
+
+local function hasQuest()
+    local gui = player.PlayerGui:FindFirstChild("Main")
+    if gui and gui:FindFirstChild("Quest") then return gui.Quest.Visible end
+    return false
+end
+
+-- 6. LOOP PRINCIPAL (CÉREBRO DO SCRIPT)
+task.spawn(function()
+    while _G.AutoFarm do
+        task.wait(0.1)
+        
+        pcall(function()
+            local char = player.Character
+            if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+            local hrp = char.HumanoidRootPart
+            local myLevel = player.Data.Level.Value
+            
+            if myLevel >= 700 then
+                _G.AutoFarm = false
+                cancelTween()
+                print("🎉 LEVEL 700 ALCANÇADO! 🎉")
+                return
+            end
+            
+            local questData = getQuestData(myLevel)
+            local npcPos = findNPC(questData.npc)
+            if not npcPos then return end
+            
+            if not hasQuest() then
+                -- FASE 1: PEGAR MISSÃO
+                if (hrp.Position - npcPos).Magnitude > 10 then
+                    tweenTo(npcPos)
+                else
+                    cancelTween()
+                    task.spawn(function()
+                        rs.Remotes.CommF_:InvokeServer("StartQuest", questData.quest, questData.num)
+                    end)
+                    task.wait(0.5)
+                end
+            else
+                -- FASE 2: MATAR O MONSTRO
+                local targetMob = scanForMob(questData.mob)
+                
+                if targetMob then
+                    -- Calcula a posição nas costas do monstro
+                    local farmPos = targetMob.HumanoidRootPart.CFrame * CFrame.new(0, 5, 4)
+                    
+                    if (hrp.Position - farmPos.Position).Magnitude > 12 then
+                        tweenTo(farmPos.Position)
+                    else
+                        cancelTween()
+                        -- Trava nas costas e bate
+                        if targetMob.Humanoid.Health > 0 then
+                            hrp.CFrame = farmPos 
+                            autoAttackAndSkills()
+                        end
+                    end
+                else
+                    -- Se a missão tá ativa mas não achou o monstro, fica no ar perto do NPC esperando dar spawn
+                    local waitPos = npcPos + Vector3.new(0, 50, 0)
+                    if (hrp.Position - waitPos).Magnitude > 15 then
+                        tweenTo(waitPos)
+                    end
+                end
+            end
+        end)
+    end
+end)
