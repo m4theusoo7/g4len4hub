@@ -15,7 +15,7 @@ local commF = remotes:WaitForChild("CommF_")
 -- Configurações do Usuário
 getgenv().Config = {
     AutoFarm = true,
-    SelectWeapon = "Combat", -- Altere para sua arma/fruta equipada (ex: Melee, Sword, Blox Fruit)
+    SelectWeapon = "Combat", -- Altere para sua arma/fruta equipada
     SkillZ = true,
     SkillX = true,
     SkillC = true,
@@ -30,7 +30,7 @@ player.Idled:Connect(function()
     vu:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
 end)
 
--- Noclip para evitar travamentos em paredes da ilha
+-- Noclip para evitar travamentos nas paredes da ilha
 RunService.Stepped:Connect(function()
     if getgenv().Config.AutoFarm and player.Character then
         for _, part in pairs(player.Character:GetDescendants()) do
@@ -46,7 +46,7 @@ local function safeTween(targetCFrame)
     if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then return end
     local hrp = player.Character.HumanoidRootPart
     local distance = (hrp.Position - targetCFrame.Position).Magnitude
-    local speed = 300 -- Velocidade segura para evitar anti-cheat
+    local speed = 300
     
     local info = TweenInfo.new(distance / speed, Enum.EasingStyle.Linear)
     local tween = TweenService:Create(hrp, info, {CFrame = targetCFrame + Vector3.new(0, 5, 0)})
@@ -64,10 +64,10 @@ end
 
 -- Função para equipar arma selecionada
 local function equipWeapon()
-    local背包 = player.Backpack
+    local backpack = player.Backpack
     local char = player.Character
     if char and not char:FindFirstChildOfClass("Tool") then
-        for _, tool in pairs(背包:GetChildren()) do
+        for _, tool in pairs(backpack:GetChildren()) do
             if tool:IsA("Tool") and (tool.Name == getgenv().Config.SelectWeapon or tool.ToolTip == getgenv().Config.SelectWeapon or true) then
                 char.Humanoid:EquipTool(tool)
                 break
@@ -76,7 +76,7 @@ local function equipWeapon()
     end
 end
 
--- Loop Principal de Farm
+-- Loop Principal de Farm na Pirate Village
 task.spawn(function()
     while task.wait(0.5) do
         if getgenv().Config.AutoFarm then
@@ -84,16 +84,14 @@ task.spawn(function()
                 local level = player.Data.Level.Value
                 local currentQuest = player.PlayerGui.Main.Quest.Visible
                 
-                -- Gerenciamento de Missões por Nível na Pirate Village
                 if level >= 30 and level < 40 then
                     -- Missão: Pirates
                     local questTitle = player.PlayerGui.Main.Quest.Container.QuestTitle.Text
                     if not currentQuest or not string.find(questTitle, "Pirate") then
-                        safeTween(CFrame.new(-1141.07, 4.10, 3831.55))
+                        safeTween(CFrame.new(-1141.07, 4.10, 3831.55)) -- NPC Giver da Pirate Village
                         commF:InvokeServer("RequestQuest", "PiratesQuest", 1)
                         task.wait(1)
                     else
-                        -- Localizar e farmar Pirate
                         for _, enemy in pairs(workspace.Enemies:GetChildren()) do
                             if enemy.Name == "Pirate" and enemy:FindFirstChild("HumanoidRootPart") and enemy:FindFirstChild("Humanoid") and enemy.Humanoid.Health > 0 then
                                 repeat
@@ -103,7 +101,6 @@ task.spawn(function()
                                     enemy.HumanoidRootPart.Size = Vector3.new(60, 60, 60)
                                     enemy.HumanoidRootPart.Transparency = 0.8
                                     
-                                    -- Disparar Ataques e Habilidades
                                     game:GetService("VirtualUser"):Button1Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
                                     if getgenv().Config.SkillZ then game:GetService("VirtualInputManager"):SendKeyEvent(true, Enum.KeyCode.Z, false, game) task.wait(0.1) end
                                     if getgenv().Config.SkillX then game:GetService("VirtualInputManager"):SendKeyEvent(true, Enum.KeyCode.X, false, game) task.wait(0.1) end
