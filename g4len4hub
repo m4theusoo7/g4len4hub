@@ -1,120 +1,44 @@
--- ================================================================= --
--- [OmegaCore] AUTO FARM BASE V1 - OTIMIZADO PARA DELTA EXECUTOR
--- ================================================================= --
+-- OmegaCore Update 30: Sea 1 CFrame Dumper
+local workspace = game:GetService("Workspace")
 
-local player = game.Players.LocalPlayer
-local repStorage = game:GetService("ReplicatedStorage")
-local virtualUser = game:GetService("VirtualUser")
-local commF = repStorage:WaitForChild("Remotes"):WaitForChild("CommF_")
+local function round(num)
+    return math.floor(num * 10) / 10
+end
 
--- [ CONFIGURAÇÕES DE FARM ]
-_G.AutoFarm = true
-_G.ArmaParaFarmar = "Melee" -- Opções: "Melee", "Sword", "Blox Fruit"
-_G.NomeDaQuest = "BanditQuest1"
-_G.NumeroDaQuest = 1
-_G.NomeDoMob = "Bandit"
-local farmDistance = CFrame.new(0, 20, 0) -- Fica 20 studs ACIMA do mob para não tomar dano de ataques físicos
+local dump = "local Update30_Coords = {\n"
+dump = dump .. "    -- [[ NPCs (Pegar Quest) ]]\n"
 
-print("-----------------------------------")
-print("[OmegaCore] Iniciando Sistema...")
-
--- 1. VERIFICAÇÃO DE SEA
-local placeId = game.PlaceId
-if placeId == 2753915549 then
-    print("[OmegaCore] Sea 1 Detectado. Carregando rotinas...")
+-- Mapeia todos os NPCs (Givers) da ilha
+if workspace:FindFirstChild("NPCs") then
+    for _, npc in pairs(workspace.NPCs:GetChildren()) do
+        if npc:FindFirstChild("HumanoidRootPart") then
+            local pos = npc.HumanoidRootPart.CFrame
+            dump = dump .. string.format('    ["%s"] = CFrame.new(%.1f, %.1f, %.1f),\n', npc.Name, pos.X, pos.Y, pos.Z)
+        end
+    end
 else
-    warn("[OmegaCore] Atenção: Este script foi configurado para testar no Sea 1!")
+    warn("Pasta de NPCs não encontrada no Workspace.")
 end
 
--- 2. VERIFICA MISSÃO ATIVA
-local function HasQuest()
-    local questUI = player.PlayerGui.Main.Quest
-    return questUI.Visible
-end
+dump = dump .. "\n    -- [[ Inimigos (Mapeamento de Farm) ]]\n"
+local mappedMobs = {}
 
--- 3. AUTO QUEST REMOTO
-local function OmegaPegarQuest()
-    if not HasQuest() then
-        commF:InvokeServer("StartQuest", _G.NomeDaQuest, _G.NumeroDaQuest)
-    end
-end
-
--- 4. EQUIPAR ARMA AUTOMATICAMENTE
-local function OmegaEquiparArma()
-    local character = player.Character
-    if not character then return end
-    
-    -- Procura a arma na mochila
-    for _, tool in pairs(player.Backpack:GetChildren()) do
-        if tool:IsA("Tool") and tool.ToolTip == _G.ArmaParaFarmar then
-            -- Equipa passando para o personagem
-            character.Humanoid:EquipTool(tool)
-        end
-    end
-end
-
--- 5. FAST ATTACK (Clique Automático sem delay)
-local function OmegaFastAttack()
-    virtualUser:CaptureController()
-    virtualUser:ClickButton1(Vector2.new())
-    -- Bônus: Envia o sinal de ataque direto pro servidor para garantir o hit
-    commF:InvokeServer("Xoxo") 
-end
-
--- 6. BRING MOBS + HITBOX
-local function OmegaBringMobs()
-    local character = player.Character
-    if not character or not character:FindFirstChild("HumanoidRootPart") then return end
-    local myRoot = character.HumanoidRootPart
-
-    local hasTarget = false
-
+-- Mapeia os mobs que estão vivos no mapa (evita repetição)
+if workspace:FindFirstChild("Enemies") then
     for _, mob in pairs(workspace.Enemies:GetChildren()) do
-        if string.find(mob.Name, _G.NomeDoMob) and mob:FindFirstChild("Humanoid") and mob.Humanoid.Health > 0 then
-            local mobRoot = mob:FindFirstChild("HumanoidRootPart")
-            
-            if mobRoot then
-                -- Se ainda não tivermos um alvo principal, vamos até ele
-                if not hasTarget then
-                    myRoot.CFrame = mobRoot.CFrame * farmDistance
-                    hasTarget = true
-                end
-                
-                -- Puxa todos os outros mobs com o mesmo nome para a mesma posição
-                mob.Humanoid.WalkSpeed = 0
-                mob.Humanoid.JumpPower = 0
-                mobRoot.CanCollide = false
-                mobRoot.Size = Vector3.new(20, 20, 20) -- Hitbox gigante
-                mobRoot.Transparency = 0.7
-                
-                -- Mantém os mobs agrupados exatamente embaixo de você
-                mobRoot.CFrame = myRoot.CFrame * CFrame.new(0, -20, 0)
-            end
+        if mob:FindFirstChild("HumanoidRootPart") and not mappedMobs[mob.Name] then
+            local pos = mob.HumanoidRootPart.CFrame
+            dump = dump .. string.format('    ["%s"] = CFrame.new(%.1f, %.1f, %.1f),\n', mob.Name, pos.X, pos.Y, pos.Z)
+            mappedMobs[mob.Name] = true
         end
     end
+else
+    warn("Nenhum inimigo spawnado no momento. Chegue perto da área de farm.")
 end
 
--- 7. LOOP PRINCIPAL DE EXECUÇÃO (CÉREBRO DO SCRIPT)
-task.spawn(function()
-    while task.wait() do
-        if _G.AutoFarm then
-            local character = player.Character
-            if character and character:FindFirstChild("Humanoid") and character.Humanoid.Health > 0 then
-                
-                -- Passo A: Garante que estamos com a missão
-                OmegaPegarQuest()
-                
-                -- Passo B: Se temos a missão, vamos farmar
-                if HasQuest() then
-                    OmegaEquiparArma()
-                    OmegaBringMobs()
-                    OmegaFastAttack()
-                end
-                
-            end
-        end
-    end
-end)
+dump = dump .. "}"
 
-print("[OmegaCore] Script de Auto Farm Ativado com Sucesso!")
-print("-----------------------------------")
+-- Imprime a tabela pronta no console do Delta Executor
+print("\n--- COPIE O CÓDIGO ABAIXO ---")
+print(dump)
+print("--- FIM DO MAPEAMENTO ---\n")
