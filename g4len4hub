@@ -1,44 +1,87 @@
--- OmegaCore Update 30: Sea 1 CFrame Dumper
-local workspace = game:GetService("Workspace")
+local player = game.Players.LocalPlayer
+local tweenService = game:GetService("TweenService")
+local runService = game:GetService("RunService")
 
-local function round(num)
-    return math.floor(num * 10) / 10
-end
+-- Coordenadas exatas da Pirate Village mapeadas por tu
+local coords = {
+    PirateAdventurer = CFrame.new(-1151.6, 16.6, 3863.1),
+    -- Eixo Y aumentado pra ficar acima do mob esperando o spawn
+    PirateSpawn = CFrame.new(-1122.8, 35.0, 3965.9), 
+    BruteSpawn = CFrame.new(-942.4, 45.0, 4387.2)   
+}
 
-local dump = "local Update30_Coords = {\n"
-dump = dump .. "    -- [[ NPCs (Pegar Quest) ]]\n"
+_G.AutoFarmPirate = true
+_G.TargetMob = "Pirate" -- Quando bater level 45, tu muda pra "Brute"
 
--- Mapeia todos os NPCs (Givers) da ilha
-if workspace:FindFirstChild("NPCs") then
-    for _, npc in pairs(workspace.NPCs:GetChildren()) do
-        if npc:FindFirstChild("HumanoidRootPart") then
-            local pos = npc.HumanoidRootPart.CFrame
-            dump = dump .. string.format('    ["%s"] = CFrame.new(%.1f, %.1f, %.1f),\n', npc.Name, pos.X, pos.Y, pos.Z)
+-- Noclip maroto + Antigravidade pra não bater em parede nem cair
+runService.Stepped:Connect(function()
+    if _G.AutoFarmPirate and player.Character then
+        for _, v in pairs(player.Character:GetDescendants()) do
+            if v:IsA("BasePart") and v.CanCollide then
+                v.CanCollide = false
+            end
+        end
+        if player.Character:FindFirstChild("HumanoidRootPart") then
+            player.Character.HumanoidRootPart.Velocity = Vector3.new(0, 0, 0)
         end
     end
-else
-    warn("Pasta de NPCs não encontrada no Workspace.")
+end)
+
+local function tweenTo(targetCFrame)
+    if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then return end
+    local hrp = player.Character.HumanoidRootPart
+    local dist = (hrp.Position - targetCFrame.Position).Magnitude
+    local speed = 300
+    local time = dist / speed
+    local tween = tweenService:Create(hrp, TweenInfo.new(time, Enum.EasingStyle.Linear), {CFrame = targetCFrame})
+    tween:Play()
+    tween.Completed:Wait()
 end
 
-dump = dump .. "\n    -- [[ Inimigos (Mapeamento de Farm) ]]\n"
-local mappedMobs = {}
-
--- Mapeia os mobs que estão vivos no mapa (evita repetição)
-if workspace:FindFirstChild("Enemies") then
-    for _, mob in pairs(workspace.Enemies:GetChildren()) do
-        if mob:FindFirstChild("HumanoidRootPart") and not mappedMobs[mob.Name] then
-            local pos = mob.HumanoidRootPart.CFrame
-            dump = dump .. string.format('    ["%s"] = CFrame.new(%.1f, %.1f, %.1f),\n', mob.Name, pos.X, pos.Y, pos.Z)
-            mappedMobs[mob.Name] = true
+-- Loop principal do Auto-Farm
+spawn(function()
+    while task.wait() do
+        if _G.AutoFarmPirate then
+            -- 1. Verifica se está sem quest
+            if player.PlayerGui.Main.Quest.Visible == false then
+                tweenTo(coords.PirateAdventurer)
+                task.wait(0.5)
+                
+                -- Puxa a quest certa baseada no mob alvo
+                local questName = _G.TargetMob == "Pirate" and "PirateQuest" or "PirateQuest2"
+                local questLevel = _G.TargetMob == "Pirate" and 1 or 2
+                game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("StartQuest", questName, questLevel)
+            else
+                -- 2. Já tem quest, vai pro local de farm
+                local targetSpawn = _G.TargetMob == "Pirate" and coords.PirateSpawn or coords.BruteSpawn
+                
+                -- Procura o mob vivo no mapa
+                local mob = game:GetService("Workspace").Enemies:FindFirstChild(_G.TargetMob)
+                if mob and mob:FindFirstChild("Humanoid") and mob.Humanoid.Health > 0 and mob:FindFirstChild("HumanoidRootPart") then
+                    if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+                        -- Cancela o Tween e teleporta direto pra cima do mob que renderizou
+                        player.Character.HumanoidRootPart.CFrame = mob.HumanoidRootPart.CFrame * CFrame.new(0, 12, 0)
+                        
+                        -- Equipa a arma (puxa a primeira da mochila se tiver de mão vazia)
+                        local tool = player.Character:FindFirstChildOfClass("Tool")
+                        if not tool then
+                            for _, v in pairs(player.Backpack:GetChildren()) do
+                                if v:IsA("Tool") then
+                                    player.Character.Humanoid:EquipTool(v)
+                                    break
+                                end
+                            end
+                        end
+                        
+                        -- Dispara o auto click (Fast Attack nativo)
+                        game:GetService("VirtualUser"):CaptureController()
+                        game:GetService("VirtualUser"):ClickButton1(Vector2.new(851, 158))
+                    end
+                else
+                    -- Se o mob não spawnou ainda, fica aguardando no ponto mapeado
+                    tweenTo(targetSpawn)
+                end
+            end
         end
     end
-else
-    warn("Nenhum inimigo spawnado no momento. Chegue perto da área de farm.")
-end
-
-dump = dump .. "}"
-
--- Imprime a tabela pronta no console do Delta Executor
-print("\n--- COPIE O CÓDIGO ABAIXO ---")
-print(dump)
-print("--- FIM DO MAPEAMENTO ---\n")
+end)
