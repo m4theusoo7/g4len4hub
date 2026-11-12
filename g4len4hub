@@ -1,123 +1,173 @@
--- ==========================================================
--- OMEGACORE: AUTO-FARM JUNGLE (FIX DE ATAQUE)
--- ==========================================================
-getgenv().AutoFarm = true 
+-- [[ OMEGACORE: SMART AUTO-FARM SEA 1 ]] --
+getgenv().OmegaConfig = {
+    AutoFarm = true,
+    WeaponType = "Melee", -- Opções: "Melee", "Sword", "Blox Fruit"
+    Distance = 5,         -- Distância que ficará do NPC (acima ou atrás)
+    UseSkills = {
+        Z = true, X = true, C = true, V = false
+    }
+}
 
--- COLOQUE O NOME EXATO DA SUA ARMA AQUI (Ex: "Combat", "Katana", "Ice-Ice")
-local NomeDaArma = "Combat" 
+local player = game.Players.LocalPlayer
+local runService = game:GetService("RunService")
+local tweenService = game:GetService("TweenService")
+local virtualInput = game:GetService("VirtualInputManager")
+local remotes = game:GetService("ReplicatedStorage"):WaitForChild("Remotes")
+local commF = remotes:WaitForChild("CommF_")
 
-local Players = game:GetService("Players")
-local Player = Players.LocalPlayer
-local TweenService = game:GetService("TweenService")
-local VirtualUser = game:GetService("VirtualUser")
-local VIM = game:GetService("VirtualInputManager")
-local RunService = game:GetService("RunService")
+-- 1. BANCO DE DADOS DE PROGRESSÃO (Level 1 ao 700)
+-- Você pode adicionar as ilhas intermediárias seguindo essa mesma lógica estrutural.
+local FarmGuide = {
+    {min = 1, max = 9, mob = "Bandit", quest = "BanditQuest1", id = 1, npcPos = CFrame.new(1060, 16, 1547)},
+    {min = 10, max = 14, mob = "Monkey", quest = "JungleQuest", id = 1, npcPos = CFrame.new(-1598, 37, 153)},
+    {min = 15, max = 29, mob = "Gorilla", quest = "JungleQuest", id = 2, npcPos = CFrame.new(-1598, 37, 153)},
+    {min = 30, max = 39, mob = "Pirate", quest = "BuggyQuest1", id = 1, npcPos = CFrame.new(-1140, 4, 3828)},
+    {min = 40, max = 59, mob = "Brute", quest = "BuggyQuest1", id = 2, npcPos = CFrame.new(-1140, 4, 3828)},
+    -- [Insira aqui outras ilhas como Desert, Frozen Village, Marine Fortress, Skylands, etc...]
+    {min = 625, max = 700, mob = "Galley Pirate", quest = "FountainQuest", id = 1, npcPos = CFrame.new(5259, 38, 4050)}
+}
 
-Player.Idled:Connect(function()
-    VirtualUser:Button2Down(Vector2.new(0,0),workspace.CurrentCamera.CFrame)
-    task.wait(1)
-    VirtualUser:Button2Up(Vector2.new(0,0),workspace.CurrentCamera.CFrame)
-end)
+-- 2. INTELIGÊNCIA: LEITURA DO LEVEL DO JOGADOR
+local function GetCurrentFarmData()
+    local myLevel = player.Data.Level.Value
+    for _, data in ipairs(FarmGuide) do
+        if myLevel >= data.min and myLevel <= data.max then
+            return data
+        end
+    end
+    -- Se passar do 700, retorna o último (Fountain)
+    return FarmGuide[#FarmGuide]
+end
 
-RunService.Stepped:Connect(function()
-    if getgenv().AutoFarm and Player.Character then
-        for _, part in pairs(Player.Character:GetDescendants()) do
-            if part:IsA("BasePart") and part.CanCollide then
-                part.CanCollide = false
+-- 3. MOVIMENTAÇÃO SUAVE (Bypass de Anti-Cheat)
+local function TweenTo(targetCFrame)
+    local char = player.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+    
+    local hrp = char.HumanoidRootPart
+    local distance = (hrp.Position - targetCFrame.Position).Magnitude
+    local speed = 300 -- Velocidade segura para não ser kickado
+    
+    local tweenInfo = TweenInfo.new(distance / speed, Enum.EasingStyle.Linear)
+    local tween = tweenService:Create(hrp, tweenInfo, {CFrame = targetCFrame})
+    tween:Play()
+    tween.Completed:Wait()
+end
+
+-- 4. INTELIGÊNCIA: VARREDURA DE NPCs VIVOS NA ILHA
+local function GetClosestMob(mobName)
+    local closestMob = nil
+    local shortestDist = math.huge
+    local char = player.Character
+    
+    if char and char:FindFirstChild("HumanoidRootPart") then
+        local myPos = char.HumanoidRootPart.Position
+        -- Escaneia a pasta correta onde os inimigos dão spawn
+        for _, enemy in ipairs(workspace.Enemies:GetChildren()) do
+            if enemy.Name == mobName and enemy:FindFirstChild("Humanoid") and enemy.Humanoid.Health > 0 and enemy:FindFirstChild("HumanoidRootPart") then
+                local dist = (myPos - enemy.HumanoidRootPart.Position).Magnitude
+                if dist < shortestDist then
+                    shortestDist = dist
+                    closestMob = enemy
+                end
+            end
+        end
+    end
+    return closestMob
+end
+
+-- 5. VERIFICAÇÃO DE MISSÃO (Quest Check)
+local function HasActiveQuest()
+    local gui = player.PlayerGui
+    if gui:FindFirstChild("Main") and gui.Main:FindFirstChild("Quest") then
+        return gui.Main.Quest.Visible
+    end
+    return false
+end
+
+-- 6. MOTOR DE COMBATE (Ataque e Skills)
+local function AutoAttack()
+    virtualInput:SendMouseButtonEvent(0, 0, 0, true, game, 1)
+    task.wait(0.05)
+    virtualInput:SendMouseButtonEvent(0, 0, 0, false, game, 1)
+end
+
+local function FireSkill(key)
+    virtualInput:SendKeyEvent(true, Enum.KeyCode[key], false, game)
+    task.wait(0.1)
+    virtualInput:SendKeyEvent(false, Enum.KeyCode[key], false, game)
+end
+
+local function EquipWeapon()
+    local char = player.Character
+    if not char then return end
+    -- Varredura no inventário (Backpack) pelo tipo de arma escolhida
+    for _, tool in ipairs(player.Backpack:GetChildren()) do
+        if tool:IsA("Tool") and tool.ToolTip == getgenv().OmegaConfig.WeaponType then
+            char.Humanoid:EquipTool(tool)
+        end
+    end
+end
+
+-- NOCLIP (Impede o jogador de ficar preso em paredes enquanto voa)
+runService.Stepped:Connect(function()
+    if getgenv().OmegaConfig.AutoFarm then
+        local char = player.Character
+        if char then
+            for _, part in ipairs(char:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    part.CanCollide = false
+                end
             end
         end
     end
 end)
 
-local JungleConfig = {
-    Mobs = {
-        Monkey = { LevelReq = 10, Position = Vector3.new(-1479, 29, 319), Name = "Monkey" },
-        Gorilla = { LevelReq = 15, Position = Vector3.new(-1402, 26, -464), Name = "Gorilla" },
-        GorillaKing = { LevelReq = 20, Position = Vector3.new(-1194, 10, -550), Name = "The Gorilla King" }
-    }
-}
-
-local function TweenTo(targetPos)
-    local char = Player.Character
-    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
-    
-    local hrp = char.HumanoidRootPart
-    local distance = (hrp.Position - targetPos).Magnitude
-    local speed = 300 
-    
-    local tweenInfo = TweenInfo.new(distance / speed, Enum.EasingStyle.Linear)
-    -- Fica um pouco acima para o inimigo não acertar você tão fácil
-    local tween = TweenService:Create(hrp, tweenInfo, {CFrame = CFrame.new(targetPos + Vector3.new(0, 8, 0))}) 
-    
-    tween:Play()
-    return tween
-end
-
--- Novo sistema de Equipar (Garante que a arma vai pra mão)
-local function EquipWeapon()
-    local char = Player.Character
-    local backpack = Player.Backpack
-    if not char then return end
-
-    local weapon = backpack:FindFirstChild(NomeDaArma)
-    if weapon then
-        char.Humanoid:EquipTool(weapon)
-    end
-end
-
--- Novo sistema de Ataque (Simula um toque real na tela do celular)
-local function FastAttack()
-    VIM:SendMouseButtonEvent(0, 0, 0, true, game, 1) -- Pressiona a tela
-    task.wait(0.05)
-    VIM:SendMouseButtonEvent(0, 0, 0, false, game, 1) -- Solta a tela
-end
-
-local function AutoSkills()
-    local keys = {Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C, Enum.KeyCode.V}
-    for _, key in ipairs(keys) do
-        VIM:SendKeyEvent(true, key, false, game)
-        task.wait(0.05)
-        VIM:SendKeyEvent(false, key, false, game)
-    end
-end
-
-local function GetTargetMob()
-    local myLevel = Player.Data.Level.Value
-    if myLevel >= 20 then
-        return JungleConfig.Mobs.GorillaKing
-    elseif myLevel >= 15 then
-        return JungleConfig.Mobs.Gorilla
-    else
-        return JungleConfig.Mobs.Monkey
-    end
-end
-
+-- 7. LOOP PRINCIPAL DE INTELIGÊNCIA
 task.spawn(function()
     while task.wait() do
-        if not getgenv().AutoFarm then break end
+        if not getgenv().OmegaConfig.AutoFarm then continue end
         
         pcall(function()
-            local char = Player.Character
-            if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+            local farmData = GetCurrentFarmData()
+            local char = player.Character
             
-            local targetMobInfo = GetTargetMob()
-            local targetEnemy = workspace.Enemies:FindFirstChild(targetMobInfo.Name)
-            
-            if targetEnemy and targetEnemy:FindFirstChild("HumanoidRootPart") and targetEnemy.Humanoid.Health > 0 then
-                EquipWeapon()
+            if char and char:FindFirstChild("HumanoidRootPart") then
                 
-                local enemyPos = targetEnemy.HumanoidRootPart.Position
-                TweenTo(enemyPos)
-                
-                -- Olha pro inimigo
-                char.HumanoidRootPart.CFrame = CFrame.new(char.HumanoidRootPart.Position, enemyPos)
-                
-                -- Bate e lança skill
-                FastAttack()
-                AutoSkills()
-            else
-                TweenTo(targetMobInfo.Position)
+                -- Se não tem missão, vai até o NPC de missão e pega
+                if not HasActiveQuest() then
+                    TweenTo(farmData.npcPos)
+                    if (char.HumanoidRootPart.Position - farmData.npcPos.Position).Magnitude < 10 then
+                        commF:InvokeServer("StartQuest", farmData.quest, farmData.id)
+                        task.wait(1)
+                    end
+                else
+                    -- Se tem missão, faz a varredura e caça o NPC
+                    local targetMob = GetClosestMob(farmData.mob)
+                    
+                    if targetMob and targetMob:FindFirstChild("HumanoidRootPart") then
+                        -- Fica um pouco acima/atrás do NPC para evitar dano corpo a corpo
+                        local farmPos = targetMob.HumanoidRootPart.CFrame * CFrame.new(0, getgenv().OmegaConfig.Distance, 0)
+                        TweenTo(farmPos)
+                        
+                        -- Sistema de Auto-Ataque e Skills
+                        EquipWeapon()
+                        char.HumanoidRootPart.CFrame = CFrame.new(char.HumanoidRootPart.Position, targetMob.HumanoidRootPart.Position) -- Olha pro NPC
+                        
+                        AutoAttack()
+                        
+                        if getgenv().OmegaConfig.UseSkills.Z then FireSkill("Z") end
+                        if getgenv().OmegaConfig.UseSkills.X then FireSkill("X") end
+                        if getgenv().OmegaConfig.UseSkills.C then FireSkill("C") end
+                        if getgenv().OmegaConfig.UseSkills.V then FireSkill("V") end
+                    else
+                        -- Se o mob não spawnou ainda, fica aguardando próximo da área de spawn geral dele
+                        -- Você pode colocar para farmar outro mais longe ou apenas orbitar no centro do mapa.
+                    end
+                end
             end
         end)
     end
 end)
+
+print("OmegaCore: Módulo Smart Auto-Farm Sea 1 Carregado com Sucesso!")
