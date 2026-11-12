@@ -1,19 +1,17 @@
 local player = game.Players.LocalPlayer
-local tweenService = game:GetService("TweenService")
 local runService = game:GetService("RunService")
 
--- Coordenadas exatas da Pirate Village mapeadas por tu
+-- As coordenadas exatas que tu mapeou
 local coords = {
     PirateAdventurer = CFrame.new(-1151.6, 16.6, 3863.1),
-    -- Eixo Y aumentado pra ficar acima do mob esperando o spawn
     PirateSpawn = CFrame.new(-1122.8, 35.0, 3965.9), 
     BruteSpawn = CFrame.new(-942.4, 45.0, 4387.2)   
 }
 
 _G.AutoFarmPirate = true
-_G.TargetMob = "Pirate" -- Quando bater level 45, tu muda pra "Brute"
+_G.TargetMob = "Pirate" -- Muda pra "Brute" no level 45
 
--- Noclip maroto + Antigravidade pra não bater em parede nem cair
+-- Noclip e Antigravidade (rodando em background)
 runService.Stepped:Connect(function()
     if _G.AutoFarmPirate and player.Character then
         for _, v in pairs(player.Character:GetDescendants()) do
@@ -27,42 +25,33 @@ runService.Stepped:Connect(function()
     end
 end)
 
-local function tweenTo(targetCFrame)
-    if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then return end
-    local hrp = player.Character.HumanoidRootPart
-    local dist = (hrp.Position - targetCFrame.Position).Magnitude
-    local speed = 300
-    local time = dist / speed
-    local tween = tweenService:Create(hrp, TweenInfo.new(time, Enum.EasingStyle.Linear), {CFrame = targetCFrame})
-    tween:Play()
-    tween.Completed:Wait()
-end
-
--- Loop principal do Auto-Farm
+-- Loop Principal Agressivo (Sem Tween)
 spawn(function()
     while task.wait() do
-        if _G.AutoFarmPirate then
-            -- 1. Verifica se está sem quest
-            if player.PlayerGui.Main.Quest.Visible == false then
-                tweenTo(coords.PirateAdventurer)
-                task.wait(0.5)
+        if _G.AutoFarmPirate and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+            
+            -- Checa se a UI da Missão está ativa na tela
+            local hasQuest = player.PlayerGui.Main.Quest.Visible
+            
+            if not hasQuest then
+                -- 1. Se NÃO tem quest, teleporta pro NPC e puxa a missão
+                player.Character.HumanoidRootPart.CFrame = coords.PirateAdventurer
+                task.wait(0.3) -- Pausa rápida pra dar tempo de renderizar
                 
-                -- Puxa a quest certa baseada no mob alvo
                 local questName = _G.TargetMob == "Pirate" and "PirateQuest" or "PirateQuest2"
                 local questLevel = _G.TargetMob == "Pirate" and 1 or 2
                 game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("StartQuest", questName, questLevel)
             else
-                -- 2. Já tem quest, vai pro local de farm
+                -- 2. Já tem quest, vai pro farm
                 local targetSpawn = _G.TargetMob == "Pirate" and coords.PirateSpawn or coords.BruteSpawn
-                
-                -- Procura o mob vivo no mapa
                 local mob = game:GetService("Workspace").Enemies:FindFirstChild(_G.TargetMob)
+                
                 if mob and mob:FindFirstChild("Humanoid") and mob.Humanoid.Health > 0 and mob:FindFirstChild("HumanoidRootPart") then
-                    if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-                        -- Cancela o Tween e teleporta direto pra cima do mob que renderizou
-                        player.Character.HumanoidRootPart.CFrame = mob.HumanoidRootPart.CFrame * CFrame.new(0, 12, 0)
-                        
-                        -- Equipa a arma (puxa a primeira da mochila se tiver de mão vazia)
+                    -- O bicho tá vivo: gruda em cima da cabeça dele
+                    player.Character.HumanoidRootPart.CFrame = mob.HumanoidRootPart.CFrame * CFrame.new(0, 12, 0)
+                    
+                    -- Equipa a primeira arma/estilo de luta do inventário sem travar o código
+                    pcall(function()
                         local tool = player.Character:FindFirstChildOfClass("Tool")
                         if not tool then
                             for _, v in pairs(player.Backpack:GetChildren()) do
@@ -72,14 +61,14 @@ spawn(function()
                                 end
                             end
                         end
-                        
-                        -- Dispara o auto click (Fast Attack nativo)
-                        game:GetService("VirtualUser"):CaptureController()
-                        game:GetService("VirtualUser"):ClickButton1(Vector2.new(851, 158))
-                    end
+                    end)
+                    
+                    -- Desce a porrada
+                    game:GetService("VirtualUser"):CaptureController()
+                    game:GetService("VirtualUser"):ClickButton1(Vector2.new(851, 158))
                 else
-                    -- Se o mob não spawnou ainda, fica aguardando no ponto mapeado
-                    tweenTo(targetSpawn)
+                    -- O bicho morreu ou não spawnou: fica flutuando no local exato esperando ele nascer
+                    player.Character.HumanoidRootPart.CFrame = targetSpawn
                 end
             end
         end
