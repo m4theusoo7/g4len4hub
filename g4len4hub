@@ -1,8 +1,8 @@
--- [[ OMEGACORE: SMART AUTO-FARM SEA 1 ]] --
+-- [[ OMEGACORE: SMART AUTO-FARM SEA 1 (LV 1 - 700) ]] --
 getgenv().OmegaConfig = {
     AutoFarm = true,
     WeaponType = "Melee", -- Opções: "Melee", "Sword", "Blox Fruit"
-    Distance = 5,         -- Distância que ficará do NPC (acima ou atrás)
+    Distance = 15,        -- Altura que ficará acima do NPC para bater sem apanhar
     UseSkills = {
         Z = true, X = true, C = true, V = false
     }
@@ -12,22 +12,45 @@ local player = game.Players.LocalPlayer
 local runService = game:GetService("RunService")
 local tweenService = game:GetService("TweenService")
 local virtualInput = game:GetService("VirtualInputManager")
+local virtualUser = game:GetService("VirtualUser")
 local remotes = game:GetService("ReplicatedStorage"):WaitForChild("Remotes")
 local commF = remotes:WaitForChild("CommF_")
 
--- 1. BANCO DE DADOS DE PROGRESSÃO (Level 1 ao 700)
--- Você pode adicionar as ilhas intermediárias seguindo essa mesma lógica estrutural.
+-- ANTI-AFK (Evita desconexão por inatividade)
+player.Idled:Connect(function()
+    virtualUser:CaptureController()
+    virtualUser:ClickButton2(Vector2.new())
+end)
+
+-- 1. BANCO DE DADOS DE PROGRESSÃO (Coordenadas Exatas)
 local FarmGuide = {
-    {min = 1, max = 9, mob = "Bandit", quest = "BanditQuest1", id = 1, npcPos = CFrame.new(1060, 16, 1547)},
-    {min = 10, max = 14, mob = "Monkey", quest = "JungleQuest", id = 1, npcPos = CFrame.new(-1598, 37, 153)},
-    {min = 15, max = 29, mob = "Gorilla", quest = "JungleQuest", id = 2, npcPos = CFrame.new(-1598, 37, 153)},
-    {min = 30, max = 39, mob = "Pirate", quest = "BuggyQuest1", id = 1, npcPos = CFrame.new(-1140, 4, 3828)},
-    {min = 40, max = 59, mob = "Brute", quest = "BuggyQuest1", id = 2, npcPos = CFrame.new(-1140, 4, 3828)},
-    -- [Insira aqui outras ilhas como Desert, Frozen Village, Marine Fortress, Skylands, etc...]
-    {min = 625, max = 700, mob = "Galley Pirate", quest = "FountainQuest", id = 1, npcPos = CFrame.new(5259, 38, 4050)}
+    {min = 1, max = 9, mob = "Bandit", quest = "BanditQuest1", id = 1, npcPos = CFrame.new(1059, 16, 1546)},
+    {min = 10, max = 14, mob = "Monkey", quest = "JungleQuest", id = 1, npcPos = CFrame.new(-1598, 36, 153)},
+    {min = 15, max = 29, mob = "Gorilla", quest = "JungleQuest", id = 2, npcPos = CFrame.new(-1598, 36, 153)},
+    {min = 30, max = 39, mob = "Pirate", quest = "BuggyQuest1", id = 1, npcPos = CFrame.new(-1141, 4, 3828)},
+    {min = 40, max = 59, mob = "Brute", quest = "BuggyQuest1", id = 2, npcPos = CFrame.new(-1141, 4, 3828)},
+    {min = 60, max = 74, mob = "Desert Bandit", quest = "DesertQuest", id = 1, npcPos = CFrame.new(896, 6, 4390)},
+    {min = 75, max = 89, mob = "Desert Officer", quest = "DesertQuest", id = 2, npcPos = CFrame.new(896, 6, 4390)},
+    {min = 90, max = 99, mob = "Snow Bandit", quest = "SnowQuest", id = 1, npcPos = CFrame.new(1385, 87, -1297)},
+    {min = 100, max = 119, mob = "Snowman", quest = "SnowQuest", id = 2, npcPos = CFrame.new(1385, 87, -1297)},
+    {min = 120, max = 149, mob = "Chief Petty Officer", quest = "MarineQuest2", id = 1, npcPos = CFrame.new(-5036, 28, 4324)},
+    {min = 150, max = 174, mob = "Sky Bandit", quest = "SkyQuest", id = 1, npcPos = CFrame.new(-4839, 717, -2619)},
+    {min = 175, max = 189, mob = "Dark Master", quest = "SkyQuest", id = 2, npcPos = CFrame.new(-4839, 717, -2619)},
+    {min = 190, max = 211, mob = "Prisoner", quest = "PrisonerQuest", id = 1, npcPos = CFrame.new(5308, 1, 474)},
+    {min = 212, max = 249, mob = "Dangerous Prisoner", quest = "PrisonerQuest", id = 2, npcPos = CFrame.new(5308, 1, 474)},
+    {min = 250, max = 299, mob = "Toga Warrior", quest = "ColosseumQuest", id = 1, npcPos = CFrame.new(-225, 7, 3324)},
+    {min = 300, max = 329, mob = "Gladiator", quest = "ColosseumQuest", id = 2, npcPos = CFrame.new(-225, 7, 3324)},
+    {min = 330, max = 349, mob = "Military Soldier", quest = "MagmaQuest", id = 1, npcPos = CFrame.new(-5315, 12, 8515)},
+    {min = 350, max = 399, mob = "Military Spy", quest = "MagmaQuest", id = 2, npcPos = CFrame.new(-5315, 12, 8515)},
+    {min = 400, max = 449, mob = "Fishman Warrior", quest = "FishmanQuest", id = 1, npcPos = CFrame.new(61122, 18, 1569)},
+    {min = 450, max = 474, mob = "Fishman Commando", quest = "FishmanQuest", id = 2, npcPos = CFrame.new(61122, 18, 1569)},
+    {min = 475, max = 524, mob = "God's Guard", quest = "SkyExp1Quest", id = 1, npcPos = CFrame.new(-4721, 845, -1950)},
+    {min = 525, max = 624, mob = "Shanda", quest = "SkyExp1Quest", id = 2, npcPos = CFrame.new(-4721, 845, -1950)},
+    {min = 625, max = 699, mob = "Galley Pirate", quest = "FountainQuest", id = 1, npcPos = CFrame.new(5259, 38, 4050)},
+    {min = 700, max = 9999, mob = "Galley Captain", quest = "FountainQuest", id = 2, npcPos = CFrame.new(5259, 38, 4050)}
 }
 
--- 2. INTELIGÊNCIA: LEITURA DO LEVEL DO JOGADOR
+-- 2. LEITURA DE LEVEL
 local function GetCurrentFarmData()
     local myLevel = player.Data.Level.Value
     for _, data in ipairs(FarmGuide) do
@@ -35,18 +58,23 @@ local function GetCurrentFarmData()
             return data
         end
     end
-    -- Se passar do 700, retorna o último (Fountain)
     return FarmGuide[#FarmGuide]
 end
 
--- 3. MOVIMENTAÇÃO SUAVE (Bypass de Anti-Cheat)
+-- 3. MOVIMENTAÇÃO (TWEEN)
 local function TweenTo(targetCFrame)
     local char = player.Character
     if not char or not char:FindFirstChild("HumanoidRootPart") then return end
     
     local hrp = char.HumanoidRootPart
     local distance = (hrp.Position - targetCFrame.Position).Magnitude
-    local speed = 300 -- Velocidade segura para não ser kickado
+    local speed = 320 -- Velocidade otimizada para o Delta
+    
+    -- Se estiver muito perto, teletransporta direto para não bugar o Tween
+    if distance < 5 then
+        hrp.CFrame = targetCFrame
+        return
+    end
     
     local tweenInfo = TweenInfo.new(distance / speed, Enum.EasingStyle.Linear)
     local tween = tweenService:Create(hrp, tweenInfo, {CFrame = targetCFrame})
@@ -54,7 +82,7 @@ local function TweenTo(targetCFrame)
     tween.Completed:Wait()
 end
 
--- 4. INTELIGÊNCIA: VARREDURA DE NPCs VIVOS NA ILHA
+-- 4. VARREDURA DE INIMIGOS
 local function GetClosestMob(mobName)
     local closestMob = nil
     local shortestDist = math.huge
@@ -62,7 +90,6 @@ local function GetClosestMob(mobName)
     
     if char and char:FindFirstChild("HumanoidRootPart") then
         local myPos = char.HumanoidRootPart.Position
-        -- Escaneia a pasta correta onde os inimigos dão spawn
         for _, enemy in ipairs(workspace.Enemies:GetChildren()) do
             if enemy.Name == mobName and enemy:FindFirstChild("Humanoid") and enemy.Humanoid.Health > 0 and enemy:FindFirstChild("HumanoidRootPart") then
                 local dist = (myPos - enemy.HumanoidRootPart.Position).Magnitude
@@ -76,7 +103,7 @@ local function GetClosestMob(mobName)
     return closestMob
 end
 
--- 5. VERIFICAÇÃO DE MISSÃO (Quest Check)
+-- 5. VALIDAÇÃO DE MISSÃO
 local function HasActiveQuest()
     local gui = player.PlayerGui
     if gui:FindFirstChild("Main") and gui.Main:FindFirstChild("Quest") then
@@ -85,7 +112,7 @@ local function HasActiveQuest()
     return false
 end
 
--- 6. MOTOR DE COMBATE (Ataque e Skills)
+-- 6. MOTOR DE COMBATE
 local function AutoAttack()
     virtualInput:SendMouseButtonEvent(0, 0, 0, true, game, 1)
     task.wait(0.05)
@@ -101,7 +128,6 @@ end
 local function EquipWeapon()
     local char = player.Character
     if not char then return end
-    -- Varredura no inventário (Backpack) pelo tipo de arma escolhida
     for _, tool in ipairs(player.Backpack:GetChildren()) do
         if tool:IsA("Tool") and tool.ToolTip == getgenv().OmegaConfig.WeaponType then
             char.Humanoid:EquipTool(tool)
@@ -109,7 +135,7 @@ local function EquipWeapon()
     end
 end
 
--- NOCLIP (Impede o jogador de ficar preso em paredes enquanto voa)
+-- 7. NOCLIP CONSTANTE (Prevenção de travamento no mapa)
 runService.Stepped:Connect(function()
     if getgenv().OmegaConfig.AutoFarm then
         local char = player.Character
@@ -119,11 +145,15 @@ runService.Stepped:Connect(function()
                     part.CanCollide = false
                 end
             end
+            -- Trava a câmera e a queda caso esteja caindo no void
+            if char:FindFirstChild("HumanoidRootPart") and char.HumanoidRootPart.Velocity.Y < -50 then
+                char.HumanoidRootPart.Velocity = Vector3.new(0, 0, 0)
+            end
         end
     end
 end)
 
--- 7. LOOP PRINCIPAL DE INTELIGÊNCIA
+-- 8. NÚCLEO DO AUTO-FARM
 task.spawn(function()
     while task.wait() do
         if not getgenv().OmegaConfig.AutoFarm then continue end
@@ -134,35 +164,31 @@ task.spawn(function()
             
             if char and char:FindFirstChild("HumanoidRootPart") then
                 
-                -- Se não tem missão, vai até o NPC de missão e pega
                 if not HasActiveQuest() then
                     TweenTo(farmData.npcPos)
                     if (char.HumanoidRootPart.Position - farmData.npcPos.Position).Magnitude < 10 then
                         commF:InvokeServer("StartQuest", farmData.quest, farmData.id)
-                        task.wait(1)
+                        task.wait(0.5) -- Pausa rápida para o servidor confirmar a quest
                     end
                 else
-                    -- Se tem missão, faz a varredura e caça o NPC
                     local targetMob = GetClosestMob(farmData.mob)
                     
                     if targetMob and targetMob:FindFirstChild("HumanoidRootPart") then
-                        -- Fica um pouco acima/atrás do NPC para evitar dano corpo a corpo
+                        -- Fica ACIMA do inimigo usando o OmegaConfig.Distance
                         local farmPos = targetMob.HumanoidRootPart.CFrame * CFrame.new(0, getgenv().OmegaConfig.Distance, 0)
-                        TweenTo(farmPos)
                         
-                        -- Sistema de Auto-Ataque e Skills
+                        -- Aponta para baixo (olhando para o mob) para os ataques/skills acertarem
+                        local lookAtPos = CFrame.lookAt(farmPos.Position, targetMob.HumanoidRootPart.Position)
+                        
+                        TweenTo(lookAtPos)
+                        
                         EquipWeapon()
-                        char.HumanoidRootPart.CFrame = CFrame.new(char.HumanoidRootPart.Position, targetMob.HumanoidRootPart.Position) -- Olha pro NPC
-                        
                         AutoAttack()
                         
                         if getgenv().OmegaConfig.UseSkills.Z then FireSkill("Z") end
                         if getgenv().OmegaConfig.UseSkills.X then FireSkill("X") end
                         if getgenv().OmegaConfig.UseSkills.C then FireSkill("C") end
                         if getgenv().OmegaConfig.UseSkills.V then FireSkill("V") end
-                    else
-                        -- Se o mob não spawnou ainda, fica aguardando próximo da área de spawn geral dele
-                        -- Você pode colocar para farmar outro mais longe ou apenas orbitar no centro do mapa.
                     end
                 end
             end
@@ -170,4 +196,4 @@ task.spawn(function()
     end
 end)
 
-print("OmegaCore: Módulo Smart Auto-Farm Sea 1 Carregado com Sucesso!")
+print("OmegaCore: Atualizado e Pronto para o Sea 1!")
