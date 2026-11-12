@@ -1,207 +1,137 @@
--- [[ OMEGACORE: SMART AUTO-FARM SEA 1 (V4 - Search Engine & Spawns Fix) ]] --
-getgenv().OmegaConfig = {
-    AutoFarm = true,
-    WeaponType = "Melee", 
-    Distance = 15,        
-    UseSkills = { Z = true, X = true, C = true, V = false }
-}
+-- OmegaCore: Módulo Ilha da Selva (Níveis 10 ao 30)
+-- Otimizado para Delta Executor
 
-local player = game.Players.LocalPlayer
-local runService = game:GetService("RunService")
-local tweenService = game:GetService("TweenService")
-local virtualInput = game:GetService("VirtualInputManager")
-local virtualUser = game:GetService("VirtualUser")
-local remotes = game:GetService("ReplicatedStorage"):WaitForChild("Remotes")
-local commF = remotes:WaitForChild("CommF_")
+_G.AutoFarm_Selva = true
+_G.DistanciaAtaque = 7 -- Altura ideal acima do mob para evitar ficar preso no hitbox do chão
 
--- ANTI-AFK
-player.Idled:Connect(function()
-    virtualUser:CaptureController()
-    virtualUser:ClickButton2(Vector2.new())
+local plr = game.Players.LocalPlayer
+local rs = game:GetService("RunService")
+local vu = game:GetService("VirtualUser")
+local vim = game:GetService("VirtualInputManager")
+
+-- Anti-AFK
+plr.Idled:Connect(function()
+    vu:Button2Down(Vector2.new(0,0),workspace.CurrentCamera.CFrame)
+    task.wait(1)
+    vu:Button2Up(Vector2.new(0,0),workspace.CurrentCamera.CFrame)
 end)
 
--- 1. BANCO DE DADOS (Agora com 'mobPos' para saber onde esperar o bicho nascer)
-local FarmGuide = {
-    {min = 1, max = 9, mob = "Bandit", quest = "BanditQuest1", id = 1, npcPos = CFrame.new(1059, 15, 1544), mobPos = CFrame.new(1145, 16, 1615)},
-    {min = 10, max = 14, mob = "Monkey", quest = "JungleQuest", id = 1, npcPos = CFrame.new(-1598, 35, 153), mobPos = CFrame.new(-1445, 23, 144)},
-    {min = 15, max = 29, mob = "Gorilla", quest = "JungleQuest", id = 2, npcPos = CFrame.new(-1598, 35, 153), mobPos = CFrame.new(-1186, 39, -475)},
-    {min = 30, max = 39, mob = "Pirate", quest = "BuggyQuest1", id = 1, npcPos = CFrame.new(-1139, 4, 3824), mobPos = CFrame.new(-1141, 41, 4000)},
-    {min = 40, max = 59, mob = "Brute", quest = "BuggyQuest1", id = 2, npcPos = CFrame.new(-1139, 4, 3824), mobPos = CFrame.new(-1390, 70, 4280)},
-    {min = 60, max = 74, mob = "Desert Bandit", quest = "DesertQuest", id = 1, npcPos = CFrame.new(894, 5, 4388), mobPos = CFrame.new(990, 15, 4390)},
-    {min = 75, max = 89, mob = "Desert Officer", quest = "DesertQuest", id = 2, npcPos = CFrame.new(894, 5, 4388), mobPos = CFrame.new(1500, 15, 4390)},
-    {min = 90, max = 99, mob = "Snow Bandit", quest = "SnowQuest", id = 1, npcPos = CFrame.new(1389, 88, -1298), mobPos = CFrame.new(1300, 100, -1300)},
-    {min = 100, max = 119, mob = "Snowman", quest = "SnowQuest", id = 2, npcPos = CFrame.new(1389, 88, -1298), mobPos = CFrame.new(1300, 100, -1500)},
-    {min = 120, max = 149, mob = "Chief Petty Officer", quest = "MarineQuest2", id = 1, npcPos = CFrame.new(-5039, 27, 4324), mobPos = CFrame.new(-4800, 21, 4300)},
-    {min = 150, max = 174, mob = "Sky Bandit", quest = "SkyQuest", id = 1, npcPos = CFrame.new(-4842, 716, -2622), mobPos = CFrame.new(-4900, 717, -2600)},
-    {min = 175, max = 189, mob = "Dark Master", quest = "SkyQuest", id = 2, npcPos = CFrame.new(-4842, 716, -2622), mobPos = CFrame.new(-5100, 717, -2600)},
-    {min = 190, max = 211, mob = "Prisoner", quest = "PrisonerQuest", id = 1, npcPos = CFrame.new(5310, 0, 474), mobPos = CFrame.new(5300, 1, 470)},
-    {min = 212, max = 249, mob = "Dangerous Prisoner", quest = "PrisonerQuest", id = 2, npcPos = CFrame.new(5310, 0, 474), mobPos = CFrame.new(5500, 1, 470)},
-    {min = 250, max = 299, mob = "Toga Warrior", quest = "ColosseumQuest", id = 1, npcPos = CFrame.new(-227, 6, 3326), mobPos = CFrame.new(-225, 7, 3324)},
-    {min = 300, max = 329, mob = "Gladiator", quest = "ColosseumQuest", id = 2, npcPos = CFrame.new(-227, 6, 3326), mobPos = CFrame.new(-225, 7, 3324)},
-    {min = 330, max = 349, mob = "Military Soldier", quest = "MagmaQuest", id = 1, npcPos = CFrame.new(-5317, 10, 8516), mobPos = CFrame.new(-5300, 12, 8500)},
-    {min = 350, max = 399, mob = "Military Spy", quest = "MagmaQuest", id = 2, npcPos = CFrame.new(-5317, 10, 8516), mobPos = CFrame.new(-5500, 12, 8500)},
-    {min = 400, max = 449, mob = "Fishman Warrior", quest = "FishmanQuest", id = 1, npcPos = CFrame.new(61122, 18, 1568), mobPos = CFrame.new(61100, 18, 1500)},
-    {min = 450, max = 474, mob = "Fishman Commando", quest = "FishmanQuest", id = 2, npcPos = CFrame.new(61122, 18, 1568), mobPos = CFrame.new(61200, 18, 1500)},
-    {min = 475, max = 524, mob = "God's Guard", quest = "SkyExp1Quest", id = 1, npcPos = CFrame.new(-4722, 843, -1954), mobPos = CFrame.new(-4700, 845, -1900)},
-    {min = 525, max = 624, mob = "Shanda", quest = "SkyExp1Quest", id = 2, npcPos = CFrame.new(-4722, 843, -1954), mobPos = CFrame.new(-4700, 1000, -2000)},
-    {min = 625, max = 699, mob = "Galley Pirate", quest = "FountainQuest", id = 1, npcPos = CFrame.new(5256, 38, 4048), mobPos = CFrame.new(5400, 38, 4000)},
-    {min = 700, max = 9999, mob = "Galley Captain", quest = "FountainQuest", id = 2, npcPos = CFrame.new(5256, 38, 4048), mobPos = CFrame.new(5600, 38, 4000)}
-}
-
-local function GetCurrentFarmData()
-    local myLevel = player.Data.Level.Value
-    for _, data in ipairs(FarmGuide) do
-        if myLevel >= data.min and myLevel <= data.max then return data end
-    end
-    return FarmGuide[#FarmGuide]
-end
-
--- 3. MOVIMENTAÇÃO INTELIGENTE (Rota Aérea Segura)
-local function TweenTo(targetCFrame)
-    local char = player.Character
-    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
-    
-    local hrp = char.HumanoidRootPart
-    local targetPos = targetCFrame.Position
-    local distance = (hrp.Position - targetPos).Magnitude
-    local speed = 300 
-    
-    if distance < 10 then
-        hrp.CFrame = targetCFrame
-        return
-    end
-    
-    if distance > 300 then
-        hrp.CFrame = CFrame.new(hrp.Position.X, 600, hrp.Position.Z)
-        task.wait(0.1)
-        
-        local skyTarget = CFrame.new(targetPos.X, 600, targetPos.Z)
-        local skyTweenInfo = TweenInfo.new((hrp.Position - skyTarget.Position).Magnitude / speed, Enum.EasingStyle.Linear)
-        local skyTween = tweenService:Create(hrp, skyTweenInfo, {CFrame = skyTarget})
-        
-        skyTween:Play()
-        skyTween.Completed:Wait()
-    end
-    
-    local finalTweenInfo = TweenInfo.new((hrp.Position - targetPos).Magnitude / speed, Enum.EasingStyle.Linear)
-    local finalTween = tweenService:Create(hrp, finalTweenInfo, {CFrame = targetCFrame})
-    finalTween:Play()
-    finalTween.Completed:Wait()
-end
-
--- 4. VARREDURA DINÂMICA (CORRIGIDA: Ignora letras extras e acha o inimigo real)
-local function GetClosestMob(mobName)
-    local closestMob = nil
-    local shortestDist = math.huge
-    local char = player.Character
-    
-    if char and char:FindFirstChild("HumanoidRootPart") then
-        local myPos = char.HumanoidRootPart.Position
-        
-        for _, enemy in ipairs(workspace.Enemies:GetChildren()) do
-            -- O segredo está aqui: string.find resolve o problema do nome!
-            if enemy.Name:find(mobName) and enemy:FindFirstChild("Humanoid") and enemy.Humanoid.Health > 0 and enemy:FindFirstChild("HumanoidRootPart") then
-                local dist = (myPos - enemy.HumanoidRootPart.Position).Magnitude
-                if dist < shortestDist then
-                    shortestDist = dist
-                    closestMob = enemy
-                end
-            end
-        end
-    end
-    return closestMob
-end
-
--- 5. MISSÃO E COMBATE
-local function HasActiveQuest()
-    local gui = player.PlayerGui
-    if gui:FindFirstChild("Main") and gui.Main:FindFirstChild("Quest") then
-        return gui.Main.Quest.Visible
-    end
-    return false
-end
-
-local function AutoAttack()
-    virtualInput:SendMouseButtonEvent(0, 0, 0, true, game, 1)
-    task.wait(0.05)
-    virtualInput:SendMouseButtonEvent(0, 0, 0, false, game, 1)
-end
-
-local function FireSkill(key)
-    virtualInput:SendKeyEvent(true, Enum.KeyCode[key], false, game)
-    task.wait(0.1)
-    virtualInput:SendKeyEvent(false, Enum.KeyCode[key], false, game)
-end
-
-local function EquipWeapon()
-    local char = player.Character
-    if not char then return end
-    for _, tool in ipairs(player.Backpack:GetChildren()) do
-        if tool:IsA("Tool") and tool.ToolTip == getgenv().OmegaConfig.WeaponType then
-            char.Humanoid:EquipTool(tool)
-        end
-    end
-end
-
--- NOCLIP
-runService.Stepped:Connect(function()
-    if getgenv().OmegaConfig.AutoFarm then
-        local char = player.Character
-        if char then
-            for _, part in ipairs(char:GetDescendants()) do
-                if part:IsA("BasePart") then part.CanCollide = false end
-            end
-            if char:FindFirstChild("HumanoidRootPart") and char.HumanoidRootPart.Velocity.Y < -50 then
-                char.HumanoidRootPart.Velocity = Vector3.new(0, 0, 0)
+-- Noclip Constante para evitar travar nas árvores da selva
+rs.Stepped:Connect(function()
+    if _G.AutoFarm_Selva and plr.Character then
+        for _, part in pairs(plr.Character:GetDescendants()) do
+            if part:IsA("BasePart") and part.CanCollide then
+                part.CanCollide = false
             end
         end
     end
 end)
 
--- LOOP PRINCIPAL DE INTELIGÊNCIA
+-- Movimentação Híbrida (Tween/CFrame)
+local function MoverPara(alvoCFrame)
+    if not plr.Character or not plr.Character:FindFirstChild("HumanoidRootPart") then return end
+    local hrp = plr.Character.HumanoidRootPart
+    local distancia = (hrp.Position - alvoCFrame.Position).Magnitude
+
+    if distancia > 250 then
+        local tweenInfo = TweenInfo.new(distancia / 300, Enum.EasingStyle.Linear)
+        local tween = game:GetService("TweenService"):Create(hrp, tweenInfo, {CFrame = alvoCFrame})
+        tween:Play()
+    else
+        hrp.CFrame = alvoCFrame
+    end
+end
+
+-- Auto Equipar Melee/Espada
+local function EquiparArma()
+    for _, tool in pairs(plr.Backpack:GetChildren()) do
+        if tool:IsA("Tool") and (tool.ToolTip == "Melee" or tool.ToolTip == "Sword") then
+            plr.Character.Humanoid:EquipTool(tool)
+        end
+    end
+end
+
+-- Spam de Skills do OmegaCore
+local function UsarSkills()
+    local skills = {Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C, Enum.KeyCode.V}
+    for _, key in ipairs(skills) do
+        vim:SendKeyEvent(true, key, false, game)
+        task.wait(0.05)
+        vim:SendKeyEvent(false, key, false, game)
+    end
+end
+
+-- Loop de Farm da Selva
 task.spawn(function()
     while task.wait() do
-        if not getgenv().OmegaConfig.AutoFarm then continue end
+        if not _G.AutoFarm_Selva then break end
         
         pcall(function()
-            local farmData = GetCurrentFarmData()
-            local char = player.Character
+            local nivel = plr.Data.Level.Value
+            local questNome = "Jungle Quest"
+            local mobNome = ""
+            local questId = 1
+            local npcQuestCFrame = CFrame.new(-1602.5, 36.8, 152.4) -- Jungle Adventurer
+
+            -- Sistema de Progressão de Nível
+            if nivel >= 10 and nivel < 15 then
+                mobNome = "Monkey"
+                questId = 1
+            elseif nivel >= 15 and nivel <= 30 then
+                mobNome = "Gorilla"
+                questId = 2
+            else
+                _G.AutoFarm_Selva = false
+                print("[OmegaCore] Nível fora da rota da Selva. Preparando transição para Vila Pirata.")
+                return
+            end
+
+            -- Validação de Missão
+            local questContainer = plr.PlayerGui.Main.Quest.Container
+            local temMissao = questContainer.Visible
+            local missaoCorreta = false
             
-            if char and char:FindFirstChild("HumanoidRootPart") then
-                
-                if not HasActiveQuest() then
-                    TweenTo(farmData.npcPos)
-                    if (char.HumanoidRootPart.Position - farmData.npcPos.Position).Magnitude <= 15 then
-                        commF:InvokeServer("StartQuest", farmData.quest, farmData.id)
-                        task.wait(0.5) 
-                    end
+            if temMissao then
+                local titulo = questContainer.QuestTitle.Title.Text
+                if string.find(titulo, mobNome) then
+                    missaoCorreta = true
                 else
-                    local targetMob = GetClosestMob(farmData.mob)
-                    
-                    if targetMob and targetMob:FindFirstChild("HumanoidRootPart") then
-                        -- MONSTRO ENCONTRADO: Vai até ele e ataca
-                        local farmPos = targetMob.HumanoidRootPart.CFrame * CFrame.new(0, getgenv().OmegaConfig.Distance, 0)
-                        local lookAtPos = CFrame.lookAt(farmPos.Position, targetMob.HumanoidRootPart.Position)
+                    -- Cancela missão errada
+                    game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("AbandonQuest")
+                end
+            end
+
+            if not missaoCorreta then
+                MoverPara(npcQuestCFrame)
+                if (plr.Character.HumanoidRootPart.Position - npcQuestCFrame.Position).Magnitude < 10 then
+                    game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("StartQuest", questNome, questId)
+                end
+            else
+                -- Lógica de Combate
+                local mobEncontrado = false
+                
+                for _, mob in pairs(workspace.Enemies:GetChildren()) do
+                    if string.find(mob.Name, mobNome) and mob:FindFirstChild("Humanoid") and mob.Humanoid.Health > 0 and mob:FindFirstChild("HumanoidRootPart") then
+                        mobEncontrado = true
                         
-                        TweenTo(lookAtPos)
+                        -- CFrame offset fixo apontando para baixo
+                        local posAtaque = mob.HumanoidRootPart.CFrame * CFrame.new(0, _G.DistanciaAtaque, 0) * CFrame.Angles(math.rad(-90), 0, 0)
+                        MoverPara(posAtaque)
                         
-                        EquipWeapon()
-                        AutoAttack()
+                        EquiparArma()
+                        vu:ClickButton1(Vector2.new()) -- Auto-click
+                        UsarSkills()
                         
-                        if getgenv().OmegaConfig.UseSkills.Z then FireSkill("Z") end
-                        if getgenv().OmegaConfig.UseSkills.X then FireSkill("X") end
-                        if getgenv().OmegaConfig.UseSkills.C then FireSkill("C") end
-                        if getgenv().OmegaConfig.UseSkills.V then FireSkill("V") end
-                    else
-                        -- MONSTRO NÃO ENCONTRADO (Morto ou descarregado): Vai para a área de respawn dele
-                        if farmData.mobPos then
-                            TweenTo(farmData.mobPos)
-                        end
+                        break -- Focar em 1 mob por vez
                     end
+                end
+                
+                -- Ponto de espera (mobPos) seguro acima do respawn para evitar o bug de flutuação infinita
+                if not mobEncontrado then
+                    local waitPos = (mobNome == "Monkey") and CFrame.new(-1620, 60, 140) or CFrame.new(-1160, 60, 330)
+                    MoverPara(waitPos)
                 end
             end
         end)
     end
 end)
-
-print("OmegaCore: Varredura de Inimigos e Spawn corrigidos!")
