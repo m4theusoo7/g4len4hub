@@ -1,137 +1,120 @@
--- OmegaCore: Módulo Ilha da Selva (Níveis 10 ao 30)
--- Otimizado para Delta Executor
+-- ================================================================= --
+-- [OmegaCore] AUTO FARM BASE V1 - OTIMIZADO PARA DELTA EXECUTOR
+-- ================================================================= --
 
-_G.AutoFarm_Selva = true
-_G.DistanciaAtaque = 7 -- Altura ideal acima do mob para evitar ficar preso no hitbox do chão
+local player = game.Players.LocalPlayer
+local repStorage = game:GetService("ReplicatedStorage")
+local virtualUser = game:GetService("VirtualUser")
+local commF = repStorage:WaitForChild("Remotes"):WaitForChild("CommF_")
 
-local plr = game.Players.LocalPlayer
-local rs = game:GetService("RunService")
-local vu = game:GetService("VirtualUser")
-local vim = game:GetService("VirtualInputManager")
+-- [ CONFIGURAÇÕES DE FARM ]
+_G.AutoFarm = true
+_G.ArmaParaFarmar = "Melee" -- Opções: "Melee", "Sword", "Blox Fruit"
+_G.NomeDaQuest = "BanditQuest1"
+_G.NumeroDaQuest = 1
+_G.NomeDoMob = "Bandit"
+local farmDistance = CFrame.new(0, 20, 0) -- Fica 20 studs ACIMA do mob para não tomar dano de ataques físicos
 
--- Anti-AFK
-plr.Idled:Connect(function()
-    vu:Button2Down(Vector2.new(0,0),workspace.CurrentCamera.CFrame)
-    task.wait(1)
-    vu:Button2Up(Vector2.new(0,0),workspace.CurrentCamera.CFrame)
-end)
+print("-----------------------------------")
+print("[OmegaCore] Iniciando Sistema...")
 
--- Noclip Constante para evitar travar nas árvores da selva
-rs.Stepped:Connect(function()
-    if _G.AutoFarm_Selva and plr.Character then
-        for _, part in pairs(plr.Character:GetDescendants()) do
-            if part:IsA("BasePart") and part.CanCollide then
-                part.CanCollide = false
+-- 1. VERIFICAÇÃO DE SEA
+local placeId = game.PlaceId
+if placeId == 2753915549 then
+    print("[OmegaCore] Sea 1 Detectado. Carregando rotinas...")
+else
+    warn("[OmegaCore] Atenção: Este script foi configurado para testar no Sea 1!")
+end
+
+-- 2. VERIFICA MISSÃO ATIVA
+local function HasQuest()
+    local questUI = player.PlayerGui.Main.Quest
+    return questUI.Visible
+end
+
+-- 3. AUTO QUEST REMOTO
+local function OmegaPegarQuest()
+    if not HasQuest() then
+        commF:InvokeServer("StartQuest", _G.NomeDaQuest, _G.NumeroDaQuest)
+    end
+end
+
+-- 4. EQUIPAR ARMA AUTOMATICAMENTE
+local function OmegaEquiparArma()
+    local character = player.Character
+    if not character then return end
+    
+    -- Procura a arma na mochila
+    for _, tool in pairs(player.Backpack:GetChildren()) do
+        if tool:IsA("Tool") and tool.ToolTip == _G.ArmaParaFarmar then
+            -- Equipa passando para o personagem
+            character.Humanoid:EquipTool(tool)
+        end
+    end
+end
+
+-- 5. FAST ATTACK (Clique Automático sem delay)
+local function OmegaFastAttack()
+    virtualUser:CaptureController()
+    virtualUser:ClickButton1(Vector2.new())
+    -- Bônus: Envia o sinal de ataque direto pro servidor para garantir o hit
+    commF:InvokeServer("Xoxo") 
+end
+
+-- 6. BRING MOBS + HITBOX
+local function OmegaBringMobs()
+    local character = player.Character
+    if not character or not character:FindFirstChild("HumanoidRootPart") then return end
+    local myRoot = character.HumanoidRootPart
+
+    local hasTarget = false
+
+    for _, mob in pairs(workspace.Enemies:GetChildren()) do
+        if string.find(mob.Name, _G.NomeDoMob) and mob:FindFirstChild("Humanoid") and mob.Humanoid.Health > 0 then
+            local mobRoot = mob:FindFirstChild("HumanoidRootPart")
+            
+            if mobRoot then
+                -- Se ainda não tivermos um alvo principal, vamos até ele
+                if not hasTarget then
+                    myRoot.CFrame = mobRoot.CFrame * farmDistance
+                    hasTarget = true
+                end
+                
+                -- Puxa todos os outros mobs com o mesmo nome para a mesma posição
+                mob.Humanoid.WalkSpeed = 0
+                mob.Humanoid.JumpPower = 0
+                mobRoot.CanCollide = false
+                mobRoot.Size = Vector3.new(20, 20, 20) -- Hitbox gigante
+                mobRoot.Transparency = 0.7
+                
+                -- Mantém os mobs agrupados exatamente embaixo de você
+                mobRoot.CFrame = myRoot.CFrame * CFrame.new(0, -20, 0)
             end
         end
     end
-end)
-
--- Movimentação Híbrida (Tween/CFrame)
-local function MoverPara(alvoCFrame)
-    if not plr.Character or not plr.Character:FindFirstChild("HumanoidRootPart") then return end
-    local hrp = plr.Character.HumanoidRootPart
-    local distancia = (hrp.Position - alvoCFrame.Position).Magnitude
-
-    if distancia > 250 then
-        local tweenInfo = TweenInfo.new(distancia / 300, Enum.EasingStyle.Linear)
-        local tween = game:GetService("TweenService"):Create(hrp, tweenInfo, {CFrame = alvoCFrame})
-        tween:Play()
-    else
-        hrp.CFrame = alvoCFrame
-    end
 end
 
--- Auto Equipar Melee/Espada
-local function EquiparArma()
-    for _, tool in pairs(plr.Backpack:GetChildren()) do
-        if tool:IsA("Tool") and (tool.ToolTip == "Melee" or tool.ToolTip == "Sword") then
-            plr.Character.Humanoid:EquipTool(tool)
-        end
-    end
-end
-
--- Spam de Skills do OmegaCore
-local function UsarSkills()
-    local skills = {Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C, Enum.KeyCode.V}
-    for _, key in ipairs(skills) do
-        vim:SendKeyEvent(true, key, false, game)
-        task.wait(0.05)
-        vim:SendKeyEvent(false, key, false, game)
-    end
-end
-
--- Loop de Farm da Selva
+-- 7. LOOP PRINCIPAL DE EXECUÇÃO (CÉREBRO DO SCRIPT)
 task.spawn(function()
     while task.wait() do
-        if not _G.AutoFarm_Selva then break end
-        
-        pcall(function()
-            local nivel = plr.Data.Level.Value
-            local questNome = "Jungle Quest"
-            local mobNome = ""
-            local questId = 1
-            local npcQuestCFrame = CFrame.new(-1602.5, 36.8, 152.4) -- Jungle Adventurer
-
-            -- Sistema de Progressão de Nível
-            if nivel >= 10 and nivel < 15 then
-                mobNome = "Monkey"
-                questId = 1
-            elseif nivel >= 15 and nivel <= 30 then
-                mobNome = "Gorilla"
-                questId = 2
-            else
-                _G.AutoFarm_Selva = false
-                print("[OmegaCore] Nível fora da rota da Selva. Preparando transição para Vila Pirata.")
-                return
-            end
-
-            -- Validação de Missão
-            local questContainer = plr.PlayerGui.Main.Quest.Container
-            local temMissao = questContainer.Visible
-            local missaoCorreta = false
-            
-            if temMissao then
-                local titulo = questContainer.QuestTitle.Title.Text
-                if string.find(titulo, mobNome) then
-                    missaoCorreta = true
-                else
-                    -- Cancela missão errada
-                    game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("AbandonQuest")
-                end
-            end
-
-            if not missaoCorreta then
-                MoverPara(npcQuestCFrame)
-                if (plr.Character.HumanoidRootPart.Position - npcQuestCFrame.Position).Magnitude < 10 then
-                    game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("StartQuest", questNome, questId)
-                end
-            else
-                -- Lógica de Combate
-                local mobEncontrado = false
+        if _G.AutoFarm then
+            local character = player.Character
+            if character and character:FindFirstChild("Humanoid") and character.Humanoid.Health > 0 then
                 
-                for _, mob in pairs(workspace.Enemies:GetChildren()) do
-                    if string.find(mob.Name, mobNome) and mob:FindFirstChild("Humanoid") and mob.Humanoid.Health > 0 and mob:FindFirstChild("HumanoidRootPart") then
-                        mobEncontrado = true
-                        
-                        -- CFrame offset fixo apontando para baixo
-                        local posAtaque = mob.HumanoidRootPart.CFrame * CFrame.new(0, _G.DistanciaAtaque, 0) * CFrame.Angles(math.rad(-90), 0, 0)
-                        MoverPara(posAtaque)
-                        
-                        EquiparArma()
-                        vu:ClickButton1(Vector2.new()) -- Auto-click
-                        UsarSkills()
-                        
-                        break -- Focar em 1 mob por vez
-                    end
+                -- Passo A: Garante que estamos com a missão
+                OmegaPegarQuest()
+                
+                -- Passo B: Se temos a missão, vamos farmar
+                if HasQuest() then
+                    OmegaEquiparArma()
+                    OmegaBringMobs()
+                    OmegaFastAttack()
                 end
                 
-                -- Ponto de espera (mobPos) seguro acima do respawn para evitar o bug de flutuação infinita
-                if not mobEncontrado then
-                    local waitPos = (mobNome == "Monkey") and CFrame.new(-1620, 60, 140) or CFrame.new(-1160, 60, 330)
-                    MoverPara(waitPos)
-                end
             end
-        end)
+        end
     end
 end)
+
+print("[OmegaCore] Script de Auto Farm Ativado com Sucesso!")
+print("-----------------------------------")
