@@ -1,210 +1,61 @@
--- =====================================================================
--- OMEGACORE (SEA 1) - ADVANCED FRAMEWORK (UI + AUTO FARM LOGIC)
--- =====================================================================
-repeat task.wait() until game:IsLoaded()
+local player = game:GetService("Players").LocalPlayer
+local char = player.Character or player.CharacterAdded:Wait()
+local hrp = char:WaitForChild("HumanoidRootPart")
 
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local TweenService = game:GetService("TweenService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local VirtualUser = game:GetService("VirtualUser")
-local plr = Players.LocalPlayer
+local searchRadius = 2500 -- Raio de busca para focar só na ilha atual
+local output = "-- Mapeamento de NPCs da Ilha Atual (Raio: " .. searchRadius .. " studs)\n\n"
 
--- Variáveis Globais do Hub
-getgenv().OmegaCore = {
-    AutoFarm = false,
-    Weapon = "Melee",
-    Distance = 7,
-    TweenSpeed = 300
-}
-
--- Espera o personagem carregar para não crashar na injeção
-repeat task.wait(0.5) until plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
-repeat task.wait(0.5) until plr:FindFirstChild("Data") and plr.Data:FindFirstChild("Level")
-
--- =====================================================================
--- UI SYSTEM (RAYFIELD LIBRARY)
--- =====================================================================
-local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
-
-local Window = Rayfield:CreateWindow({
-    Name = "🌌 OmegaCore | Sea 1",
-    LoadingTitle = "Injetando OmegaCore...",
-    LoadingSubtitle = "by m4theusoo7",
-    ConfigurationSaving = { Enabled = false },
-    KeySystem = false
-})
-
-local Tab = Window:CreateTab("Auto Farm", 4483345998) -- Ícone de espada
-
-Tab:CreateSection("Configurações de Combate")
-
-Tab:CreateDropdown({
-    Name = "Selecionar Arma",
-    Options = {"Melee", "Sword", "Blox Fruit"},
-    CurrentOption = {"Melee"},
-    MultipleOptions = false,
-    Flag = "WeaponSelect",
-    Callback = function(Option)
-        getgenv().OmegaCore.Weapon = Option[1]
-    end,
-})
-
-Tab:CreateSection("Controles")
-
-Tab:CreateToggle({
-    Name = "Ativar Auto Farm Level",
-    CurrentValue = false,
-    Flag = "FarmToggle",
-    Callback = function(Value)
-        getgenv().OmegaCore.AutoFarm = Value
-    end,
-})
-
--- =====================================================================
--- CORE LOGIC: BYPASSES & MOVEMENT
--- =====================================================================
-
--- Anti-AFK
-plr.Idled:Connect(function()
-    VirtualUser:CaptureController()
-    VirtualUser:ClickButton2(Vector2.new())
-end)
-
--- Noclip + Anti-Stun (Injetado direto no processador gráfico)
-RunService.Stepped:Connect(function()
-    if getgenv().OmegaCore.AutoFarm then
-        pcall(function()
-            local char = plr.Character
-            if char and char:FindFirstChild("HumanoidRootPart") then
-                char.HumanoidRootPart.Velocity = Vector3.new(0,0,0) -- Zera física (evita fling)
-                for _, v in pairs(char:GetDescendants()) do
-                    if v:IsA("BasePart") and v.CanCollide then
-                        v.CanCollide = false
-                    end
-                end
-            end
-        end)
-    end
-end)
-
--- Tweening Inteligente (Cálculo de Rota Dinâmica)
-local currentTween = nil
-local function toTarget(targetCFrame)
-    local hrp = plr.Character.HumanoidRootPart
-    local dist = (hrp.Position - targetCFrame.Position).Magnitude
+local function scanFolder(folder)
+    if not folder then return end
+    local foundNames = {}
     
-    if dist < 12 then
-        if currentTween then currentTween:Cancel() currentTween = nil end
-        hrp.CFrame = targetCFrame
-    else
-        if not currentTween or currentTween.PlaybackState ~= Enum.PlaybackState.Playing then
-            local tweenInfo = TweenInfo.new(dist / getgenv().OmegaCore.TweenSpeed, Enum.EasingStyle.Linear)
-            currentTween = TweenService:Create(hrp, tweenInfo, {CFrame = targetCFrame})
-            currentTween:Play()
-        end
-    end
-end
-
--- =====================================================================
--- DATABASE DE QUESTS (SEA 1)
--- =====================================================================
-local function GetFarmData()
-    local lvl = plr.Data.Level.Value
-    if lvl >= 1 and lvl < 10 then
-        return "BanditQuest1", 1, "Bandit", CFrame.new(1060, 16, 1547), CFrame.new(1145, 17, 1618)
-    elseif lvl >= 10 and lvl < 15 then
-        return "JungleQuest", 1, "Monkey", CFrame.new(-1602, 37, 152), CFrame.new(-1448, 22, 107)
-    elseif lvl >= 15 and lvl < 30 then
-        return "JungleQuest", 2, "Gorilla", CFrame.new(-1602, 37, 152), CFrame.new(-1147, 40, -500)
-    elseif lvl >= 30 and lvl < 40 then
-        return "BuggyQuest1", 1, "Pirate", CFrame.new(-1140, 4, 3828), CFrame.new(-1115, 14, 3938)
-    elseif lvl >= 40 and lvl < 60 then
-        return "BuggyQuest1", 2, "Brute", CFrame.new(-1140, 4, 3828), CFrame.new(-1146, 14, 4310)
-    end
-    -- Adicione mais levels aqui depois seguindo o mesmo padrão!
-    return nil
-end
-
-local function HasQuest()
-    local gui = plr.PlayerGui:FindFirstChild("Main")
-    return gui and gui:FindFirstChild("Quest") and gui.Quest.Visible
-end
-
-local function EquipWeapon()
-    local char = plr.Character
-    if char then
-        for _, tool in pairs(plr.Backpack:GetChildren()) do
-            if tool:IsA("Tool") and string.find(tool.ToolTip, getgenv().OmegaCore.Weapon) then
-                char.Humanoid:EquipTool(tool)
-            end
-        end
-    end
-end
-
--- =====================================================================
--- MOTOR DE FARM (LOOP PRINCIPAL)
--- =====================================================================
-task.spawn(function()
-    while task.wait(0.05) do -- Loop super rápido para Fast Attack
-        if getgenv().OmegaCore.AutoFarm then
-            local char = plr.Character
-            if not char or not char:FindFirstChild("HumanoidRootPart") or char.Humanoid.Health <= 0 then 
-                continue 
-            end
+    for _, obj in pairs(folder:GetChildren()) do
+        if obj:IsA("Model") and obj:FindFirstChild("HumanoidRootPart") then
+            local npcPos = obj.HumanoidRootPart.Position
+            local distance = (hrp.Position - npcPos).Magnitude
             
-            local questName, questLevel, mobName, questPos, mobSpawn = GetFarmData()
-            if not questName then continue end
-            
-            if not HasQuest() then
-                if (char.HumanoidRootPart.Position - questPos.Position).Magnitude > 15 then
-                    toTarget(questPos)
-                else
-                    ReplicatedStorage.Remotes.CommF_:InvokeServer("StartQuest", questName, questLevel)
-                end
-            else
-                local targetMob = nil
-                local dist = math.huge
-                
-                for _, v in pairs(workspace.Enemies:GetChildren()) do
-                    if string.find(v.Name, mobName) and v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 then
-                        local d = (char.HumanoidRootPart.Position - v.HumanoidRootPart.Position).Magnitude
-                        if d < dist then
-                            dist = d
-                            targetMob = v
-                        end
-                    end
-                end
-                
-                if targetMob then
-                    EquipWeapon()
-                    -- Fica em cima do mob, virado para baixo
-                    local aimPos = targetMob.HumanoidRootPart.CFrame * CFrame.new(0, getgenv().OmegaCore.Distance, 0)
-                    toTarget(aimPos * CFrame.Angles(math.rad(-90), 0, 0)) 
+            -- Verifica se o NPC está na mesma ilha e se já não foi mapeado
+            if distance <= searchRadius then
+                if not foundNames[obj.Name] then
+                    local vectorCode = string.format("Vector3.new(%.1f, %.1f, %.1f)", npcPos.X, npcPos.Y, npcPos.Z)
                     
-                    -- Fast Attack via VirtualUser e CommF_
-                    VirtualUser:CaptureController()
-                    VirtualUser:ClickButton1(Vector2.new(800, 800))
+                    -- Formata o nome para ser uma variável válida em Lua (tira espaços)
+                    local varName = string.gsub(obj.Name, "%s+", "_")
                     
-                    -- Dispara o evento de ataque nativo da arma
-                    pcall(function()
-                        local activeTool = char:FindFirstChildOfClass("Tool")
-                        if activeTool then
-                            activeTool:Activate()
-                        end
-                    end)
-                else
-                    -- Vai para o local de respawn esperar os mobs nascerem
-                    toTarget(mobSpawn * CFrame.new(0, 30, 0))
+                    output = output .. string.format("-- %s (Distância: %.1f studs)\n", obj.Name, distance)
+                    output = output .. string.format("local pos_%s = %s\n\n", varName, vectorCode)
+                    
+                    foundNames[obj.Name] = true
                 end
             end
         end
     end
-end)
+end
 
-Rayfield:Notify({
-    Title = "Injetado!",
-    Content = "OmegaCore carregado com sucesso.",
-    Duration = 5,
-    Image = 4483362458,
-})
+output = output .. "-----------------------------------\n"
+output = output .. "------- INIMIGOS (MOBS) -----------\n"
+output = output .. "-----------------------------------\n"
+scanFolder(workspace:FindFirstChild("Enemies"))
+
+output = output .. "-----------------------------------\n"
+output = output .. "----- NPCs (QUESTS / LOJAS) -------\n"
+output = output .. "-----------------------------------\n"
+scanFolder(workspace:FindFirstChild("NPCs"))
+
+-- Imprime no console (F9) por segurança
+print(output)
+
+-- Tenta copiar para o clipboard (suportado pelo Delta)
+if setclipboard then
+    setclipboard(output)
+    print("[OmegaCore] Coordenadas copiadas para a área de transferência com sucesso!")
+    
+    -- Notificação na tela do jogo
+    game:GetService("StarterGui"):SetCore("SendNotification", {
+        Title = "OmegaCore Mapper",
+        Text = "Coordenadas da ilha copiadas!",
+        Duration = 5
+    })
+else
+    warn("[OmegaCore] Seu executor não suporta cópia automática. Aperte F9 para copiar as coordenadas do console.")
+end
