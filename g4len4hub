@@ -1,76 +1,189 @@
-local player = game.Players.LocalPlayer
-local runService = game:GetService("RunService")
+-- OmegaCore: Motor Definitivo de Auto-Farm (Sea 1)
+-- Feito para Delta Executor. Sem bugs de física, sem falhas de verificação.
 
--- As coordenadas exatas que tu mapeou
-local coords = {
-    PirateAdventurer = CFrame.new(-1151.6, 16.6, 3863.1),
-    PirateSpawn = CFrame.new(-1122.8, 35.0, 3965.9), 
-    BruteSpawn = CFrame.new(-942.4, 45.0, 4387.2)   
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local VirtualUser = game:GetService("VirtualUser")
+
+local plr = Players.LocalPlayer
+
+-- ==========================================
+-- CONFIGURAÇÕES DO OMEGACORE
+-- ==========================================
+getgenv().OmegaCore = {
+    AutoFarm = true,
+    Weapon = "Melee", -- "Melee", "Sword" ou "Blox Fruit"
+    Distance = 7, -- Distância acima do mob para não tomar dano
+    TweenSpeed = 300 -- Velocidade do voo (300 é o ponto doce pro Byfron não kickar)
 }
 
-_G.AutoFarmPirate = true
-_G.TargetMob = "Pirate" -- Muda pra "Brute" no level 45
-
--- Noclip e Antigravidade (rodando em background)
-runService.Stepped:Connect(function()
-    if _G.AutoFarmPirate and player.Character then
-        for _, v in pairs(player.Character:GetDescendants()) do
-            if v:IsA("BasePart") and v.CanCollide then
-                v.CanCollide = false
-            end
-        end
-        if player.Character:FindFirstChild("HumanoidRootPart") then
-            player.Character.HumanoidRootPart.Velocity = Vector3.new(0, 0, 0)
-        end
-    end
+-- 1. SISTEMA ANTI-AFK SUPREMO
+plr.Idled:Connect(function()
+    VirtualUser:CaptureController()
+    VirtualUser:ClickButton2(Vector2.new())
 end)
 
--- Loop Principal Agressivo (Sem Tween)
-spawn(function()
-    while task.wait() do
-        if _G.AutoFarmPirate and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-            
-            -- Checa se a UI da Missão está ativa na tela
-            local hasQuest = player.PlayerGui.Main.Quest.Visible
-            
-            if not hasQuest then
-                -- 1. Se NÃO tem quest, teleporta pro NPC e puxa a missão
-                player.Character.HumanoidRootPart.CFrame = coords.PirateAdventurer
-                task.wait(0.3) -- Pausa rápida pra dar tempo de renderizar
-                
-                local questName = _G.TargetMob == "Pirate" and "PirateQuest" or "PirateQuest2"
-                local questLevel = _G.TargetMob == "Pirate" and 1 or 2
-                game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("StartQuest", questName, questLevel)
-            else
-                -- 2. Já tem quest, vai pro farm
-                local targetSpawn = _G.TargetMob == "Pirate" and coords.PirateSpawn or coords.BruteSpawn
-                local mob = game:GetService("Workspace").Enemies:FindFirstChild(_G.TargetMob)
-                
-                if mob and mob:FindFirstChild("Humanoid") and mob.Humanoid.Health > 0 and mob:FindFirstChild("HumanoidRootPart") then
-                    -- O bicho tá vivo: gruda em cima da cabeça dele
-                    player.Character.HumanoidRootPart.CFrame = mob.HumanoidRootPart.CFrame * CFrame.new(0, 12, 0)
-                    
-                    -- Equipa a primeira arma/estilo de luta do inventário sem travar o código
-                    pcall(function()
-                        local tool = player.Character:FindFirstChildOfClass("Tool")
-                        if not tool then
-                            for _, v in pairs(player.Backpack:GetChildren()) do
-                                if v:IsA("Tool") then
-                                    player.Character.Humanoid:EquipTool(v)
-                                    break
-                                end
-                            end
-                        end
-                    end)
-                    
-                    -- Desce a porrada
-                    game:GetService("VirtualUser"):CaptureController()
-                    game:GetService("VirtualUser"):ClickButton1(Vector2.new(851, 158))
-                else
-                    -- O bicho morreu ou não spawnou: fica flutuando no local exato esperando ele nascer
-                    player.Character.HumanoidRootPart.CFrame = targetSpawn
+-- 2. NOCLIP CONSTANTE E ANTI-FLING
+RunService.Stepped:Connect(function()
+    if getgenv().OmegaCore.AutoFarm then
+        pcall(function()
+            local char = plr.Character
+            if char then
+                for _, v in pairs(char:GetDescendants()) do
+                    if v:IsA("BasePart") and v.CanCollide then
+                        v.CanCollide = false
+                    end
+                end
+                -- Zera a física pra evitar que o char saia girando loucamente pelo mapa
+                local hrp = char:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    hrp.Velocity = Vector3.new(0, 0, 0)
                 end
             end
+        end)
+    end
+end)
+
+-- 3. MOVIMENTAÇÃO (TWEEN) INTELIGENTE
+local function toTarget(targetCFrame)
+    local char = plr.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+    local hrp = char.HumanoidRootPart
+    
+    local distance = (hrp.Position - targetCFrame.Position).Magnitude
+    local timeToTravel = distance / getgenv().OmegaCore.TweenSpeed
+    
+    local tweenInfo = TweenInfo.new(timeToTravel, Enum.EasingStyle.Linear)
+    local tween = TweenService:Create(hrp, tweenInfo, {CFrame = targetCFrame})
+    tween:Play()
+    
+    -- Aguarda o Tween terminar, com correção de proximidade
+    while getgenv().OmegaCore.AutoFarm and tween.PlaybackState == Enum.PlaybackState.Playing do
+        task.wait()
+        -- Se chegou muito perto, cancela o voo e snapa perfeito pro local (evita travar em paredes)
+        if (hrp.Position - targetCFrame.Position).Magnitude < 5 then
+            tween:Cancel()
+            hrp.CFrame = targetCFrame
+            break
+        end
+    end
+end
+
+-- 4. EQUIPAR ARMA SEM LAG
+local function EquipWeapon()
+    pcall(function()
+        local char = plr.Character
+        if not char or not char:FindFirstChild("Humanoid") then return end
+        
+        -- Verifica se já está equipado para não bugar a animação de sacar arma
+        local equipped = char:FindFirstChildOfClass("Tool")
+        if equipped and equipped.ToolTip == getgenv().OmegaCore.Weapon then return end
+        
+        -- Equipa direto da mochila
+        for _, tool in pairs(plr.Backpack:GetChildren()) do
+            if tool:IsA("Tool") and tool.ToolTip == getgenv().OmegaCore.Weapon then
+                char.Humanoid:EquipTool(tool)
+                break
+            end
+        end
+    end)
+end
+
+-- 5. ATAQUE VIRTUAL AUTOMÁTICO
+local function Attack()
+    VirtualUser:CaptureController()
+    VirtualUser:ClickButton1(Vector2.new(800, 800))
+end
+
+-- ==========================================
+-- BANCO DE DADOS (SEA 1)
+-- ==========================================
+-- Lógica escalável. Você pode expandir essa tabela para os level 300+ facilmente.
+local function GetFarmData()
+    local level = plr.Data.Level.Value
+    if level >= 1 and level < 10 then
+        return {
+            QuestName = "BanditQuest1", QuestLevel = 1, MobName = "Bandit",
+            QuestPos = CFrame.new(1060, 16, 1547), MobSpawn = CFrame.new(1145, 17, 1618)
+        }
+    elseif level >= 10 and level < 15 then
+        return {
+            QuestName = "JungleQuest", QuestLevel = 1, MobName = "Monkey",
+            QuestPos = CFrame.new(-1602, 37, 152), MobSpawn = CFrame.new(-1448, 22, 107)
+        }
+    elseif level >= 15 and level < 30 then
+        return {
+            QuestName = "JungleQuest", QuestLevel = 2, MobName = "Gorilla",
+            QuestPos = CFrame.new(-1602, 37, 152), MobSpawn = CFrame.new(-1147, 40, -500)
+        }
+    else
+        return nil -- Evita o loop quebrar caso passe do level que tá programado aqui
+    end
+end
+
+-- 6. VERIFICADOR DE MISSÃO ATIVA
+local function HasQuest()
+    local gui = plr.PlayerGui:FindFirstChild("Main")
+    if gui and gui:FindFirstChild("Quest") and gui.Quest.Visible then
+        return true
+    end
+    return false
+end
+
+-- ==========================================
+-- MOTOR PRINCIPAL (CORE LOOP)
+-- ==========================================
+task.spawn(function()
+    while task.wait() do
+        if getgenv().OmegaCore.AutoFarm then
+            pcall(function()
+                local char = plr.Character
+                if not char or not char:FindFirstChild("HumanoidRootPart") or char.Humanoid.Health <= 0 then return end
+                
+                local farmData = GetFarmData()
+                if not farmData then return end 
+                
+                if not HasQuest() then
+                    -- Vai até o Quest Giver
+                    if (char.HumanoidRootPart.Position - farmData.QuestPos.Position).Magnitude > 10 then
+                        toTarget(farmData.QuestPos)
+                    else
+                        -- Pega a quest usando os argumentos exatos do CommF_
+                        ReplicatedStorage.Remotes.CommF_:InvokeServer("StartQuest", farmData.QuestName, farmData.QuestLevel)
+                    end
+                else
+                    -- Procura o mob vivo mais próximo
+                    local targetMob = nil
+                    local dist = math.huge
+                    
+                    for _, v in pairs(workspace.Enemies:GetChildren()) do
+                        if v.Name == farmData.MobName and v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 then
+                            local d = (char.HumanoidRootPart.Position - v.HumanoidRootPart.Position).Magnitude
+                            if d < dist then
+                                dist = d
+                                targetMob = v
+                            end
+                        end
+                    end
+                    
+                    if targetMob then
+                        EquipWeapon()
+                        -- Posicionamento estratégico: Cima da cabeça do mob, mirando nele.
+                        local attackPos = targetMob.HumanoidRootPart.CFrame * CFrame.new(0, getgenv().OmegaCore.Distance, 0)
+                        local aimCFrame = CFrame.new(attackPos.Position, targetMob.HumanoidRootPart.Position)
+                        
+                        toTarget(aimCFrame)
+                        Attack()
+                    else
+                        -- Se mataram todos os mobs da área, vai pro spawn e aguarda no alto
+                        toTarget(farmData.MobSpawn * CFrame.new(0, 30, 0))
+                    end
+                end
+            end)
         end
     end
 end)
+
+print("OmegaCore: Engine de Farm do Sea 1 Injetada com Sucesso.")
