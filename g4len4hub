@@ -1,158 +1,58 @@
--- ==============================================================================
--- [ OmegaCore - Engine de Auto-Farm Base ]
--- Otimizado para Delta Executor (Mobile/PC) - Blox Fruits (Sea 1)
--- ==============================================================================
+local player = game.Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:FindFirstChild("Humanoid")
+local rootPart = character:FindFirstChild("HumanoidRootPart")
 
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local TweenService = game:GetService("TweenService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local VirtualUser = game:GetService("VirtualUser")
+-- Configurações
+local farmLocation = Vector3.new(100, 50, -200) -- Coordenadas de uma área segura (exemplo: Mar 1 ou 2)
+local attackRange = 40
+local speed = 16
 
-local LocalPlayer = Players.LocalPlayer
-local CommF = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("CommF_")
-local WorkspaceEnemies = workspace:WaitForChild("Enemies")
-
--- Velocidade segura para evitar Kicks por teleporte do Anti-Cheat
-local TWEEN_SPEED = 300
-getgenv().OmegaCore_AutoFarm = true -- Variável global para controle de estado
-
--- ==============================================================================
--- 1. SISTEMA DE PROGRESSÃO (DATABASE)
--- ==============================================================================
-local Sea1_Progression = {
-    {
-        Min = 1,
-        Max = 14,
-        QuestName = "BanditQuest1",
-        QuestN = 1,
-        QuestPos = CFrame.new(1059.37, 15.44, 1550.42),
-        MobName = "Bandit",
-        MobPos = CFrame.new(1148.86, 16.43, 1630.54)
-    },
-    {
-        Min = 15,
-        Max = 19,
-        QuestName = "JungleQuest",
-        QuestN = 1,
-        QuestPos = CFrame.new(-1598.08, 35.55, 153.37),
-        MobName = "Monkey",
-        MobPos = CFrame.new(-1446.54, 22.84, 148.81)
-    }
-    -- Adicione Gorillas e as próximas ilhas seguindo este padrão
-}
-
-local function GetCurrentQuest()
-    local playerLevel = LocalPlayer.Data.Level.Value
-    for _, quest in ipairs(Sea1_Progression) do
-        if playerLevel >= quest.Min and playerLevel <= quest.Max then
-            return quest
-        end
-    end
-    return nil -- Retorna nil caso alcance o cap ou falte configuração
+-- Função para mover o personagem
+function moveToFarm()
+    local targetPos = farmLocation + Vector3.new(0, math.random(-5, 5), 0) -- Pequena variação para não ficar preso
+    rootPart.CFrame = CFrame.new(targetPos) * CFrame.Angles(math.rad(90), 0, 0)
 end
 
--- ==============================================================================
--- 2. MOTOR DE MOVIMENTAÇÃO (TWEEN SERVICE BYPASS)
--- ==============================================================================
-local function TweenTo(TargetCFrame)
-    local char = LocalPlayer.Character
-    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
-    
-    local hrp = char.HumanoidRootPart
-    local distance = (hrp.Position - TargetCFrame.Position).Magnitude
-    local tweenTime = distance / TWEEN_SPEED
-    
-    local tweenInfo = TweenInfo.new(tweenTime, Enum.EasingStyle.Linear)
-    local tween = TweenService:Create(hrp, tweenInfo, {CFrame = TargetCFrame})
-    
-    tween:Play()
-    -- Evita o uso de yield prolongado, o script continua mas o player se move suavemente
-end
-
--- ==============================================================================
--- 3. NOCLIP INTELIGENTE (RunService.Stepped)
--- ==============================================================================
-RunService.Stepped:Connect(function()
-    if getgenv().OmegaCore_AutoFarm then
-        local char = LocalPlayer.Character
-        if char then
-            for _, part in pairs(char:GetDescendants()) do
-                if part:IsA("BasePart") and part.CanCollide then
-                    part.CanCollide = false
-                end
-            end
-        end
-    end
-end)
-
--- ==============================================================================
--- 4. SISTEMA DE COMBATE SEGURO
--- ==============================================================================
-local function EquipWeapon()
-    local char = LocalPlayer.Character
-    if not char or not char:FindFirstChild("Humanoid") then return end
-    
-    -- Verifica a mochila em busca de itens com ToolTip de combate
-    for _, tool in pairs(LocalPlayer.Backpack:GetChildren()) do
-        if tool:IsA("Tool") and (tool.ToolTip == "Melee" or tool.ToolTip == "Sword") then
-            char.Humanoid:EquipTool(tool)
-            break
-        end
-    end
-end
-
-local function AutoAttack()
-    VirtualUser:CaptureController()
-    VirtualUser:ClickButton1(Vector2.new(0,0))
-end
-
--- ==============================================================================
--- 5. GERENCIAMENTO DE LOOP E EXECUÇÃO
--- ==============================================================================
-task.spawn(function()
-    while task.wait() do
-        if not getgenv().OmegaCore_AutoFarm then continue end
+-- Função principal de loop
+while true do
+    -- Aguarda o personagem estar pronto
+    if humanoid and humanoid.Health > 0 then
+        moveToFarm()
         
-        local char = LocalPlayer.Character
-        if not char or not char:FindFirstChild("HumanoidRootPart") or char.Humanoid.Health <= 0 then continue end
-        
-        local currentQuestData = GetCurrentQuest()
-        if not currentQuestData then continue end
-        
-        -- Checagem de UI invisível para puxar missão (Quest Bypass)
-        local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
-        local questUI = playerGui and playerGui:FindFirstChild("Main") and playerGui.Main:FindFirstChild("Quest")
-        
-        if questUI and not questUI.Visible then
-            -- Coleta a missão via CommF_ (Remote Invoke)
-            CommF:InvokeServer("StartQuest", currentQuestData.QuestName, currentQuestData.QuestN)
-        else
-            -- Engine de caça e abate de mobs
-            local targetMob = nil
+        -- Simula um ataque simples (ajuste conforme sua arma/fruta)
+        local weapon = character:FindFirstChild("Weapon") or character:FindFirstChild("Fruit")
+        if weapon then
+            -- Lógica de ataque (exemplo genérico)
+            print("Atacando inimigos na área...")
             
-            -- Busca o mob vivo mais próximo ou disponível
-            for _, mob in pairs(WorkspaceEnemies:GetChildren()) do
-                if mob.Name == currentQuestData.MobName and mob:FindFirstChild("HumanoidRootPart") and mob:FindFirstChild("Humanoid") and mob.Humanoid.Health > 0 then
-                    targetMob = mob
-                    break
+            -- Verifica se há inimigos próximos (simplificado)
+            local enemies = workspace:FindFirstChild("Enemies") or workspace:FindFirstChild("NPCs")
+            if enemies then
+                for _, enemy in ipairs(enemies:GetChildren()) do
+                    if enemy and enemy.Parent ~= character then
+                        local dist = rootPart.Position - enemy.PrimaryPart.Position
+                        if mag(dist) < attackRange then
+                            -- Tocar animação de ataque (opcional, depende da ferramenta)
+                            print("Inimigo detectado!")
+                        end
+                    end
                 end
-            end
-            
-            if targetMob then
-                -- Calcula a posição Y=+15 e faz o personagem olhar para o mob
-                local mobPos = targetMob.HumanoidRootPart.Position
-                local targetFarmCFrame = targetMob.HumanoidRootPart.CFrame * CFrame.new(0, 15, 0)
-                local lookAtCFrame = CFrame.lookAt(targetFarmCFrame.Position, mobPos)
-                
-                TweenTo(lookAtCFrame)
-                EquipWeapon()
-                AutoAttack()
             else
-                -- Se não houver mobs vivos, aguarda no CFrame de spawn estipulado pela Database
-                local waitSpawnCFrame = currentQuestData.MobPos * CFrame.new(0, 15, 0)
-                TweenTo(waitSpawnCFrame)
+                print("Área limpa ou sem inimigos detectados.")
             end
+            
+            -- Pequeno delay para não processar demais
+            task.wait(1.5) 
         end
+    else
+        print("Aguardando personagem...")
+        task.wait(2)
     end
-end)
+    
+    -- Opcional: Voltar para spawn se estiver muito baixo de vida (exemplo simples)
+    if humanoid and humanoid.Health < 30 then
+        moveToFarm()
+        task.wait(5)
+    end
+end
