@@ -3,15 +3,36 @@ local character = player.Character or player.CharacterAdded:Wait()
 local humanoid = character:FindFirstChild("Humanoid")
 local rootPart = character:FindFirstChild("HumanoidRootPart")
 
--- Configurações
-local farmLocation = Vector3.new(100, 50, -200) -- Coordenadas de uma área segura (exemplo: Mar 1 ou 2)
+-- ⚙️ Configurações
+local farmLocation = Vector3.new(100, 50, -200) -- Ajuste conforme sua área (ex: Mar 1, Floresta, etc.)
 local attackRange = 40
 local speed = 16
+local healthThreshold = 30 -- Voltar ao spawn se HP < este valor
+local xpTarget = 5000 -- XP alvo para farmar
 
 -- Função para mover o personagem
 function moveToFarm()
-    local targetPos = farmLocation + Vector3.new(0, math.random(-5, 5), 0) -- Pequena variação para não ficar preso
+    local targetPos = farmLocation + Vector3.new(0, math.random(-5, 5), 0)
     rootPart.CFrame = CFrame.new(targetPos) * CFrame.Angles(math.rad(90), 0, 0)
+end
+
+-- Função para detectar inimigos próximos
+function findEnemies()
+    local enemies = workspace:FindFirstChild("Enemies") or workspace:FindFirstChild("NPCs") or workspace:FindFirstChild("Mobs")
+    
+    if not enemies then return nil end
+    
+    for _, enemy in ipairs(enemies:GetChildren()) do
+        if enemy and enemy.Parent ~= character then
+            local dist = rootPart.Position - enemy.PrimaryPart.Position
+            if mag(dist) < attackRange then
+                print("🎯 Inimigo detectado: " .. tostring(enemy.Name))
+                return enemy
+            end
+        end
+    end
+    
+    return nil
 end
 
 -- Função principal de loop
@@ -20,38 +41,36 @@ while true do
     if humanoid and humanoid.Health > 0 then
         moveToFarm()
         
-        -- Simula um ataque simples (ajuste conforme sua arma/fruta)
         local weapon = character:FindFirstChild("Weapon") or character:FindFirstChild("Fruit")
         if weapon then
-            -- Lógica de ataque (exemplo genérico)
-            print("Atacando inimigos na área...")
+            print("⚔️ Atacando automaticamente...")
             
-            -- Verifica se há inimigos próximos (simplificado)
-            local enemies = workspace:FindFirstChild("Enemies") or workspace:FindFirstChild("NPCs")
-            if enemies then
-                for _, enemy in ipairs(enemies:GetChildren()) do
-                    if enemy and enemy.Parent ~= character then
-                        local dist = rootPart.Position - enemy.PrimaryPart.Position
-                        if mag(dist) < attackRange then
-                            -- Tocar animação de ataque (opcional, depende da ferramenta)
-                            print("Inimigo detectado!")
-                        end
-                    end
-                end
+            -- Verifica se há inimigos próximos
+            local enemy = findEnemies()
+            if enemy then
+                -- Tocar animação de ataque (opcional, depende da ferramenta)
+                print("Inimigo detectado!")
+                
+                -- Delay entre ataques para parecer mais natural
+                task.wait(1.5) 
             else
-                print("Área limpa ou sem inimigos detectados.")
+                print("🌊 Área limpa ou sem inimigos detectados.")
+                task.wait(2)
             end
             
-            -- Pequeno delay para não processar demais
-            task.wait(1.5) 
+        else
+            print("🔫 Sem arma/fruta equipada!")
+            task.wait(3)
         end
+        
     else
-        print("Aguardando personagem...")
+        print("⏳ Aguardando personagem...")
         task.wait(2)
     end
     
-    -- Opcional: Voltar para spawn se estiver muito baixo de vida (exemplo simples)
-    if humanoid and humanoid.Health < 30 then
+    -- Opcional: Voltar para spawn se estiver muito baixo de vida
+    if humanoid and humanoid.Health < healthThreshold then
+        print("🚑 Vida baixa! Voltando ao spawn...")
         moveToFarm()
         task.wait(5)
     end
