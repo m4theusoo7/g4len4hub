@@ -1,104 +1,155 @@
--- OmegaCore Auto-Farm: Brutes (Pirate Village) até Level 55
-local player = game.Players.LocalPlayer
-local tweenService = game:GetService("TweenService")
-local vim = game:GetService("VirtualInputManager")
+-- [ OMEGA CORE - SEA 1 AUTO PROGRESSION ENGINE ] --
+-- Desenvolvido com arquitetura de Hubs Premium (Bypass Tween, Noclip e CommF_)
 
-local mobName = "Brute"
-local questName = "PirateQuest"
-local questLevel = 2 -- A quest dos Brutes é a número 2 na Pirate Village
-local questGiverCFrame = CFrame.new(-1139.5, 4.7, 3824.5) -- CFrame do NPC de Quest da Pirate Village
-local bruteSpawnCFrame = CFrame.new(-1145, 40, 4250) -- Posição de espera caso os Brutes não tenham spawnado
+getgenv().OmegaFarm_Enabled = true
+getgenv().FarmDistance = 7 -- Altura que o player fica acima do mob (evita dano terrestre)
+getgenv().TweenSpeed = 300 -- Velocidade do voo (300 é seguro contra anti-cheat)
 
--- Anti-AFK
-for _, connection in pairs(getconnections(player.Idled)) do
-    connection:Disable()
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local VirtualUser = game:GetService("VirtualUser")
+
+local Player = Players.LocalPlayer
+local CommF = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("CommF_")
+
+-- ==========================================
+-- 📚 TABELA DE PROGRESSÃO (DATABASE SEA 1)
+-- ==========================================
+local Sea1_Progression = {
+    -- Level 1 a 9: Ilha Inicial
+    {Min = 1, Max = 9, QuestName = "BanditQuest1", QuestN = 1, QuestPos = CFrame.new(1060, 16, 1547), MobName = "Bandit", MobPos = CFrame.new(1148, 16, 1610)},
+    
+    -- Level 10 a 14: Selva (Monkeys)
+    {Min = 10, Max = 14, QuestName = "JungleQuest", QuestN = 1, QuestPos = CFrame.new(-1602, 36, 152), MobName = "Monkey", MobPos = CFrame.new(-1432, 22, 140)},
+    
+    -- Level 15 a 29: Selva (Gorillas)
+    {Min = 15, Max = 29, QuestName = "JungleQuest", QuestN = 2, QuestPos = CFrame.new(-1602, 36, 152), MobName = "Gorilla", MobPos = CFrame.new(-1222, 6, -512)},
+    
+    -- Level 30 a 39: Vila Pirata (Pirates)
+    {Min = 30, Max = 39, QuestName = "BuggyQuest1", QuestN = 1, QuestPos = CFrame.new(-1140, 4, 3828), MobName = "Pirate", MobPos = CFrame.new(-1189, 4, 3971)},
+
+    -- ... [AQUI VOCÊ ADICIONA AS ILHAS DO MEIO: DESERTO, NEVE, MAGMA, ETC] ...
+
+    -- Level 625 a 700: Ilha da Fonte (Última ilha do Sea 1)
+    {Min = 625, Max = 1000, QuestName = "FountainQuest", QuestN = 1, QuestPos = CFrame.new(5257, 38, 4050), MobName = "Galley Pirate", MobPos = CFrame.new(5589, 38, 3996)}
+}
+
+-- ==========================================
+-- 🛠️ FUNÇÕES DE ENGENHARIA (BYPASS & CORE)
+-- ==========================================
+
+-- 1. Noclip (Evita o boneco travar em paredes durante o voo)
+RunService.Stepped:Connect(function()
+    if getgenv().OmegaFarm_Enabled and Player.Character then
+        for _, part in pairs(Player.Character:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = false
+            end
+        end
+    end
+end)
+
+-- 2. Motor de Movimentação Suave (Tween Bypass)
+local function TweenTo(targetCFrame)
+    if not Player.Character or not Player.Character:FindFirstChild("HumanoidRootPart") then return end
+    
+    local root = Player.Character.HumanoidRootPart
+    local distance = (root.Position - targetCFrame.Position).Magnitude
+    local time = distance / getgenv().TweenSpeed
+    
+    local tweenInfo = TweenInfo.new(time, Enum.EasingStyle.Linear)
+    local tween = TweenService:Create(root, tweenInfo, {CFrame = targetCFrame})
+    
+    tween:Play()
+    
+    -- Ancorar temporariamente se chegar no mob para não tomar knockback
+    if distance < 15 then
+        root.CFrame = targetCFrame
+        tween:Cancel()
+    end
 end
 
-local function noclip()
-    for _, part in pairs(player.Character:GetDescendants()) do
-        if part:IsA("BasePart") and part.CanCollide then
-            part.CanCollide = false
+-- 3. Identificador de Nível (Qual mob farmar agora?)
+local function GetCurrentQuestData()
+    local myLevel = Player.Data.Level.Value
+    for _, data in ipairs(Sea1_Progression) do
+        if myLevel >= data.Min and myLevel <= data.Max then
+            return data
+        end
+    end
+    return Sea1_Progression[#Sea1_Progression] -- Retorna o último se passar do level max
+end
+
+-- 4. Auto Equipar Arma (Sempre garante que o Melee está na mão)
+local function EquipWeapon()
+    if not Player.Character then return end
+    for _, tool in pairs(Player.Backpack:GetChildren()) do
+        if tool:IsA("Tool") and tool.ToolTip == "Melee" then -- Pode mudar para "Sword" ou "Blox Fruit"
+            Player.Character.Humanoid:EquipTool(tool)
         end
     end
 end
 
-local function tweenTo(targetCFrame)
-    if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-        local distance = (player.Character.HumanoidRootPart.Position - targetCFrame.Position).Magnitude
-        local speed = 300 -- Ajuste a velocidade se o anti-cheat der teleport back (padrão seguro 300)
-        local info = TweenInfo.new(distance / speed, Enum.EasingStyle.Linear)
-        local tween = tweenService:Create(player.Character.HumanoidRootPart, info, {CFrame = targetCFrame})
-        tween:Play()
-        tween.Completed:Wait()
-    end
+-- 5. Função de Ataque (Usa o Click Virtual do Roblox para segurança)
+local function AutoAttack()
+    VirtualUser:CaptureController()
+    VirtualUser:ClickButton1(Vector2.new())
 end
 
-local function hasQuest()
-    return player.PlayerGui.Main.Quest.Visible
-end
+-- ==========================================
+-- 🚀 LOOP PRINCIPAL DO OMEGACORE
+-- ==========================================
 
-local function getQuest()
-    if not hasQuest() then
-        tweenTo(questGiverCFrame)
-        task.wait(0.5)
-        -- Invoca o servidor para pegar a quest 2 (Brutes)
-        game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("StartQuest", questName, questLevel)
-    end
-end
-
-local function useSkills()
-    local skills = {Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C, Enum.KeyCode.V}
-    for _, key in ipairs(skills) do
-        vim:SendKeyEvent(true, key, false, game)
-        task.wait(0.05)
-        vim:SendKeyEvent(false, key, false, game)
-    end
-end
-
-local function attackMob(mob)
-    if mob and mob:FindFirstChild("Humanoid") and mob.Humanoid.Health > 0 and mob:FindFirstChild("HumanoidRootPart") then
-        -- Fica acima do Brute virado para baixo para evitar dano
-        tweenTo(mob.HumanoidRootPart.CFrame * CFrame.new(0, 8, 0) * CFrame.Angles(math.rad(-90), 0, 0))
-        
-        -- Auto Click
-        vim:SendMouseButtonEvent(0, 0, 0, true, game, 1)
-        task.wait(0.05)
-        vim:SendMouseButtonEvent(0, 0, 0, false, game, 1)
-        
-        -- Rotação de Skills
-        useSkills()
-    end
-end
-
-spawn(function()
+task.spawn(function()
     while task.wait() do
-        pcall(function()
-            local level = player.Data.Level.Value
-            
-            if level < 55 then
-                noclip() -- Impede de enganchar nas casas da vila
-                
-                if hasQuest() then
-                    local foundMob = false
-                    
-                    for _, v in pairs(workspace.Enemies:GetChildren()) do
-                        if v.Name == mobName and v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 then
-                            foundMob = true
-                            attackMob(v)
-                            break -- Foca em um Brute por vez
-                        end
-                    end
-                    
-                    if not foundMob then
-                        -- Se matou todos, fica esperando no ar em cima do spawn point
-                        tweenTo(bruteSpawnCFrame) 
-                    end
-                else
-                    getQuest()
-                end
+        if not getgenv().OmegaFarm_Enabled then break end
+        
+        local questData = GetCurrentQuestData()
+        local hasQuest = false
+        
+        -- Verifica na UI se já estamos com uma missão ativa
+        if Player.PlayerGui.Main.Quest.Visible then
+            hasQuest = true
+        end
+
+        if not hasQuest then
+            -- 1. Ir até o NPC da Missão
+            local root = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
+            if root and (root.Position - questData.QuestPos.Position).Magnitude > 5 then
+                TweenTo(questData.QuestPos)
             else
-                print("[OmegaCore] Level 55 atingido! Finalizando o farm dos Brutes. Hora de ir pro Bobby ou Desert Island.")
+                -- 2. Puxar a missão silenciosamente usando o CommF_
+                CommF:InvokeServer("StartQuest", questData.QuestName, questData.QuestN)
+                task.wait(0.5) -- Pausa rápida para o servidor registrar
             end
-        end)
+        else
+            -- 3. Procurar o Mob no Mapa
+            local targetMob = nil
+            for _, v in pairs(workspace.Enemies:GetChildren()) do
+                if v.Name == questData.MobName and v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 then
+                    targetMob = v
+                    break
+                end
+            end
+
+            -- 4. Matar o Mob ou Esperar o Spawn
+            if targetMob and targetMob:FindFirstChild("HumanoidRootPart") then
+                EquipWeapon()
+                -- Fica acima do mob (CFrame.new(0, FarmDistance, 0)) para não levar hit
+                TweenTo(targetMob.HumanoidRootPart.CFrame * CFrame.new(0, getgenv().FarmDistance, 0))
+                
+                -- Olha pra baixo na direção do mob e ataca
+                Player.Character.HumanoidRootPart.CFrame = CFrame.lookAt(
+                    Player.Character.HumanoidRootPart.Position, 
+                    targetMob.HumanoidRootPart.Position
+                )
+                AutoAttack()
+            else
+                -- Se não achou o mob, voa para o ponto de respawn e espera
+                TweenTo(questData.MobPos * CFrame.new(0, 20, 0))
+            end
+        end
     end
 end)
