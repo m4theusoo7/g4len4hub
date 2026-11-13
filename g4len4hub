@@ -1,80 +1,104 @@
--- ==========================================
--- OmegaCore - Pirate Village Auto-Farm (Lvl 30-60)
--- ==========================================
-
-_G.AutoFarmPirateVillage = true -- Mude para false para parar o script
-
+-- OmegaCore Auto-Farm: Brutes (Pirate Village) até Level 55
 local player = game.Players.LocalPlayer
-local rs = game:GetService("ReplicatedStorage")
-local commF = rs:WaitForChild("Remotes"):WaitForChild("CommF_")
+local tweenService = game:GetService("TweenService")
+local vim = game:GetService("VirtualInputManager")
 
--- Coordenadas Mapeadas (Pirate Village)
-local pos_Pirate = Vector3.new(-981.0, 26.0, 3966.8)
-local pos_Brute = Vector3.new(-1094.9, 26.0, 4442.9)
+local mobName = "Brute"
+local questName = "PirateQuest"
+local questLevel = 2 -- A quest dos Brutes é a número 2 na Pirate Village
+local questGiverCFrame = CFrame.new(-1139.5, 4.7, 3824.5) -- CFrame do NPC de Quest da Pirate Village
+local bruteSpawnCFrame = CFrame.new(-1145, 40, 4250) -- Posição de espera caso os Brutes não tenham spawnado
 
--- Configuração do Alvo Atual
-local mobAlvo = "Pirate" -- Mude para "Brute" no nível 40
-local questNome = "PirateQuest"
-local questLevel = 1 -- 1 = Pirate, 2 = Brute
-local spawnAtual = pos_Pirate
-
--- 1. MENSAGEM FALSA PARA O SERVIDOR (Remote Spoofing)
-local function pegarMissaoRemota()
-    local gui = player.PlayerGui
-    -- Verifica se o painel de missão não está visível na tela
-    if gui and gui:FindFirstChild("Main") and gui.Main:FindFirstChild("Quest") and not gui.Main.Quest.Visible then
-        pcall(function()
-            -- Envia os argumentos diretos para o servidor fingindo interação com o NPC
-            commF:InvokeServer("StartQuest", questNome, questLevel)
-        end)
-        task.wait(0.5) -- Pausa rápida para o servidor processar e a UI atualizar
-    end
+-- Anti-AFK
+for _, connection in pairs(getconnections(player.Idled)) do
+    connection:Disable()
 end
 
--- 2. FUNÇÃO DE ATAQUE E MOVIMENTAÇÃO
-local function autoFarma()
-    local char = player.Character
-    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
-
-    local alvoEncontrado = false
-
-    -- Procura o mob renderizado no mapa
-    for _, v in pairs(workspace.Enemies:GetChildren()) do
-        if v.Name == mobAlvo and v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 and v:FindFirstChild("HumanoidRootPart") then
-            alvoEncontrado = true
-            
-            -- Bypass de colisão para não prender em paredes (Noclip)
-            for _, part in pairs(char:GetDescendants()) do
-                if part:IsA("BasePart") then
-                    part.CanCollide = false
-                end
-            end
-            
-            -- TP para as costas do inimigo
-            char.HumanoidRootPart.CFrame = v.HumanoidRootPart.CFrame * CFrame.new(0, 0, 3)
-            
-            -- Ativa a ferramenta (Fast Attack embutido do executor ou clique padrão)
-            local tool = char:FindFirstChildOfClass("Tool")
-            if tool then
-                tool:Activate()
-            end
-            
-            break -- Trava em um inimigo até ele morrer
+local function noclip()
+    for _, part in pairs(player.Character:GetDescendants()) do
+        if part:IsA("BasePart") and part.CanCollide then
+            part.CanCollide = false
         end
     end
+end
 
-    -- Se não achou o mob vivo perto, vai para a coordenada de Spawn que você mapeou
-    if not alvoEncontrado then
-        char.HumanoidRootPart.CFrame = CFrame.new(spawnAtual)
+local function tweenTo(targetCFrame)
+    if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+        local distance = (player.Character.HumanoidRootPart.Position - targetCFrame.Position).Magnitude
+        local speed = 300 -- Ajuste a velocidade se o anti-cheat der teleport back (padrão seguro 300)
+        local info = TweenInfo.new(distance / speed, Enum.EasingStyle.Linear)
+        local tween = tweenService:Create(player.Character.HumanoidRootPart, info, {CFrame = targetCFrame})
+        tween:Play()
+        tween.Completed:Wait()
     end
 end
 
--- 3. LOOP PRINCIPAL DO OMEGACORE
-task.spawn(function()
+local function hasQuest()
+    return player.PlayerGui.Main.Quest.Visible
+end
+
+local function getQuest()
+    if not hasQuest() then
+        tweenTo(questGiverCFrame)
+        task.wait(0.5)
+        -- Invoca o servidor para pegar a quest 2 (Brutes)
+        game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("StartQuest", questName, questLevel)
+    end
+end
+
+local function useSkills()
+    local skills = {Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C, Enum.KeyCode.V}
+    for _, key in ipairs(skills) do
+        vim:SendKeyEvent(true, key, false, game)
+        task.wait(0.05)
+        vim:SendKeyEvent(false, key, false, game)
+    end
+end
+
+local function attackMob(mob)
+    if mob and mob:FindFirstChild("Humanoid") and mob.Humanoid.Health > 0 and mob:FindFirstChild("HumanoidRootPart") then
+        -- Fica acima do Brute virado para baixo para evitar dano
+        tweenTo(mob.HumanoidRootPart.CFrame * CFrame.new(0, 8, 0) * CFrame.Angles(math.rad(-90), 0, 0))
+        
+        -- Auto Click
+        vim:SendMouseButtonEvent(0, 0, 0, true, game, 1)
+        task.wait(0.05)
+        vim:SendMouseButtonEvent(0, 0, 0, false, game, 1)
+        
+        -- Rotação de Skills
+        useSkills()
+    end
+end
+
+spawn(function()
     while task.wait() do
-        if _G.AutoFarmPirateVillage then
-            pegarMissaoRemota()
-            autoFarma()
-        end
+        pcall(function()
+            local level = player.Data.Level.Value
+            
+            if level < 55 then
+                noclip() -- Impede de enganchar nas casas da vila
+                
+                if hasQuest() then
+                    local foundMob = false
+                    
+                    for _, v in pairs(workspace.Enemies:GetChildren()) do
+                        if v.Name == mobName and v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 then
+                            foundMob = true
+                            attackMob(v)
+                            break -- Foca em um Brute por vez
+                        end
+                    end
+                    
+                    if not foundMob then
+                        -- Se matou todos, fica esperando no ar em cima do spawn point
+                        tweenTo(bruteSpawnCFrame) 
+                    end
+                else
+                    getQuest()
+                end
+            else
+                print("[OmegaCore] Level 55 atingido! Finalizando o farm dos Brutes. Hora de ir pro Bobby ou Desert Island.")
+            end
+        end)
     end
 end)
