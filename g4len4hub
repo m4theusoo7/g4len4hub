@@ -1,164 +1,80 @@
 -- ==========================================
---        OMEGACORE: AUTO-FARM V5 (PIRATE VILLAGE)
+-- OmegaCore - Pirate Village Auto-Farm (Lvl 30-60)
 -- ==========================================
 
-_G.AutoFarm = true
-_G.TargetMob = "Pirate" -- Mude para "Brute" se quiser farmar os Brutes
-_G.AttackDistance = 15 -- Altura que vai ficar em cima do mob
+_G.AutoFarmPirateVillage = true -- Mude para false para parar o script
 
--- Serviços
 local player = game.Players.LocalPlayer
-local rs = game:GetService("RunService")
-local ts = game:GetService("TweenService")
-local rep = game:GetService("ReplicatedStorage")
-local vim = game:GetService("VirtualUser")
+local rs = game:GetService("ReplicatedStorage")
+local commF = rs:WaitForChild("Remotes"):WaitForChild("CommF_")
 
--- ==========================================
--- COORDENADAS MAPEADAS (Importadas do seu script)
--- ==========================================
-local pos_Pirate_Adventurer = Vector3.new(-1151.6, 16.6, 3863.1)
+-- Coordenadas Mapeadas (Pirate Village)
 local pos_Pirate = Vector3.new(-981.0, 26.0, 3966.8)
 local pos_Brute = Vector3.new(-1094.9, 26.0, 4442.9)
 
--- Variavel de Controle de Tween
-local currentTween = nil
+-- Configuração do Alvo Atual
+local mobAlvo = "Pirate" -- Mude para "Brute" no nível 40
+local questNome = "PirateQuest"
+local questLevel = 1 -- 1 = Pirate, 2 = Brute
+local spawnAtual = pos_Pirate
 
--- Função de Teleporte Limpo (Bypass Aéreo)
-local function TP(targetCFrame)
+-- 1. MENSAGEM FALSA PARA O SERVIDOR (Remote Spoofing)
+local function pegarMissaoRemota()
+    local gui = player.PlayerGui
+    -- Verifica se o painel de missão não está visível na tela
+    if gui and gui:FindFirstChild("Main") and gui.Main:FindFirstChild("Quest") and not gui.Main.Quest.Visible then
+        pcall(function()
+            -- Envia os argumentos diretos para o servidor fingindo interação com o NPC
+            commF:InvokeServer("StartQuest", questNome, questLevel)
+        end)
+        task.wait(0.5) -- Pausa rápida para o servidor processar e a UI atualizar
+    end
+end
+
+-- 2. FUNÇÃO DE ATAQUE E MOVIMENTAÇÃO
+local function autoFarma()
     local char = player.Character
     if not char or not char:FindFirstChild("HumanoidRootPart") then return end
-    
-    local hrp = char.HumanoidRootPart
-    local dist = (hrp.Position - targetCFrame.Position).Magnitude
-    
-    if dist < 20 then
-        -- Se estiver perto, teleporta direto para não bugar o Tween
-        if currentTween then currentTween:Cancel() end
-        hrp.CFrame = targetCFrame
-    else
-        -- Se estiver longe, usa Tween suave
-        local speed = 300
-        local tweenInfo = TweenInfo.new(dist / speed, Enum.EasingStyle.Linear)
-        currentTween = ts:Create(hrp, tweenInfo, {CFrame = targetCFrame})
-        currentTween:Play()
-    end
-end
 
--- Função para Pegar a Quest Certa
-local function PegarQuest()
-    local questNum = (_G.TargetMob == "Pirate") and 1 or 2
-    local args = {
-        [1] = "StartQuest",
-        [2] = "PirateQuest",
-        [3] = questNum
-    }
-    rep.Remotes.CommF_:InvokeServer(unpack(args))
-end
+    local alvoEncontrado = false
 
--- Função para Equipar Arma
-local function EquiparArma()
-    local char = player.Character
-    if char and not char:FindFirstChildOfClass("Tool") then
-        -- Tenta puxar a primeira arma do inventário (Melee ou Espada)
-        for _, tool in pairs(player.Backpack:GetChildren()) do
-            if tool:IsA("Tool") and (tool.ToolTip == "Melee" or tool.ToolTip == "Sword" or tool.ToolTip == "Blox Fruit") then
-                char.Humanoid:EquipTool(tool)
-                break
+    -- Procura o mob renderizado no mapa
+    for _, v in pairs(workspace.Enemies:GetChildren()) do
+        if v.Name == mobAlvo and v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 and v:FindFirstChild("HumanoidRootPart") then
+            alvoEncontrado = true
+            
+            -- Bypass de colisão para não prender em paredes (Noclip)
+            for _, part in pairs(char:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    part.CanCollide = false
+                end
             end
+            
+            -- TP para as costas do inimigo
+            char.HumanoidRootPart.CFrame = v.HumanoidRootPart.CFrame * CFrame.new(0, 0, 3)
+            
+            -- Ativa a ferramenta (Fast Attack embutido do executor ou clique padrão)
+            local tool = char:FindFirstChildOfClass("Tool")
+            if tool then
+                tool:Activate()
+            end
+            
+            break -- Trava em um inimigo até ele morrer
         end
     end
+
+    -- Se não achou o mob vivo perto, vai para a coordenada de Spawn que você mapeou
+    if not alvoEncontrado then
+        char.HumanoidRootPart.CFrame = CFrame.new(spawnAtual)
+    end
 end
 
--- Sistema de Noclip e Anti-Queda
-rs.Stepped:Connect(function()
-    if _G.AutoFarm then
-        pcall(function()
-            local char = player.Character
-            if char and char:FindFirstChild("HumanoidRootPart") then
-                -- Noclip: Atravessar paredes
-                for _, v in pairs(char:GetDescendants()) do
-                    if v:IsA("BasePart") and v.CanCollide then
-                        v.CanCollide = false
-                    end
-                end
-                -- Travar o personagem no ar enquanto ataca
-                char.HumanoidRootPart.Velocity = Vector3.new(0, 0, 0)
-            end
-        end)
-    end
-end)
-
--- ==========================================
--- LOOP PRINCIPAL DO AUTO-FARM
--- ==========================================
+-- 3. LOOP PRINCIPAL DO OMEGACORE
 task.spawn(function()
     while task.wait() do
-        if not _G.AutoFarm then break end
-        
-        pcall(function()
-            local char = player.Character
-            if not char or not char:FindFirstChild("Humanoid") or char.Humanoid.Health <= 0 then return end
-            
-            -- 1. Verifica se temos a quest ativa
-            local questGui = player.PlayerGui.Main:FindFirstChild("Quest")
-            local temQuest = questGui and questGui.Visible
-            
-            if temQuest then
-                -- Verifica se pegou a quest errada por acidente
-                if not string.find(questGui.Container.QuestTitle.Title.Text, _G.TargetMob) then
-                    rep.Remotes.CommF_:InvokeServer("AbandonQuest")
-                    task.wait(0.5)
-                    return
-                end
-            end
-            
-            if not temQuest then
-                -- 2. Vai até o NPC pegar a Quest
-                local questCFrame = CFrame.new(pos_Pirate_Adventurer)
-                TP(questCFrame)
-                
-                -- Se chegou no NPC, pega a quest
-                if (char.HumanoidRootPart.Position - pos_Pirate_Adventurer).Magnitude < 15 then
-                    PegarQuest()
-                    task.wait(0.5) -- Pausa rápida para o servidor registrar a quest
-                end
-            else
-                -- 3. Procura o Monstro Vivo
-                local mobTarget = nil
-                
-                for _, mob in pairs(workspace.Enemies:GetChildren()) do
-                    -- Confirma nome e se está vivo
-                    if string.find(mob.Name, _G.TargetMob) and mob:FindFirstChild("Humanoid") and mob.Humanoid.Health > 0 and mob:FindFirstChild("HumanoidRootPart") then
-                        mobTarget = mob
-                        break
-                    end
-                end
-                
-                if mobTarget then
-                    -- 4. Vai até o Monstro e Ataca
-                    -- Fica exatamente acima do mob (AttackDistance) virado para baixo
-                    local mobRoot = mobTarget.HumanoidRootPart
-                    local attackPos = mobRoot.CFrame * CFrame.new(0, _G.AttackDistance, 0)
-                    local lookAtPos = CFrame.lookAt(attackPos.Position, mobRoot.Position)
-                    
-                    TP(lookAtPos)
-                    
-                    if (char.HumanoidRootPart.Position - attackPos.Position).Magnitude < 10 then
-                        EquiparArma()
-                        
-                        -- Clica automaticamente para atacar (Fast Attack Simples)
-                        vim:CaptureController()
-                        vim:ClickButton1(Vector2.new(0, 0))
-                    end
-                else
-                    -- 5. Se não tiver mob vivo, vai para a coordenada de Spawn aguardar
-                    local spawnWaitPos = (_G.TargetMob == "Pirate") and pos_Pirate or pos_Brute
-                    -- Fica planando no alto esperando o mob nascer
-                    TP(CFrame.new(spawnWaitPos) * CFrame.new(0, 30, 0))
-                end
-            end
-        end)
+        if _G.AutoFarmPirateVillage then
+            pegarMissaoRemota()
+            autoFarma()
+        end
     end
 end)
-
-print("[OmegaCore] Auto-Farm Iniciado! Alvo: " .. _G.TargetMob)
