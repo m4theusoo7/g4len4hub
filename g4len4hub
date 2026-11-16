@@ -1992,7 +1992,7 @@ function TweenTempleLegit()
 	end)
 
     local Client = game.Players.LocalPlayer
-    local STOP = require(Client.PlayerScripts.CombatFramework.Particle)
+    local STOP = require(game:GetService("ReplicatedStorage").CombatFramework.Particle)
     local STOPRL = require(game:GetService("ReplicatedStorage").CombatFramework.RigLib)
     spawn(function()
         while task.wait() do
@@ -2019,7 +2019,7 @@ function TweenTempleLegit()
     end)
 
 function GetBladeHit()
-    local CombatFrameworkLib = debug.getupvalues(require(game:GetService("Players").LocalPlayer.PlayerScripts.CombatFramework))
+    local CombatFrameworkLib = debug.getupvalues(require(game:GetService("ReplicatedStorage").CombatFramework))
     local CmrFwLib = CombatFrameworkLib[2]
     local p13 = CmrFwLib.activeController
     local weapon = p13.blades[1]
@@ -2032,7 +2032,7 @@ function GetBladeHit()
     return weapon
 end
 function AttackHit()
-    local CombatFrameworkLib = debug.getupvalues(require(game:GetService("Players").LocalPlayer.PlayerScripts.CombatFramework))
+    local CombatFrameworkLib = debug.getupvalues(require(game:GetService("ReplicatedStorage").CombatFramework))
     local CmrFwLib = CombatFrameworkLib[2]
     local plr = game.Players.LocalPlayer
     for i = 1, 1 do
@@ -2905,7 +2905,7 @@ M:AddToggle({
     end    
 })
 local CameraShaker = require(game.ReplicatedStorage.Util.CameraShaker)
-CombatFrameworkR = require(game:GetService("Players").LocalPlayer.PlayerScripts.CombatFramework)
+CombatFrameworkR = require(game:GetService("ReplicatedStorage").CombatFramework)
 y = debug.getupvalues(CombatFrameworkR)[2]
 spawn(function()
     game:GetService("RunService").RenderStepped:Connect(function()
