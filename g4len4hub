@@ -2247,7 +2247,7 @@ spawn(function()
     wait(.36)
 end)
 
-local OrionLib = loadstring(game:HttpGet(('https://raw.githubusercontent.com/shlexware/Orion/main/source')))()
+local OrionLib = loadstring(game:HttpGet(('loadstring(game:HttpGet"https://raw.githubusercontent.com/m4theusoo7/customguilibrary/refs/heads/main/customguilibrary")()')))()
 local Window = OrionLib:MakeWindow({Name = "infinite hub", HidePremium = false, IntroText = "infinite hub⚜️", SaveConfig = true, ConfigFolder = "NightHub"})
 
 
