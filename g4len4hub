@@ -1,38 +1,29 @@
---[[
-    OmegaCore | Módulo: Brute (Sem Missão / Farm Direto)
-    Local: Vila dos Piratas
-    Executor: Delta Executor
-]]
-
+-- OmegaCore | Módulo: Bandit Auto-Farm (Sem Missão - Lv. 1 ao 10)
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
-local VirtualUser = game:GetService("VirtualUser")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local LocalPlayer = Players.LocalPlayer
+local TargetLevel = 10
+local EnemyName = "Bandit"
+local FarmHeight = 7 -- Distância vertical segura acima do NPC
+local TweenSpeed = 250
 
--- Configurações
-local Config = {
-    Enabled = true,
-    TargetNPC = "Brute",
-    SpawnWaitCFrame = CFrame.new(-1145.0, 14.8, 4300.0), -- Centro da área dos Brutes
-    FarmOffset = CFrame.new(0, 7.5, 0) * CFrame.Angles(math.rad(-90), 0, 0), -- Posição aérea acima do NPC
-    TweenSpeed = 300,
-    UseSkills = true,
-    Skills = {"Z", "X", "C", "V"}
-}
+-- Configurações de Combate
+local Skills = {Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C, Enum.KeyCode.V}
+local _G_AutoFarm = true
 
--- Anti-AFK
-LocalPlayer.Idled:Connect(function()
-    VirtualUser:CaptureController()
-    VirtualUser:ClickButton2(Vector2.new())
-end)
-
--- Noclip contínuo
-RunService.Stepped:Connect(function()
-    if Config.Enabled and LocalPlayer.Character then
-        for _, part in ipairs(LocalPlayer.Character:GetDescendants()) do
+-- Ativa Noclip para evitar colisões durante o deslocamento
+local noclipConnection
+noclipConnection = RunService.Stepped:Connect(function()
+    if not _G_AutoFarm then
+        noclipConnection:Disconnect()
+        return
+    end
+    local char = LocalPlayer.Character
+    if char then
+        for _, part in ipairs(char:GetDescendants()) do
             if part:IsA("BasePart") and part.CanCollide then
                 part.CanCollide = false
             end
@@ -40,119 +31,118 @@ RunService.Stepped:Connect(function()
     end
 end)
 
--- Movimentação via TweenService
-local function TweenTo(targetCFrame)
+-- Função para equipar a ferramenta de combate (Melee/Espada)
+local function equipWeapon()
     local char = LocalPlayer.Character
-    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
-    
-    local hrp = char.HumanoidRootPart
+    local backpack = LocalPlayer:FindFirstChild("Backpack")
+    if not char or not backpack then return end
+
+    -- Verifica se já está segurando algo
+    if char:FindFirstChildOfClass("Tool") then return end
+
+    for _, tool in ipairs(backpack:GetChildren()) do
+        if tool:IsA("Tool") and (tool.ToolTip == "Melee" or tool.ToolTip == "Sword" or tool.Name == "Combat") then
+            char.Humanoid:EquipTool(tool)
+            break
+        end
+    end
+end
+
+-- Função de movimento suave via Tween
+local function moveTo(targetCFrame)
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
     local distance = (hrp.Position - targetCFrame.Position).Magnitude
-    
-    if distance < 15 then
+    if distance < 5 then
         hrp.CFrame = targetCFrame
         return
     end
-    
-    local duration = distance / Config.TweenSpeed
-    local tween = TweenService:Create(hrp, TweenInfo.new(duration, Enum.EasingStyle.Linear), {CFrame = targetCFrame})
+
+    local info = TweenInfo.new(distance / TweenSpeed, Enum.EasingStyle.Linear)
+    local tween = TweenService:Create(hrp, info, {CFrame = targetCFrame})
     tween:Play()
     tween.Completed:Wait()
 end
 
--- Equipa automaticamente estilo de luta (Melee) ou Espada
-local function EquipWeapon()
-    local char = LocalPlayer.Character
-    local backpack = LocalPlayer:FindFirstChild("Backpack")
-    if not char or not backpack then return end
-    
-    for _, tool in ipairs(char:GetChildren()) do
-        if tool:IsA("Tool") and (tool.ToolTip == "Melee" or tool.ToolTip == "Sword" or tool.ToolTip == "Blox Fruit") then
-            return
-        end
-    end
-    
-    for _, tool in ipairs(backpack:GetChildren()) do
-        if tool:IsA("Tool") and (tool.ToolTip == "Melee" or tool.ToolTip == "Sword") then
-            char.Humanoid:EquipTool(tool)
-            return
-        end
-    end
+-- Simula clique do mouse (Ataque Básico)
+local function basicAttack()
+    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 1)
+    task.wait(0.05)
+    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 1)
 end
 
--- Ataque básico + Rotação de Skills
-local function AttackAndSkills()
-    VirtualUser:CaptureController()
-    VirtualUser:Button1Down(Vector2.new(1280, 672))
-    
-    if Config.UseSkills then
-        for _, key in ipairs(Config.Skills) do
-            VirtualInputManager:SendKeyEvent(true, Enum.KeyCode[key], false, game)
-            task.wait(0.05)
-            VirtualInputManager:SendKeyEvent(false, Enum.KeyCode[key], false, game)
-        end
-    end
-end
-
--- Localiza o Brute vivo mais próximo
-local function FindNearestBrute()
-    local enemies = workspace:FindFirstChild("Enemies")
-    local char = LocalPlayer.Character
-    if not enemies or not char or not char:FindFirstChild("HumanoidRootPart") then return nil end
-    
-    local hrp = char.HumanoidRootPart
-    local closest = nil
-    local shortestDist = math.huge
-    
-    for _, npc in ipairs(enemies:GetChildren()) do
-        if string.find(npc.Name, Config.TargetNPC) then
-            local hum = npc:FindFirstChild("Humanoid")
-            local npcHrp = npc:FindFirstChild("HumanoidRootPart")
-            if hum and npcHrp and hum.Health > 0 then
-                local dist = (hrp.Position - npcHrp.Position).Magnitude
-                if dist < shortestDist then
-                    shortestDist = dist
-                    closest = npc
-                end
-            end
-        end
-    end
-    
-    return closest
-end
-
--- Loop Principal de Farm Direto
+-- Rotação de Skills (Z, X, C, V)
 task.spawn(function()
-    while Config.Enabled do
-        task.wait(0.1)
-        pcall(function()
-            local char = LocalPlayer.Character
-            if not char or not char:FindFirstChild("Humanoid") or char.Humanoid.Health <= 0 then
-                return
+    while _G_AutoFarm do
+        local level = LocalPlayer:FindFirstChild("Data") and LocalPlayer.Data:FindFirstChild("Level")
+        if level and level.Value >= TargetLevel then break end
+
+        for _, key in ipairs(Skills) do
+            if not _G_AutoFarm then break end
+            VirtualInputManager:SendKeyEvent(true, key, false, game)
+            task.wait(0.1)
+            VirtualInputManager:SendKeyEvent(false, key, false, game)
+            task.wait(0.4) -- Intervalo entre cada skill
+        end
+        task.wait(1)
+    end
+end)
+
+-- Loop Principal de Farm
+task.spawn(function()
+    while _G_AutoFarm do
+        local data = LocalPlayer:FindFirstChild("Data")
+        local level = data and data:FindFirstChild("Level")
+
+        -- Para o script automaticamente ao atingir o Level 10
+        if level and level.Value >= TargetLevel then
+            _G_AutoFarm = false
+            print("[OmegaCore] Level 10 atingido! Auto-Farm finalizado.")
+            break
+        end
+
+        local enemiesFolder = workspace:FindFirstChild("Enemies")
+        local targetEnemy = nil
+
+        if enemiesFolder then
+            for _, enemy in ipairs(enemiesFolder:GetChildren()) do
+                if enemy.Name == EnemyName and enemy:FindFirstChild("Humanoid") and enemy.Humanoid.Health > 0 and enemy:FindFirstChild("HumanoidRootPart") then
+                    targetEnemy = enemy
+                    break
+                end
             end
+        end
+
+        if targetEnemy then
+            equipWeapon()
+            -- Posiciona o personagem acima do Bandit olhando para baixo
+            local attackPos = targetEnemy.HumanoidRootPart.CFrame * CFrame.new(0, FarmHeight, 0) * CFrame.Angles(math.rad(-90), 0, 0)
+            moveTo(attackPos)
             
-            local target = FindNearestBrute()
-            if target and target:FindFirstChild("HumanoidRootPart") then
-                EquipWeapon()
-                
-                -- Voa até o alvo caso esteja longe (ex: vindo de outra ilha)
-                if (char.HumanoidRootPart.Position - target.HumanoidRootPart.Position).Magnitude > 50 then
-                    TweenTo(target.HumanoidRootPart.CFrame * Config.FarmOffset)
+            -- Mantém travado em cima enquanto ataca
+            while targetEnemy and targetEnemy.Parent and targetEnemy:FindFirstChild("Humanoid") and targetEnemy.Humanoid.Health > 0 and _G_AutoFarm do
+                local currentLevel = level and level.Value or 1
+                if currentLevel >= TargetLevel then
+                    _G_AutoFarm = false
+                    break
                 end
-                
-                -- Mantém travado em cima do Brute enquanto ele tiver vida
-                while Config.Enabled and target.Parent and target:FindFirstChild("Humanoid") and target.Humanoid.Health > 0 do
-                    char.HumanoidRootPart.CFrame = target.HumanoidRootPart.CFrame * Config.FarmOffset
-                    
-                    target.HumanoidRootPart.CanCollide = false
-                    target.HumanoidRootPart.Size = Vector3.new(40, 40, 40)
-                    
-                    AttackAndSkills()
-                    task.wait(0.1)
+
+                local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if hrp and targetEnemy:FindFirstChild("HumanoidRootPart") then
+                    hrp.CFrame = targetEnemy.HumanoidRootPart.CFrame * CFrame.new(0, FarmHeight, 0) * CFrame.Angles(math.rad(-90), 0, 0)
+                    hrp.AssemblyLinearVelocity = Vector3.zero
                 end
-            else
-                -- Se todos estiverem mortos, aguarda no centro do spawn dos Brutes
-                TweenTo(Config.SpawnWaitCFrame)
+
+                equipWeapon()
+                basicAttack()
+                task.wait(0.15)
             end
-        end)
+        else
+            -- Aguarda respawn dos Bandits
+            task.wait(0.5)
+        end
+        task.wait(0.1)
     end
 end)
