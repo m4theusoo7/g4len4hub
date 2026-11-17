@@ -1,221 +1,70 @@
--- OmegaCore | Módulo: Pirate Village Auto-Farm (Lv. 30 ao 60 - Altura Ajustada)
+-- OmegaCore | Módulo: Deslocamento Seguro para Ilha Desert (Sea 1)
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local LocalPlayer = Players.LocalPlayer
-local MaxTargetLevel = 60
 
--- Configurações de Distância Vertical Segura (Ajustada para alcance ideal de ataque)
-local FarmHeight = 9.5      -- Altura ideal acima dos Pirates
-local BossExtraHeight = 2.0 -- +2 studs para Brute e Chef (Total: 11.5 studs)
-local TweenSpeed = 250      -- Velocidade segura anti-rollback
+-- Coordenada segura na entrada principal da Ilha Desert (próxima ao Desert Adventurer)
+local DesertCFrame = CFrame.new(944.1, 20.9, 4373.3)
+local TweenSpeed = 185 -- Velocidade segura anti-rollback para travessias longas
 
--- Coordenadas de spawn/patrulha na Pirate Village
-local SpawnPoints = {
-    ["Pirate"] = CFrame.new(-1211.8, 14.5, 3915.2),
-    ["Brute"] = CFrame.new(-1145.0, 15.0, 4305.0),
-    ["Chef"] = CFrame.new(-1131.5, 14.5, 4080.0)
-}
+local function teleportToDesert()
+    local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+    local hrp = char:WaitForChild("HumanoidRootPart")
+    local humanoid = char:WaitForChild("Humanoid")
 
-local Skills = {Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C, Enum.KeyCode.V}
-local _G_PirateFarm = true
-
--- Calcula o CFrame seguro acima do alvo
-local function getSafeAboveCFrame(enemy)
-    local enemyHRP = enemy:FindFirstChild("HumanoidRootPart")
-    if not enemyHRP then return nil end
-
-    local heightOffset = FarmHeight
-    if enemy.Name == "Chef" or enemy.Name == "Brute" then
-        heightOffset = FarmHeight + BossExtraHeight -- 11.5 studs acima
-    end
-
-    return enemyHRP.CFrame * CFrame.new(0, heightOffset, 0) * CFrame.Angles(math.rad(-90), 0, 0)
-end
-
--- Noclip contínuo
-local noclipConnection
-noclipConnection = RunService.Stepped:Connect(function()
-    if not _G_PirateFarm then
-        if noclipConnection then noclipConnection:Disconnect() end
-        return
-    end
-    local char = LocalPlayer.Character
-    if char then
-        for _, part in ipairs(char:GetDescendants()) do
-            if part:IsA("BasePart") and part.CanCollide then
-                part.CanCollide = false
-            end
-        end
-    end
-end)
-
--- Equipa Melee ou Espada automaticamente
-local function equipWeapon()
-    local char = LocalPlayer.Character
-    local backpack = LocalPlayer:FindFirstChild("Backpack")
-    if not char or not backpack then return end
-
-    if char:FindFirstChildOfClass("Tool") then return end
-
-    for _, tool in ipairs(backpack:GetChildren()) do
-        if tool:IsA("Tool") and (tool.ToolTip == "Melee" or tool.ToolTip == "Sword" or tool.Name == "Combat") then
-            char.Humanoid:EquipTool(tool)
-            break
-        end
-    end
-end
-
--- Deslocamento estabilizado com BodyVelocity + PlatformStand
-local function safeMoveTo(targetCFrame)
-    local char = LocalPlayer.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    local humanoid = char and char:FindFirstChild("Humanoid")
     if not hrp or not humanoid then return end
 
-    local distance = (hrp.Position - targetCFrame.Position).Magnitude
-    if distance < 10 then
-        hrp.CFrame = targetCFrame
-        return
-    end
+    local isMoving = true
 
+    -- Trava a física do personagem para evitar estado de natação ou queda no mar
     humanoid.PlatformStand = true
+
     local bodyVel = Instance.new("BodyVelocity")
     bodyVel.Name = "OmegaCoreStabilizer"
     bodyVel.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
     bodyVel.Velocity = Vector3.zero
     bodyVel.Parent = hrp
 
-    local info = TweenInfo.new(distance / TweenSpeed, Enum.EasingStyle.Linear)
-    local tween = TweenService:Create(hrp, info, {CFrame = targetCFrame})
+    -- Noclip contínuo durante todo o trajeto
+    local stepConnection
+    stepConnection = RunService.Stepped:Connect(function()
+        if not isMoving or not char or not char.Parent then
+            if stepConnection then stepConnection:Disconnect() end
+            return
+        end
+
+        for _, part in ipairs(char:GetDescendants()) do
+            if part:IsA("BasePart") and part.CanCollide then
+                part.CanCollide = false
+            end
+        end
+    end)
+
+    -- Eleva levemente antes de partir para evitar colisão com construções da Pirate Village
+    hrp.CFrame = hrp.CFrame + Vector3.new(0, 20, 0)
+
+    local distance = (hrp.Position - DesertCFrame.Position).Magnitude
+    local duration = distance / TweenSpeed
+
+    print(string.format("[OmegaCore] Iniciando rota para Ilha Desert (Distância: %.0f studs | Tempo: %.1fs)", distance, duration))
+
+    local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear)
+    local tween = TweenService:Create(hrp, tweenInfo, {CFrame = DesertCFrame})
+
     tween:Play()
     tween.Completed:Wait()
 
+    -- Finaliza o trajeto e restaura física/colisões
+    isMoving = false
+    if stepConnection then stepConnection:Disconnect() end
     if bodyVel then bodyVel:Destroy() end
+
     humanoid.PlatformStand = false
+    hrp.CFrame = DesertCFrame
     hrp.AssemblyLinearVelocity = Vector3.zero
+    print("[OmegaCore] Chegou na Ilha Desert!")
 end
 
--- Procura o inimigo pelo nome em workspace.Enemies
-local function findEnemy(enemyName)
-    local enemiesFolder = workspace:FindFirstChild("Enemies")
-    if enemiesFolder then
-        for _, enemy in ipairs(enemiesFolder:GetChildren()) do
-            if enemy.Name == enemyName and enemy:FindFirstChild("Humanoid") and enemy.Humanoid.Health > 0 and enemy:FindFirstChild("HumanoidRootPart") then
-                return enemy
-            end
-        end
-    end
-    return nil
-end
-
--- Verifica se o Boss Chef está vivo no servidor
-local function isBossAlive(bossName)
-    if findEnemy(bossName) then return true end
-    local repEnemy = ReplicatedStorage:FindFirstChild(bossName)
-    if repEnemy and repEnemy:FindFirstChild("Humanoid") and repEnemy.Humanoid.Health > 0 then
-        return true
-    end
-    return false
-end
-
--- Define o alvo atual com base no Level e na presença do Chef
-local function getCurrentTargetName(currentLevel)
-    if currentLevel < 35 then
-        return "Pirate"
-    elseif currentLevel < 55 then
-        return "Brute"
-    else
-        if isBossAlive("Chef") then
-            return "Chef"
-        else
-            return "Brute"
-        end
-    end
-end
-
--- Ataque Básico
-local function basicAttack()
-    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 1)
-    task.wait(0.05)
-    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 1)
-end
-
--- Thread paralela de Skills (Z, X, C, V)
-task.spawn(function()
-    while _G_PirateFarm do
-        local data = LocalPlayer:FindFirstChild("Data")
-        local level = data and data:FindFirstChild("Level")
-        if level and level.Value >= MaxTargetLevel then break end
-
-        for _, key in ipairs(Skills) do
-            if not _G_PirateFarm then break end
-            VirtualInputManager:SendKeyEvent(true, key, false, game)
-            task.wait(0.1)
-            VirtualInputManager:SendKeyEvent(false, key, false, game)
-            task.wait(0.4)
-        end
-        task.wait(0.8)
-    end
-end)
-
--- Loop Principal de Farm
-task.spawn(function()
-    while _G_PirateFarm do
-        local data = LocalPlayer:FindFirstChild("Data")
-        local levelObj = data and data:FindFirstChild("Level")
-        local currentLevel = levelObj and levelObj.Value or 30
-
-        if currentLevel >= MaxTargetLevel then
-            _G_PirateFarm = false
-            print("[OmegaCore] Level 60 atingido! Farm da Pirate Village concluído.")
-            break
-        end
-
-        local targetName = getCurrentTargetName(currentLevel)
-        local targetEnemy = findEnemy(targetName)
-
-        if targetEnemy then
-            equipWeapon()
-            local initialPos = getSafeAboveCFrame(targetEnemy)
-            if initialPos then
-                safeMoveTo(initialPos)
-            end
-
-            while targetEnemy and targetEnemy.Parent and targetEnemy:FindFirstChild("Humanoid") and targetEnemy.Humanoid.Health > 0 and _G_PirateFarm do
-                currentLevel = levelObj and levelObj.Value or currentLevel
-                if currentLevel >= MaxTargetLevel then
-                    _G_PirateFarm = false
-                    break
-                end
-
-                local updatedTarget = getCurrentTargetName(currentLevel)
-                if updatedTarget ~= targetName then
-                    break
-                end
-
-                local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                local safeCFrame = getSafeAboveCFrame(targetEnemy)
-                if hrp and safeCFrame then
-                    hrp.CFrame = safeCFrame
-                    hrp.AssemblyLinearVelocity = Vector3.zero
-                end
-
-                equipWeapon()
-                basicAttack()
-                task.wait(0.1)
-            end
-        else
-            local spawnCFrame = SpawnPoints[targetName]
-            if spawnCFrame then
-                safeMoveTo(spawnCFrame + Vector3.new(0, FarmHeight + 3, 0))
-            end
-            task.wait(0.5)
-        end
-
-        task.wait(0.1)
-    end
-end)
+teleportToDesert()
