@@ -1,148 +1,62 @@
--- OmegaCore | Módulo: Bandit Auto-Farm (Sem Missão - Lv. 1 ao 10)
+-- OmegaCore | Módulo: Deslocamento Seguro para Ilha Jungle (Sea 1)
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
-local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local LocalPlayer = Players.LocalPlayer
-local TargetLevel = 10
-local EnemyName = "Bandit"
-local FarmHeight = 7 -- Distância vertical segura acima do NPC
-local TweenSpeed = 250
 
--- Configurações de Combate
-local Skills = {Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C, Enum.KeyCode.V}
-local _G_AutoFarm = true
+-- Coordenada central segura próxima ao Quest Giver / entrada da Jungle
+local JungleCFrame = CFrame.new(-1612.8, 36.9, 149.2)
+local TweenSpeed = 280 -- Velocidade ideal para evitar rollback do anti-cheat
 
--- Ativa Noclip para evitar colisões durante o deslocamento
-local noclipConnection
-noclipConnection = RunService.Stepped:Connect(function()
-    if not _G_AutoFarm then
-        noclipConnection:Disconnect()
-        return
-    end
-    local char = LocalPlayer.Character
-    if char then
+local function teleportToJungle()
+    local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+    local hrp = char:WaitForChild("HumanoidRootPart")
+    local humanoid = char:WaitForChild("Humanoid")
+
+    if not hrp or not humanoid then return end
+
+    local isMoving = true
+
+    -- Ativa Noclip e anula gravidade/queda durante o trajeto
+    local stepConnection
+    stepConnection = RunService.Stepped:Connect(function()
+        if not isMoving or not char or not char.Parent then
+            if stepConnection then stepConnection:Disconnect() end
+            return
+        end
+
         for _, part in ipairs(char:GetDescendants()) do
             if part:IsA("BasePart") and part.CanCollide then
                 part.CanCollide = false
             end
         end
-    end
-end)
 
--- Função para equipar a ferramenta de combate (Melee/Espada)
-local function equipWeapon()
-    local char = LocalPlayer.Character
-    local backpack = LocalPlayer:FindFirstChild("Backpack")
-    if not char or not backpack then return end
-
-    -- Verifica se já está segurando algo
-    if char:FindFirstChildOfClass("Tool") then return end
-
-    for _, tool in ipairs(backpack:GetChildren()) do
-        if tool:IsA("Tool") and (tool.ToolTip == "Melee" or tool.ToolTip == "Sword" or tool.Name == "Combat") then
-            char.Humanoid:EquipTool(tool)
-            break
+        if hrp then
+            hrp.AssemblyLinearVelocity = Vector3.zero
+            hrp.AssemblyAngularVelocity = Vector3.zero
         end
-    end
-end
+    end)
 
--- Função de movimento suave via Tween
-local function moveTo(targetCFrame)
-    local char = LocalPlayer.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
+    -- Calcula o tempo baseado na distância atual até a Jungle
+    local distance = (hrp.Position - JungleCFrame.Position).Magnitude
+    local duration = distance / TweenSpeed
 
-    local distance = (hrp.Position - targetCFrame.Position).Magnitude
-    if distance < 5 then
-        hrp.CFrame = targetCFrame
-        return
-    end
+    print(string.format("[OmegaCore] Iniciando rota para Jungle (Distância: %.0f studs | Tempo: %.1fs)", distance, duration))
 
-    local info = TweenInfo.new(distance / TweenSpeed, Enum.EasingStyle.Linear)
-    local tween = TweenService:Create(hrp, info, {CFrame = targetCFrame})
+    local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear)
+    local tween = TweenService:Create(hrp, tweenInfo, {CFrame = JungleCFrame})
+
     tween:Play()
     tween.Completed:Wait()
+
+    -- Finaliza o deslocamento e restaura o estado normal
+    isMoving = false
+    if stepConnection then stepConnection:Disconnect() end
+
+    hrp.CFrame = JungleCFrame
+    hrp.AssemblyLinearVelocity = Vector3.zero
+    print("[OmegaCore] Chegou na Ilha Jungle!")
 end
 
--- Simula clique do mouse (Ataque Básico)
-local function basicAttack()
-    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 1)
-    task.wait(0.05)
-    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 1)
-end
-
--- Rotação de Skills (Z, X, C, V)
-task.spawn(function()
-    while _G_AutoFarm do
-        local level = LocalPlayer:FindFirstChild("Data") and LocalPlayer.Data:FindFirstChild("Level")
-        if level and level.Value >= TargetLevel then break end
-
-        for _, key in ipairs(Skills) do
-            if not _G_AutoFarm then break end
-            VirtualInputManager:SendKeyEvent(true, key, false, game)
-            task.wait(0.1)
-            VirtualInputManager:SendKeyEvent(false, key, false, game)
-            task.wait(0.4) -- Intervalo entre cada skill
-        end
-        task.wait(1)
-    end
-end)
-
--- Loop Principal de Farm
-task.spawn(function()
-    while _G_AutoFarm do
-        local data = LocalPlayer:FindFirstChild("Data")
-        local level = data and data:FindFirstChild("Level")
-
-        -- Para o script automaticamente ao atingir o Level 10
-        if level and level.Value >= TargetLevel then
-            _G_AutoFarm = false
-            print("[OmegaCore] Level 10 atingido! Auto-Farm finalizado.")
-            break
-        end
-
-        local enemiesFolder = workspace:FindFirstChild("Enemies")
-        local targetEnemy = nil
-
-        if enemiesFolder then
-            for _, enemy in ipairs(enemiesFolder:GetChildren()) do
-                if enemy.Name == EnemyName and enemy:FindFirstChild("Humanoid") and enemy.Humanoid.Health > 0 and enemy:FindFirstChild("HumanoidRootPart") then
-                    targetEnemy = enemy
-                    break
-                end
-            end
-        end
-
-        if targetEnemy then
-            equipWeapon()
-            -- Posiciona o personagem acima do Bandit olhando para baixo
-            local attackPos = targetEnemy.HumanoidRootPart.CFrame * CFrame.new(0, FarmHeight, 0) * CFrame.Angles(math.rad(-90), 0, 0)
-            moveTo(attackPos)
-            
-            -- Mantém travado em cima enquanto ataca
-            while targetEnemy and targetEnemy.Parent and targetEnemy:FindFirstChild("Humanoid") and targetEnemy.Humanoid.Health > 0 and _G_AutoFarm do
-                local currentLevel = level and level.Value or 1
-                if currentLevel >= TargetLevel then
-                    _G_AutoFarm = false
-                    break
-                end
-
-                local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                if hrp and targetEnemy:FindFirstChild("HumanoidRootPart") then
-                    hrp.CFrame = targetEnemy.HumanoidRootPart.CFrame * CFrame.new(0, FarmHeight, 0) * CFrame.Angles(math.rad(-90), 0, 0)
-                    hrp.AssemblyLinearVelocity = Vector3.zero
-                end
-
-                equipWeapon()
-                basicAttack()
-                task.wait(0.15)
-            end
-        else
-            -- Aguarda respawn dos Bandits
-            task.wait(0.5)
-        end
-        task.wait(0.1)
-    end
-end)
+teleportToJungle()
