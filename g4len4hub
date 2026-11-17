@@ -1,206 +1,70 @@
--- OmegaCore | Módulo: Jungle Progression Auto-Farm (Lv. 10 ao 30 - Sem Missão)
+-- OmegaCore | Módulo: Deslocamento Seguro para Ilha Pirate Village (Sea 1)
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local LocalPlayer = Players.LocalPlayer
-local MaxTargetLevel = 30
-local FarmHeight = 7.5
-local TweenSpeed = 185 -- Velocidade segura anti-rollback
 
--- Coordenadas de patrulha/spawn na Jungle caso os NPCs estejam longe para renderizar
-local SpawnPoints = {
-    ["Monkey"] = CFrame.new(-1448.5, 67.8, 11.5),
-    ["Gorilla"] = CFrame.new(-1142.6, 40.5, -515.4),
-    ["The Gorilla King"] = CFrame.new(-1128.0, 40.5, -451.0)
-}
+-- Coordenada segura na entrada principal / doca da Pirate Village (próxima ao Pirate Adventurer)
+local PirateVillageCFrame = CFrame.new(-1141.1, 14.5, 3831.5)
+local TweenSpeed = 185 -- Velocidade segura anti-rollback para travessias longas
 
-local Skills = {Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C, Enum.KeyCode.V}
-local _G_JungleFarm = true
+local function teleportToPirateVillage()
+    local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+    local hrp = char:WaitForChild("HumanoidRootPart")
+    local humanoid = char:WaitForChild("Humanoid")
 
--- Noclip contínuo
-local noclipConnection
-noclipConnection = RunService.Stepped:Connect(function()
-    if not _G_JungleFarm then
-        if noclipConnection then noclipConnection:Disconnect() end
-        return
-    end
-    local char = LocalPlayer.Character
-    if char then
-        for _, part in ipairs(char:GetDescendants()) do
-            if part:IsA("BasePart") and part.CanCollide then
-                part.CanCollide = false
-            end
-        end
-    end
-end)
-
--- Equipa Melee ou Espada automaticamente
-local function equipWeapon()
-    local char = LocalPlayer.Character
-    local backpack = LocalPlayer:FindFirstChild("Backpack")
-    if not char or not backpack then return end
-
-    if char:FindFirstChildOfClass("Tool") then return end
-
-    for _, tool in ipairs(backpack:GetChildren()) do
-        if tool:IsA("Tool") and (tool.ToolTip == "Melee" or tool.ToolTip == "Sword" or tool.Name == "Combat") then
-            char.Humanoid:EquipTool(tool)
-            break
-        end
-    end
-end
-
--- Deslocamento estabilizado com BodyVelocity + PlatformStand
-local function safeMoveTo(targetCFrame)
-    local char = LocalPlayer.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    local humanoid = char and char:FindFirstChild("Humanoid")
     if not hrp or not humanoid then return end
 
-    local distance = (hrp.Position - targetCFrame.Position).Magnitude
-    if distance < 10 then
-        hrp.CFrame = targetCFrame
-        return
-    end
+    local isMoving = true
 
+    -- Trava a física do personagem para evitar estado de natação ou queda no mar
     humanoid.PlatformStand = true
+
     local bodyVel = Instance.new("BodyVelocity")
     bodyVel.Name = "OmegaCoreStabilizer"
     bodyVel.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
     bodyVel.Velocity = Vector3.zero
     bodyVel.Parent = hrp
 
-    local info = TweenInfo.new(distance / TweenSpeed, Enum.EasingStyle.Linear)
-    local tween = TweenService:Create(hrp, info, {CFrame = targetCFrame})
+    -- Noclip contínuo durante todo o trajeto
+    local stepConnection
+    stepConnection = RunService.Stepped:Connect(function()
+        if not isMoving or not char or not char.Parent then
+            if stepConnection then stepConnection:Disconnect() end
+            return
+        end
+
+        for _, part in ipairs(char:GetDescendants()) do
+            if part:IsA("BasePart") and part.CanCollide then
+                part.CanCollide = false
+            end
+        end
+    end)
+
+    -- Eleva levemente o personagem antes de partir para não raspar em árvores ou muros da Jungle
+    hrp.CFrame = hrp.CFrame + Vector3.new(0, 20, 0)
+
+    local distance = (hrp.Position - PirateVillageCFrame.Position).Magnitude
+    local duration = distance / TweenSpeed
+
+    print(string.format("[OmegaCore] Iniciando rota para Pirate Village (Distância: %.0f studs | Tempo: %.1fs)", distance, duration))
+
+    local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear)
+    local tween = TweenService:Create(hrp, info or tweenInfo, {CFrame = PirateVillageCFrame})
+
     tween:Play()
     tween.Completed:Wait()
 
+    -- Finaliza o trajeto e restaura física/colisões
+    isMoving = false
+    if stepConnection then stepConnection:Disconnect() end
     if bodyVel then bodyVel:Destroy() end
+
     humanoid.PlatformStand = false
+    hrp.CFrame = PirateVillageCFrame
     hrp.AssemblyLinearVelocity = Vector3.zero
+    print("[OmegaCore] Chegou na Ilha Pirate Village!")
 end
 
--- Procura o inimigo pelo nome (verifica workspace.Enemies e ReplicatedStorage)
-local function findEnemy(enemyName)
-    local enemiesFolder = workspace:FindFirstChild("Enemies")
-    if enemiesFolder then
-        for _, enemy in ipairs(enemiesFolder:GetChildren()) do
-            if enemy.Name == enemyName and enemy:FindFirstChild("Humanoid") and enemy.Humanoid.Health > 0 and enemy:FindFirstChild("HumanoidRootPart") then
-                return enemy
-            end
-        end
-    end
-    return nil
-end
-
--- Verifica se The Gorilla King está vivo no servidor (mesmo fora do alcance de renderização)
-local function isBossAlive(bossName)
-    if findEnemy(bossName) then return true end
-    local repEnemy = ReplicatedStorage:FindFirstChild(bossName)
-    if repEnemy and repEnemy:FindFirstChild("Humanoid") and repEnemy.Humanoid.Health > 0 then
-        return true
-    end
-    return false
-end
-
--- Define o alvo atual com base no Level e na presença do Boss
-local function getCurrentTargetName(currentLevel)
-    if currentLevel < 14 then
-        return "Monkey"
-    elseif currentLevel < 25 then
-        return "Gorilla"
-    else
-        if isBossAlive("The Gorilla King") then
-            return "The Gorilla King"
-        else
-            return "Gorilla"
-        end
-    end
-end
-
--- Ataque Básico
-local function basicAttack()
-    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 1)
-    task.wait(0.05)
-    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 1)
-end
-
--- Thread paralela de Skills (Z, X, C, V)
-task.spawn(function()
-    while _G_JungleFarm do
-        local data = LocalPlayer:FindFirstChild("Data")
-        local level = data and data:FindFirstChild("Level")
-        if level and level.Value >= MaxTargetLevel then break end
-
-        for _, key in ipairs(Skills) do
-            if not _G_JungleFarm then break end
-            VirtualInputManager:SendKeyEvent(true, key, false, game)
-            task.wait(0.1)
-            VirtualInputManager:SendKeyEvent(false, key, false, game)
-            task.wait(0.4)
-        end
-        task.wait(0.8)
-    end
-end)
-
--- Loop Principal de Farm
-task.spawn(function()
-    while _G_JungleFarm do
-        local data = LocalPlayer:FindFirstChild("Data")
-        local levelObj = data and data:FindFirstChild("Level")
-        local currentLevel = levelObj and levelObj.Value or 10
-
-        -- Finaliza ao atingir o Level 30
-        if currentLevel >= MaxTargetLevel then
-            _G_JungleFarm = false
-            print("[OmegaCore] Level 30 atingido! Farm da Jungle concluído.")
-            break
-        end
-
-        local targetName = getCurrentTargetName(currentLevel)
-        local targetEnemy = findEnemy(targetName)
-
-        if targetEnemy then
-            equipWeapon()
-            local attackPos = targetEnemy.HumanoidRootPart.CFrame * CFrame.new(0, FarmHeight, 0) * CFrame.Angles(math.rad(-90), 0, 0)
-            safeMoveTo(attackPos)
-
-            -- Loop de combate enquanto o alvo estiver vivo e a prioridade não mudar
-            while targetEnemy and targetEnemy.Parent and targetEnemy:FindFirstChild("Humanoid") and targetEnemy.Humanoid.Health > 0 and _G_JungleFarm do
-                currentLevel = levelObj and levelObj.Value or currentLevel
-                if currentLevel >= MaxTargetLevel then
-                    _G_JungleFarm = false
-                    break
-                end
-
-                -- Interrompe o Gorilla caso atinja Lv. 25 e o Boss dê spawn no meio da luta
-                local updatedTarget = getCurrentTargetName(currentLevel)
-                if updatedTarget ~= targetName then
-                    break
-                end
-
-                local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                if hrp and targetEnemy:FindFirstChild("HumanoidRootPart") then
-                    hrp.CFrame = targetEnemy.HumanoidRootPart.CFrame * CFrame.new(0, FarmHeight, 0) * CFrame.Angles(math.rad(-90), 0, 0)
-                    hrp.AssemblyLinearVelocity = Vector3.zero
-                end
-
-                equipWeapon()
-                basicAttack()
-                task.wait(0.15)
-            end
-        else
-            -- Se o inimigo não estiver renderizado, vai até o ponto de spawn dele para forçar o carregamento
-            local spawnCFrame = SpawnPoints[targetName]
-            if spawnCFrame then
-                safeMoveTo(spawnCFrame + Vector3.new(0, 12, 0))
-            end
-            task.wait(0.5)
-        end
-
-        task.wait(0.1)
-    end
-end)
+teleportToPirateVillage()
