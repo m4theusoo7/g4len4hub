@@ -1,6 +1,6 @@
 --[[
-    OmegaCore | Módulo: Brute (Vila dos Piratas)
-    Nível Recomendado: 40 - 55
+    OmegaCore | Módulo: Brute (Sem Missão / Farm Direto)
+    Local: Vila dos Piratas
     Executor: Delta Executor
 ]]
 
@@ -8,32 +8,28 @@ local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local VirtualUser = game:GetService("VirtualUser")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local LocalPlayer = Players.LocalPlayer
 
--- Configurações do Módulo
+-- Configurações
 local Config = {
     Enabled = true,
     TargetNPC = "Brute",
-    QuestName = "BuggyQuest1",
-    QuestLevel = 2, -- 1 = Pirate, 2 = Brute, 3 = Bobby
-    QuestCFrame = CFrame.new(-1141.07, 4.75, 3827.44), -- Pirate Adventurer
-    SpawnWaitCFrame = CFrame.new(-1145.0, 14.8, 4300.0), -- Área central dos Brutes
-    FarmOffset = CFrame.new(0, 7.5, 0) * CFrame.Angles(math.rad(-90), 0, 0), -- Fica acima do NPC atacando para baixo
+    SpawnWaitCFrame = CFrame.new(-1145.0, 14.8, 4300.0), -- Centro da área dos Brutes
+    FarmOffset = CFrame.new(0, 7.5, 0) * CFrame.Angles(math.rad(-90), 0, 0), -- Posição aérea acima do NPC
     TweenSpeed = 300,
     UseSkills = true,
     Skills = {"Z", "X", "C", "V"}
 }
 
--- Anti-AFK integrado
+-- Anti-AFK
 LocalPlayer.Idled:Connect(function()
     VirtualUser:CaptureController()
     VirtualUser:ClickButton2(Vector2.new())
 end)
 
--- Noclip contínuo enquanto o farm estiver ativo
+-- Noclip contínuo
 RunService.Stepped:Connect(function()
     if Config.Enabled and LocalPlayer.Character then
         for _, part in ipairs(LocalPlayer.Character:GetDescendants()) do
@@ -44,7 +40,7 @@ RunService.Stepped:Connect(function()
     end
 end)
 
--- Movimentação suave via TweenService
+-- Movimentação via TweenService
 local function TweenTo(targetCFrame)
     local char = LocalPlayer.Character
     if not char or not char:FindFirstChild("HumanoidRootPart") then return end
@@ -63,53 +59,27 @@ local function TweenTo(targetCFrame)
     tween.Completed:Wait()
 end
 
--- Verifica se a missão já está ativa na UI
-local function HasQuest()
-    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
-    if not playerGui then return false end
-    
-    local mainGui = playerGui:FindFirstChild("Main")
-    if mainGui and mainGui:FindFirstChild("Quest") then
-        local questFrame = mainGui.Quest
-        if questFrame.Visible and string.find(questFrame.Container.QuestTitle.Title.Text, Config.TargetNPC) then
-            return true
-        end
-    end
-    return false
-end
-
--- Pega a missão diretamente via RemoteFunction
-local function GetQuest()
-    TweenTo(Config.QuestCFrame)
-    task.wait(0.2)
-    pcall(function()
-        ReplicatedStorage.Remotes.CommF_:InvokeServer("StartQuest", Config.QuestName, Config.QuestLevel)
-    end)
-end
-
--- Equipa o estilo de luta / espada principal automaticamente
+-- Equipa automaticamente estilo de luta (Melee) ou Espada
 local function EquipWeapon()
     local char = LocalPlayer.Character
     local backpack = LocalPlayer:FindFirstChild("Backpack")
     if not char or not backpack then return end
     
-    -- Se já estiver segurando uma ferramenta de combate, mantém
     for _, tool in ipairs(char:GetChildren()) do
         if tool:IsA("Tool") and (tool.ToolTip == "Melee" or tool.ToolTip == "Sword" or tool.ToolTip == "Blox Fruit") then
             return
         end
     end
     
-    -- Prioriza Melee na mochila
     for _, tool in ipairs(backpack:GetChildren()) do
-        if tool:IsA("Tool") and tool.ToolTip == "Melee" then
+        if tool:IsA("Tool") and (tool.ToolTip == "Melee" or tool.ToolTip == "Sword") then
             char.Humanoid:EquipTool(tool)
             return
         end
     end
 end
 
--- Dispara ataques básicos e skills
+-- Ataque básico + Rotação de Skills
 local function AttackAndSkills()
     VirtualUser:CaptureController()
     VirtualUser:Button1Down(Vector2.new(1280, 672))
@@ -123,7 +93,7 @@ local function AttackAndSkills()
     end
 end
 
--- Busca o Brute vivo mais próximo
+-- Localiza o Brute vivo mais próximo
 local function FindNearestBrute()
     local enemies = workspace:FindFirstChild("Enemies")
     local char = LocalPlayer.Character
@@ -150,7 +120,7 @@ local function FindNearestBrute()
     return closest
 end
 
--- Loop Principal
+-- Loop Principal de Farm Direto
 task.spawn(function()
     while Config.Enabled do
         task.wait(0.1)
@@ -160,29 +130,28 @@ task.spawn(function()
                 return
             end
             
-            if not HasQuest() then
-                GetQuest()
-            else
-                local target = FindNearestBrute()
-                if target and target:FindFirstChild("HumanoidRootPart") then
-                    EquipWeapon()
-                    
-                    -- Mantém o personagem travado acima do Brute enquanto ele estiver vivo
-                    while Config.Enabled and HasQuest() and target.Parent and target:FindFirstChild("Humanoid") and target.Humanoid.Health > 0 do
-                        local targetPos = target.HumanoidRootPart.CFrame * Config.FarmOffset
-                        char.HumanoidRootPart.CFrame = targetPos
-                        
-                        -- Trava o NPC no lugar para facilitar o acerto
-                        target.HumanoidRootPart.CanCollide = false
-                        target.HumanoidRootPart.Size = Vector3.new(40, 40, 40)
-                        
-                        AttackAndSkills()
-                        task.wait(0.1)
-                    end
-                else
-                    -- Caso todos os Brutes estejam mortos, aguarda no ponto de spawn
-                    TweenTo(Config.SpawnWaitCFrame)
+            local target = FindNearestBrute()
+            if target and target:FindFirstChild("HumanoidRootPart") then
+                EquipWeapon()
+                
+                -- Voa até o alvo caso esteja longe (ex: vindo de outra ilha)
+                if (char.HumanoidRootPart.Position - target.HumanoidRootPart.Position).Magnitude > 50 then
+                    TweenTo(target.HumanoidRootPart.CFrame * Config.FarmOffset)
                 end
+                
+                -- Mantém travado em cima do Brute enquanto ele tiver vida
+                while Config.Enabled and target.Parent and target:FindFirstChild("Humanoid") and target.Humanoid.Health > 0 do
+                    char.HumanoidRootPart.CFrame = target.HumanoidRootPart.CFrame * Config.FarmOffset
+                    
+                    target.HumanoidRootPart.CanCollide = false
+                    target.HumanoidRootPart.Size = Vector3.new(40, 40, 40)
+                    
+                    AttackAndSkills()
+                    task.wait(0.1)
+                end
+            else
+                -- Se todos estiverem mortos, aguarda no centro do spawn dos Brutes
+                TweenTo(Config.SpawnWaitCFrame)
             end
         end)
     end
