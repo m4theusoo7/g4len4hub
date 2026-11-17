@@ -1,13 +1,11 @@
--- OmegaCore | Módulo: Deslocamento Seguro para Ilha Jungle (Sea 1)
+-- OmegaCore | Módulo: Deslocamento Seguro para Ilha Jungle (Corrigido)
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 
 local LocalPlayer = Players.LocalPlayer
-
--- Coordenada central segura próxima ao Quest Giver / entrada da Jungle
 local JungleCFrame = CFrame.new(-1612.8, 36.9, 149.2)
-local TweenSpeed = 280 -- Velocidade ideal para evitar rollback do anti-cheat
+local TweenSpeed = 185 -- Velocidade segura para evitar rollback do servidor
 
 local function teleportToJungle()
     local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
@@ -18,7 +16,16 @@ local function teleportToJungle()
 
     local isMoving = true
 
-    -- Ativa Noclip e anula gravidade/queda durante o trajeto
+    -- Trava a física do personagem para evitar estado de natação/queda
+    humanoid.PlatformStand = true
+
+    local bodyVel = Instance.new("BodyVelocity")
+    bodyVel.Name = "OmegaCoreStabilizer"
+    bodyVel.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+    bodyVel.Velocity = Vector3.zero
+    bodyVel.Parent = hrp
+
+    -- Noclip contínuo durante o trajeto
     local stepConnection
     stepConnection = RunService.Stepped:Connect(function()
         if not isMoving or not char or not char.Parent then
@@ -31,18 +38,13 @@ local function teleportToJungle()
                 part.CanCollide = false
             end
         end
-
-        if hrp then
-            hrp.AssemblyLinearVelocity = Vector3.zero
-            hrp.AssemblyAngularVelocity = Vector3.zero
-        end
     end)
 
-    -- Calcula o tempo baseado na distância atual até a Jungle
+    -- Sobe levemente antes de iniciar o trajeto para evitar colisão com o terreno inicial
+    hrp.CFrame = hrp.CFrame + Vector3.new(0, 15, 0)
+
     local distance = (hrp.Position - JungleCFrame.Position).Magnitude
     local duration = distance / TweenSpeed
-
-    print(string.format("[OmegaCore] Iniciando rota para Jungle (Distância: %.0f studs | Tempo: %.1fs)", distance, duration))
 
     local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear)
     local tween = TweenService:Create(hrp, tweenInfo, {CFrame = JungleCFrame})
@@ -50,13 +52,14 @@ local function teleportToJungle()
     tween:Play()
     tween.Completed:Wait()
 
-    -- Finaliza o deslocamento e restaura o estado normal
+    -- Restaura física e colisões ao chegar
     isMoving = false
     if stepConnection then stepConnection:Disconnect() end
+    if bodyVel then bodyVel:Destroy() end
 
+    humanoid.PlatformStand = false
     hrp.CFrame = JungleCFrame
     hrp.AssemblyLinearVelocity = Vector3.zero
-    print("[OmegaCore] Chegou na Ilha Jungle!")
 end
 
 teleportToJungle()
