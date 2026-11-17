@@ -1,4 +1,4 @@
--- OmegaCore | Módulo: Pirate Village Progression Auto-Farm (Lv. 30 ao 60 - Sem Missão)
+-- OmegaCore | Módulo: Pirate Village Auto-Farm (Lv. 30 ao 60 - Distância Vertical Segura)
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
@@ -7,10 +7,13 @@ local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local LocalPlayer = Players.LocalPlayer
 local MaxTargetLevel = 60
-local FarmHeight = 7.5
-local TweenSpeed = 185 -- Velocidade segura anti-rollback
 
--- Coordenadas de spawn/patrulha na Pirate Village caso os NPCs estejam longe da área de renderização
+-- Configurações de Distância Vertical Segura
+local FarmHeight = 14.5     -- Altura ideal acima da cabeça do NPC (fora do alcance de golpes físicos)
+local BossExtraHeight = 3.5 -- Altura extra para o Boss (Chef) devido ao tamanho maior da hitbox
+local TweenSpeed = 185      -- Velocidade segura anti-rollback
+
+-- Coordenadas de spawn/patrulha na Pirate Village
 local SpawnPoints = {
     ["Pirate"] = CFrame.new(-1211.8, 14.5, 3915.2),
     ["Brute"] = CFrame.new(-1145.0, 15.0, 4305.0),
@@ -19,6 +22,19 @@ local SpawnPoints = {
 
 local Skills = {Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C, Enum.KeyCode.V}
 local _G_PirateFarm = true
+
+-- Calcula o CFrame seguro acima do alvo com base no tipo de NPC
+local function getSafeAboveCFrame(enemy)
+    local enemyHRP = enemy:FindFirstChild("HumanoidRootPart")
+    if not enemyHRP then return nil end
+
+    local heightOffset = FarmHeight
+    if enemy.Name == "Chef" or enemy.Name == "Brute" then
+        heightOffset = FarmHeight + BossExtraHeight -- 18 studs acima para inimigos maiores
+    end
+
+    return enemyHRP.CFrame * CFrame.new(0, heightOffset, 0) * CFrame.Angles(math.rad(-90), 0, 0)
+end
 
 -- Noclip contínuo
 local noclipConnection
@@ -96,7 +112,7 @@ local function findEnemy(enemyName)
     return nil
 end
 
--- Verifica se o Boss Chef está vivo no servidor (mesmo fora do alcance de renderização)
+-- Verifica se o Boss Chef está vivo no servidor
 local function isBossAlive(bossName)
     if findEnemy(bossName) then return true end
     local repEnemy = ReplicatedStorage:FindFirstChild(bossName)
@@ -153,7 +169,6 @@ task.spawn(function()
         local levelObj = data and data:FindFirstChild("Level")
         local currentLevel = levelObj and levelObj.Value or 30
 
-        -- Finaliza ao atingir o Level 60
         if currentLevel >= MaxTargetLevel then
             _G_PirateFarm = false
             print("[OmegaCore] Level 60 atingido! Farm da Pirate Village concluído.")
@@ -165,10 +180,12 @@ task.spawn(function()
 
         if targetEnemy then
             equipWeapon()
-            local attackPos = targetEnemy.HumanoidRootPart.CFrame * CFrame.new(0, FarmHeight, 0) * CFrame.Angles(math.rad(-90), 0, 0)
-            safeMoveTo(attackPos)
+            local initialPos = getSafeAboveCFrame(targetEnemy)
+            if initialPos then
+                safeMoveTo(initialPos)
+            end
 
-            -- Loop de combate enquanto o alvo estiver vivo e a prioridade não mudar
+            -- Loop de combate mantendo distância vertical segura constante
             while targetEnemy and targetEnemy.Parent and targetEnemy:FindFirstChild("Humanoid") and targetEnemy.Humanoid.Health > 0 and _G_PirateFarm do
                 currentLevel = levelObj and levelObj.Value or currentLevel
                 if currentLevel >= MaxTargetLevel then
@@ -176,27 +193,26 @@ task.spawn(function()
                     break
                 end
 
-                -- Interrompe o Brute imediatamente se atingir Lv. 55 e o Chef estiver no servidor
                 local updatedTarget = getCurrentTargetName(currentLevel)
                 if updatedTarget ~= targetName then
                     break
                 end
 
                 local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                if hrp and targetEnemy:FindFirstChild("HumanoidRootPart") then
-                    hrp.CFrame = targetEnemy.HumanoidRootPart.CFrame * CFrame.new(0, FarmHeight, 0) * CFrame.Angles(math.rad(-90), 0, 0)
+                local safeCFrame = getSafeAboveCFrame(targetEnemy)
+                if hrp and safeCFrame then
+                    hrp.CFrame = safeCFrame
                     hrp.AssemblyLinearVelocity = Vector3.zero
                 end
 
                 equipWeapon()
                 basicAttack()
-                task.wait(0.15)
+                task.wait(0.1)
             end
         else
-            -- Desloca até o ponto de spawn do alvo para forçar o carregamento do modelo
             local spawnCFrame = SpawnPoints[targetName]
             if spawnCFrame then
-                safeMoveTo(spawnCFrame + Vector3.new(0, 12, 0))
+                safeMoveTo(spawnCFrame + Vector3.new(0, FarmHeight + 5, 0))
             end
             task.wait(0.5)
         end
