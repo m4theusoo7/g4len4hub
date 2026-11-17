@@ -9,7 +9,7 @@ local LocalPlayer = Players.LocalPlayer
 local MaxTargetLevel = 60
 
 -- Configurações de Distância Vertical Segura (Ajustada para alcance ideal de ataque)
-local FarmHeight = 7.5      -- Altura ideal acima dos Pirates
+local FarmHeight = 8.5      -- Altura ideal acima dos Pirates
 local BossExtraHeight = 2.0 -- +2 studs para Brute e Chef (Total: 11.5 studs)
 local TweenSpeed = 185      -- Velocidade segura anti-rollback
 
