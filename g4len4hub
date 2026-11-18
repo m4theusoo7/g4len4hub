@@ -1,4 +1,5 @@
 -- OmegaCore | Módulo: Desert Auto-Farm (Lv. 60 ao 90 - Estrutura Limpa)
+
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
@@ -6,42 +7,77 @@ local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local LocalPlayer = Players.LocalPlayer
 local TargetLevel = 90
-local FarmHeight = 11 -- Distância vertical segura acima do NPC
+local FarmHeight = 7 -- Distância vertical segura acima do NPC
 local TweenSpeed = 250
 
--- Pontos de referência caso os NPCs estejam longe para renderizar
 local SpawnPoints = {
     ["Desert Bandit"] = CFrame.new(932.5, 25.0, 4488.0),
-    ["Desert Officer"] = CFrame.new(1572.0, 15.0, 4373.0)
+    ["Desert Officer"] = CFrame.new(1572.0, 15.0, 4373.0),
 }
 
--- Configurações de Combate
-local Skills = {Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C, Enum.KeyCode.V}
-local _G_AutoFarm = true
+local Skills = { Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C, Enum.KeyCode.V }
+local AutoFarm = true
 
--- Ativa Noclip para evitar colisões durante o deslocamento
+local farmTask
+local skillTask
 local noclipConnection
-noclipConnection = RunService.Stepped:Connect(function()
-    if not _G_AutoFarm then
-        if noclipConnection then noclipConnection:Disconnect() end
-        return
+
+-- Para o módulo completamente: flag + noclip + tasks
+local function stopAutoFarm()
+    AutoFarm = false
+    if noclipConnection then
+        noclipConnection:Disconnect()
+        noclipConnection = nil
     end
+    if farmTask then task.cancel(farmTask) farmTask = nil end
+    if skillTask then task.cancel(skillTask) skillTask = nil end
+end
+
+-- Noclip enquanto o farm estiver ativo
+noclipConnection = RunService.Stepped:Connect(function()
+    if not AutoFarm then return end
     local char = LocalPlayer.Character
-    if char then
-        for _, part in ipairs(char:GetDescendants()) do
-            if part:IsA("BasePart") and part.CanCollide then
-                part.CanCollide = false
-            end
+    if not char then return end
+    for _, part in ipairs(char:GetDescendants()) do
+        if part:IsA("BasePart") and part.CanCollide then
+            part.CanCollide = false
         end
     end
 end)
 
--- Função para equipar a ferramenta de combate (Melee/Espada)
+-- Leitura única do nível do jogador
+local function getPlayerLevel()
+    local data = LocalPlayer:FindFirstChild("Data")
+    local level = data and data:FindFirstChild("Level")
+    return level and level.Value or nil
+end
+
+local function getEnemyName(currentLevel)
+    if currentLevel < 70 then
+        return "Desert Bandit"
+    end
+    return "Desert Officer"
+end
+
+local function findEnemy(enemyName)
+    local enemiesFolder = workspace:FindFirstChild("Enemies")
+    if not enemiesFolder then return nil end
+
+    for _, enemy in ipairs(enemiesFolder:GetChildren()) do
+        if enemy.Name == enemyName
+            and enemy:FindFirstChild("Humanoid")
+            and enemy.Humanoid.Health > 0
+            and enemy:FindFirstChild("HumanoidRootPart") then
+            return enemy
+        end
+    end
+    return nil
+end
+
 local function equipWeapon()
     local char = LocalPlayer.Character
     local backpack = LocalPlayer:FindFirstChild("Backpack")
     if not char or not backpack then return end
-
     if char:FindFirstChildOfClass("Tool") then return end
 
     for _, tool in ipairs(backpack:GetChildren()) do
@@ -52,7 +88,6 @@ local function equipWeapon()
     end
 end
 
--- Função de movimento suave via Tween (igual ao primeiro script)
 local function moveTo(targetCFrame)
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
@@ -65,36 +100,32 @@ local function moveTo(targetCFrame)
     end
 
     local info = TweenInfo.new(distance / TweenSpeed, Enum.EasingStyle.Linear)
-    local tween = TweenService:Create(hrp, info, {CFrame = targetCFrame})
+    local tween = TweenService:Create(hrp, info, { CFrame = targetCFrame })
     tween:Play()
     tween.Completed:Wait()
 end
 
--- Simula clique do mouse (Ataque Básico)
 local function basicAttack()
     VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 1)
     task.wait(0.05)
     VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 1)
 end
 
--- Define o alvo atual com base no Level
-local function getEnemyName(currentLevel)
-    if currentLevel < 70 then
-        return "Desert Bandit"
-    else
-        return "Desert Officer"
-    end
+-- CFrame de ataque: FarmHeight studs acima, olhando para o NPC
+local function getAttackCFrame(enemy)
+    local hrp = enemy:FindFirstChild("HumanoidRootPart")
+    local pos = hrp.Position + Vector3.new(0, FarmHeight, 0)
+    return CFrame.lookAt(pos, hrp.Position, Vector3.new(0, 1, 0))
 end
 
--- Rotação de Skills (Z, X, C, V)
-task.spawn(function()
-    while _G_AutoFarm do
-        local data = LocalPlayer:FindFirstChild("Data")
-        local level = data and data:FindFirstChild("Level")
-        if level and level.Value >= TargetLevel then break end
+-- ===== Loop de Skills =====
+skillTask = task.spawn(function()
+    while AutoFarm do
+        local currentLevel = getPlayerLevel()
+        if currentLevel and currentLevel >= TargetLevel then break end
 
         for _, key in ipairs(Skills) do
-            if not _G_AutoFarm then break end
+            if not AutoFarm then break end
             VirtualInputManager:SendKeyEvent(true, key, false, game)
             task.wait(0.1)
             VirtualInputManager:SendKeyEvent(false, key, false, game)
@@ -104,43 +135,41 @@ task.spawn(function()
     end
 end)
 
--- Loop Principal de Farm
-task.spawn(function()
-    while _G_AutoFarm do
-        local data = LocalPlayer:FindFirstChild("Data")
-        local level = data and data:FindFirstChild("Level")
-        local currentLevel = level and level.Value or 60
+-- ===== Loop Principal de Farm =====
+farmTask = task.spawn(function()
+    while AutoFarm do
+        local currentLevel = getPlayerLevel() or 60
 
         -- Para o script automaticamente ao atingir o Level 90
         if currentLevel >= TargetLevel then
-            _G_AutoFarm = false
+            AutoFarm = false
             print("[OmegaCore] Level 90 atingido! Auto-Farm do Deserto finalizado.")
             break
         end
 
         local enemyName = getEnemyName(currentLevel)
-        local enemiesFolder = workspace:FindFirstChild("Enemies")
-        local targetEnemy = nil
+        local targetEnemy = findEnemy(enemyName)
 
-        if enemiesFolder then
-            for _, enemy in ipairs(enemiesFolder:GetChildren()) do
-                if string.find(enemy.Name, enemyName) and enemy:FindFirstChild("Humanoid") and enemy.Humanoid.Health > 0 and enemy:FindFirstChild("HumanoidRootPart") then
-                    targetEnemy = enemy
-                    break
-                end
+        if not targetEnemy then
+            -- Sem NPC renderizado: vai até a área de spawn
+            local spawnPos = SpawnPoints[enemyName]
+            if spawnPos then
+                moveTo(spawnPos)
             end
-        end
-
-        if targetEnemy then
+            task.wait(0.5)
+        else
             equipWeapon()
-            local attackPos = targetEnemy.HumanoidRootPart.CFrame * CFrame.new(0, FarmHeight, 0) * CFrame.Angles(math.rad(-90), 0, 0)
-            moveTo(attackPos)
+            moveTo(getAttackCFrame(targetEnemy))
 
             -- Mantém travado em cima enquanto ataca
-            while targetEnemy and targetEnemy.Parent and targetEnemy:FindFirstChild("Humanoid") and targetEnemy.Humanoid.Health > 0 and _G_AutoFarm do
-                currentLevel = level and level.Value or currentLevel
+            while AutoFarm and targetEnemy and targetEnemy.Parent
+                and targetEnemy:FindFirstChild("Humanoid")
+                and targetEnemy.Humanoid.Health > 0 do
+
+                local currentLevel = getPlayerLevel() or 60
+
                 if currentLevel >= TargetLevel then
-                    _G_AutoFarm = false
+                    AutoFarm = false
                     break
                 end
 
@@ -151,7 +180,7 @@ task.spawn(function()
 
                 local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
                 if hrp and targetEnemy:FindFirstChild("HumanoidRootPart") then
-                    hrp.CFrame = targetEnemy.HumanoidRootPart.CFrame * CFrame.new(0, FarmHeight, 0) * CFrame.Angles(math.rad(-90), 0, 0)
+                    hrp.CFrame = getAttackCFrame(targetEnemy)
                     hrp.AssemblyLinearVelocity = Vector3.zero
                 end
 
@@ -159,14 +188,8 @@ task.spawn(function()
                 basicAttack()
                 task.wait(0.15)
             end
-        else
-            -- Se não encontrar o NPC renderizado, vai até a área de spawn dele
-            local spawnPos = SpawnPoints[enemyName]
-            if spawnPos then
-                moveTo(spawnPos)
-            end
-            task.wait(0.5)
         end
+
         task.wait(0.1)
     end
 end)
