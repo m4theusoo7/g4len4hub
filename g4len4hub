@@ -1,6 +1,6 @@
 -- ==========================================================
--- OMEGACORE: Desert Island Auto-Farm (Level 1 a 90)
--- Foco: Sem missões | Coordenadas atualizadas pós-update
+-- OMEGACORE: Desert Island Auto-Farm Dinâmico (1-90)
+-- Foco: Sem missões | Rastreamento dinâmico de NPCs (Pós-Update)
 -- Compatível com Delta Executor
 -- ==========================================================
 
@@ -50,17 +50,12 @@ task.spawn(function()
             end
             
             local targetName = ""
-            local spawnPos = CFrame.new()
             
-            -- Lógica de transição de level e alvos com base na ilha atualizada
+            -- Definição do alvo por faixa de level
             if currentLevel < 70 then
                 targetName = "Desert Bandit"
-                -- Área frontal / dunas dos Desert Bandits
-                spawnPos = CFrame.new(944.4, 20.9, 4350.2)
             elseif currentLevel >= 70 and currentLevel < 90 then
                 targetName = "Desert Officer"
-                -- Coordenadas atualizadas e corrigidas: área nova atrás da pirâmide / casas do deserto
-                spawnPos = CFrame.new(1045.5, 27.2, 4420.1)
             else
                 print("[OmegaCore]: Level 90 atingido! Farm do Deserto concluído.")
                 getgenv().AutoFarmDesert = false
@@ -69,7 +64,7 @@ task.spawn(function()
             
             EquipWeapon()
             
-            -- Buscar o mob correto na pasta Enemies usando string.find para segurança
+            -- Busca dinâmica por qualquer instância do mob na pasta Enemies (independente de onde o jogo o spawnou na ilha)
             local targetMob = nil
             local enemiesFolder = Workspace:FindFirstChild("Enemies")
             if enemiesFolder then
@@ -88,8 +83,8 @@ task.spawn(function()
             if targetMob and targetMob:FindFirstChild("HumanoidRootPart") then
                 local mobHrp = targetMob.HumanoidRootPart
                 
-                -- Posicionamento estratégico flutuando acima do NPC para evitar dano corpo a corpo
-                hrp.CFrame = mobHrp.CFrame * CFrame.new(0, 12, 3)
+                -- Teleporta exatamente para a posição real em tempo real do mob (evita erro de mapa atualizado)
+                hrp.CFrame = mobHrp.CFrame * CFrame.new(0, 10, 3)
                 char.Humanoid.PlatformStand = true
                 
                 -- Ataque Básico Automático (M1)
@@ -103,12 +98,12 @@ task.spawn(function()
                     VirtualInputManager:SendKeyEvent(false, skillKey, false, game)
                 end
             else
-                -- Caso não haja mobs visíveis, deslocar para o ponto de spawn exato da categoria atual
+                -- Centro padrão da Desert Island caso nenhum mob esteja carregado na tela
                 char.Humanoid.PlatformStand = false
-                hrp.CFrame = spawnPos
+                hrp.CFrame = CFrame.new(947.0, 15.0, 4390.0)
             end
         end)
     end
 end)
 
-print("[OmegaCore]: Script iniciado com sucesso para a Desert Island!")
+print("[OmegaCore]: Script dinâmico iniciado com sucesso!")
