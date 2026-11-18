@@ -1,105 +1,143 @@
--- ==========================================
--- OmegaCore: Frozen Village Auto-Farm (90-120)
--- Target NPCs: Snow Bandit, Snow Trooper, Yeti
--- Mode: Direct Auto-Farm (No Quests), Tween, Skills (Z,X,C,V)
--- ==========================================
-
-_G.AutoFarmFrozen = true
-_G.SelectWeapon = "Melee" -- Change to "Blox Fruit" or "Sword" if preferred
+-- ====================================================
+-- Blox Fruits Auto Farm - Frozen Village (Lv. 90 - 120)
+-- Estilo de UI e Automação idêntico ao vídeo (Stop Tween / Auto Quest / Tween)
+-- Compatível com Delta Executor
+-- ====================================================
 
 local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
 local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
-local VirtualUser = game:GetService("VirtualUser")
-local VirtualInputManager = game:GetService("VirtualInputManager")
 
-local Player = Players.LocalPlayer
+getgenv().AutoFarmFrozen = true
 
--- Anti-AFK protection
-Player.Idled:Connect(function()
-    VirtualUser:Button2Down(Vector2.new(0, 0), Workspace.CurrentCamera.CFrame)
-    task.wait(1)
-    VirtualUser:Button2Up(Vector2.new(0, 0), Workspace.CurrentCamera.CFrame)
+-- Criar UI Flutuante com "Stop Tween" (idêntico ao vídeo)
+local ScreenGui = Instance.new("ScreenGui")
+local StopButton = Instance.new("TextButton")
+
+ScreenGui.Name = "AutoFarmUI"
+ScreenGui.Parent = game.CoreGui
+ScreenGui.ResetOnSpawn = false
+
+StopButton.Name = "StopTweenButton"
+StopButton.Parent = ScreenGui
+StopButton.BackgroundColor3 = Color3.fromRGB(0, 120, 215)
+StopButton.Position = UDim2.new(0, 20, 0, 50)
+StopButton.Size = UDim2.new(0, 110, 0, 45)
+StopButton.Font = Enum.Font.SourceSansBold
+StopButton.Text = "Stop Tween"
+StopButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+StopButton.TextSize = 16
+StopButton.Active = true
+StopButton.Draggable = true
+
+StopButton.MouseButton1Click:Connect(function()
+    getgenv().AutoFarmFrozen = not getgenv().AutoFarmFrozen
+    if getgenv().AutoFarmFrozen then
+        StopButton.Text = "Stop Tween"
+        StopButton.BackgroundColor3 = Color3.fromRGB(0, 120, 215)
+    else
+        StopButton.Text = "Resumir Farm"
+        StopButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+    end
 end)
 
--- Find nearest target in Frozen Village
-local function getTarget()
-    local char = Player.Character
-    if not char or not char:FindFirstChild("HumanoidRootPart") then return nil end
-    
-    local enemies = Workspace.Enemies:GetChildren()
-    local closestEnemy = nil
-    local shortestDist = math.huge
-    
-    for _, enemy in ipairs(enemies) do
-        local humanoid = enemy:FindFirstChildOfClass("Humanoid")
-        local rootPart = enemy:FindFirstChild("HumanoidRootPart")
-        
-        if humanoid and rootPart and humanoid.Health > 0 then
-            local name = enemy.Name
-            -- Target Frozen Village enemies up to level 120 transition
-            if name == "Snow Bandit" or name == "Snow Trooper" or name == "Yeti" then
-                local dist = (rootPart.Position - char.HumanoidRootPart.Position).Magnitude
-                if dist < shortestDist then
-                    shortestDist = dist
-                    closestEnemy = enemy
-                end
-            end
-        end
+-- Anti-AFK para evitar desconexão
+local connections = getconnections(LocalPlayer.Idled)
+for _, connection in ipairs(connections) do
+    connection:Disable()
+end
+
+-- Função para alternar o alvo e a missão de acordo com a progressão de nível (90 a 120+)
+local function getTargetData()
+    local level = LocalPlayer.Data.Level.Value
+    if level < 100 then
+        return {
+            Name = "Snow Bandit",
+            QuestName = "SnowQuest",
+            QuestIndex = 1,
+            CFrame = CFrame.new(1385, 105, -1300) -- NPC / Spawn dos Bandidos da Neve
+        }
+    elseif level < 110 then
+        return {
+            Name = "Snow Trooper",
+            QuestName = "SnowQuest",
+            QuestIndex = 2,
+            CFrame = CFrame.new(1150, 145, -1540) -- NPC / Spawn dos Snow Troopers
+        }
+    else
+        return {
+            Name = "Yeti",
+            QuestName = "SnowQuest",
+            QuestIndex = 3,
+            CFrame = CFrame.new(1185, 110, -1580) -- Chefe Yeti
+        }
     end
-    
-    return closestEnemy
 end
 
--- Smooth Tween movement above targets
-local function tweenTo(targetCFrame)
-    local char = Player.Character
-    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
-    local rootPart = char.HumanoidRootPart
-    
-    local distance = (targetCFrame.Position - rootPart.Position).Magnitude
-    local speed = 320 -- Adjust tween speed if necessary
-    
-    local info = TweenInfo.new(distance / speed, Enum.EasingStyle.Linear)
-    local tween = TweenService:Create(rootPart, info, {CFrame = targetCFrame})
-    tween:Play()
-end
-
--- Main Auto-Farm Loop
+-- Loop Principal de Auto Farm
 task.spawn(function()
     while task.wait(0.1) do
-        if _G.AutoFarmFrozen then
+        if getgenv().AutoFarmFrozen then
             pcall(function()
-                local target = getTarget()
-                if target and target:FindFirstChild("HumanoidRootPart") then
-                    -- Hover safely 12 studs above the enemy
-                    local targetCF = target.HumanoidRootPart.CFrame + Vector3.new(0, 12, 0)
-                    tweenTo(targetCF)
+                local target = getTargetData()
+                
+                -- Ativar Haki (Buso) automaticamente
+                if not LocalPlayer.Character.HumanoidRootPart:FindFirstChild("HasBuso") then
+                    ReplicatedStorage.Remotes.CommF_:InvokeServer("Buso")
+                end
+
+                -- Verificar se a UI de Quest está visível (se precisa pegar missão)
+                local questGui = LocalPlayer.PlayerGui.Main.Quest
+                if not questGui.Visible then
+                    local rootPart = LocalPlayer.Character.HumanoidRootPart
+                    local dist = (rootPart.Position - target.CFrame.Position).Magnitude
+                    local tweenInfo = TweenInfo.new(dist / 250, Enum.EasingStyle.Linear)
+                    local tween = TweenService:Create(rootPart, tweenInfo, {CFrame = target.CFrame})
+                    tween:Play()
+                    tween.Completed:Wait()
                     
-                    -- Ensure weapon is equipped
-                    local char = Player.Character
-                    if char then
-                        local weapon = char:FindFirstChild(_G.SelectWeapon) or char:FindFirstChildOfClass("Tool")
-                        if weapon and weapon.Parent ~= char then
-                            weapon.Parent = char
+                    task.wait(0.5)
+                    ReplicatedStorage.Remotes.CommF_:InvokeServer("StartQuest", target.QuestName, target.QuestIndex)
+                    task.wait(1)
+                else
+                    -- Procurar inimigo ativo no Workspace
+                    local enemyFolder = Workspace.Enemies:FindFirstChild(target.Name)
+                    if enemyFolder and enemyFolder:FindFirstChild("HumanoidRootPart") and enemyFolder:FindFirstChild("Humanoid") then
+                        if enemyFolder.Humanoid.Health > 0 then
+                            local rootPart = LocalPlayer.Character.HumanoidRootPart
+                            local enemyRoot = enemyFolder.HumanoidRootPart
+                            local dist = (rootPart.Position - enemyRoot.Position).Magnitude
+                            
+                            if dist > 15 then
+                                local tweenInfo = TweenInfo.new(dist / 250, Enum.EasingStyle.Linear)
+                                local tween = TweenService:Create(rootPart, tweenInfo, {CFrame = enemyRoot.CFrame * CFrame.new(0, 25, 3)})
+                                tween:Play()
+                                tween.Completed:Wait()
+                            else
+                                rootPart.CFrame = enemyRoot.CFrame * CFrame.new(0, 15, 2)
+                                
+                                -- Executar ataques básicos e habilidades (Z, X, C, V)
+                                local vim = game:GetService("VirtualInputManager")
+                                vim:SendMouseButtonEvent(0, 0, 0, true, game, 0)
+                                task.wait(0.05)
+                                vim:SendMouseButtonEvent(0, 0, 0, false, game, 0)
+                                
+                                vim:SendKeyEvent(true, Enum.KeyCode.Z, false, game)
+                                vim:SendKeyEvent(true, Enum.KeyCode.X, false, game)
+                                vim:SendKeyEvent(true, Enum.KeyCode.C, false, game)
+                                vim:SendKeyEvent(true, Enum.KeyCode.V, false, game)
+                            end
                         end
-                    end
-                    
-                    -- Basic M1 Attack
-                    VirtualUser:Button1Down(Vector2.new(0, 0), Workspace.CurrentCamera.CFrame)
-                    task.wait(0.05)
-                    VirtualUser:Button1Up(Vector2.new(0, 0), Workspace.CurrentCamera.CFrame)
-                    
-                    -- Skill Rotation (Z, X, C, V)
-                    for _, key in ipairs({"Z", "X", "C", "V"}) do
-                        VirtualInputManager:SendKeyEvent(true, key, false, game)
-                        task.wait(0.05)
-                        VirtualInputManager:SendKeyEvent(false, key, false, game)
+                    else
+                        -- Se o mob não estiver visível, reposiciona no ponto padrão
+                        local rootPart = LocalPlayer.Character.HumanoidRootPart
+                        rootPart.CFrame = target.CFrame
+                        task.wait(1)
                     end
                 end
             end)
         end
     end
 end)
-
-print("OmegaCore: Frozen Village Auto-Farm running successfully!")
