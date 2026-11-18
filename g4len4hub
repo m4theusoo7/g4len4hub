@@ -1,4 +1,4 @@
--- OmegaCore | Módulo: Desert Auto-Farm (Lv. 60 ao 90 - Missão + Sobrevivência)
+-- OmegaCore | Módulo: Desert Auto-Farm (Lv. 60 ao 90 - Estrutura Limpa)
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
@@ -9,14 +9,10 @@ local LocalPlayer = Players.LocalPlayer
 local TargetLevel = 90
 local FarmHeight = 7 -- Distância vertical segura acima do NPC
 local TweenSpeed = 250
-local LowHealthThreshold = 60 -- HP mínimo para manter farmando; abaixo disso o módulo para
+local AttackRange = 40 -- Alcance máximo horizontal para atacar
+local LowHealthThreshold = 60 -- HP mínimo para desligar o farm
 
 local SpawnPoints = {
-    ["Desert Bandit"] = CFrame.new(932.5, 25.0, 4488.0),
-    ["Desert Officer"] = CFrame.new(1572.0, 15.0, 4373.0),
-}
-
-local QuestNPCs = {
     ["Desert Bandit"] = CFrame.new(932.5, 25.0, 4488.0),
     ["Desert Officer"] = CFrame.new(1572.0, 15.0, 4373.0),
 }
@@ -127,39 +123,6 @@ local function getAttackCFrame(enemy)
     return CFrame.lookAt(pos, hrp.Position, Vector3.new(0, 1, 0))
 end
 
--- ===== Missões =====
-local function hasQuest(questKey)
-    local data = LocalPlayer:FindFirstChild("Data")
-    local quest = data and data:FindFirstChild("Quest")
-    if not quest then return false end
-    return quest.Value == questKey
-end
-
-local function acceptQuest(questKey)
-    local npcPos = QuestNPCs[questKey]
-    if not npcPos then return false end
-
-    moveTo(npcPos)
-    task.wait(2.5) -- tempo de chegada / prompt de interação
-
-    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.E, false, game)
-    task.wait(0.1)
-    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.E, false, game)
-    task.wait(3) -- aguarda o diálogo/aceite
-
-    return true
-end
-
-local function waitForQuest(questKey, timeout)
-    local waited = 0
-    while waited < timeout do
-        task.wait(1)
-        waited = waited + 1
-        if hasQuest(questKey) then return true end
-    end
-    return false
-end
-
 -- ===== Loop de Skills =====
 skillTask = task.spawn(function()
     while AutoFarm do
@@ -190,19 +153,10 @@ farmTask = task.spawn(function()
         end
 
         local enemyName = getEnemyName(currentLevel)
-
-        -- [Missão] Coletar missão do NPC antes de farmar
-        if not hasQuest(enemyName) then
-            acceptQuest(enemyName)
-            if not waitForQuest(enemyName, 20) then
-                task.wait(2)
-            end
-        end
-
         local targetEnemy = findEnemy(enemyName)
 
         if not targetEnemy then
-            -- Se não encontrar o NPC renderizado, vai até a área de spawn dele
+            -- Sem NPC renderizado: vai até a área de spawn
             local spawnPos = SpawnPoints[enemyName]
             if spawnPos then
                 moveTo(spawnPos)
@@ -211,6 +165,8 @@ farmTask = task.spawn(function()
         else
             equipWeapon()
             moveTo(getAttackCFrame(targetEnemy))
+
+            local shouldHeal = false
 
             -- Mantém travado em cima enquanto ataca
             while AutoFarm and targetEnemy and targetEnemy.Parent
@@ -233,13 +189,17 @@ farmTask = task.spawn(function()
                 local hrp = char and char:FindFirstChild("HumanoidRootPart")
                 local humanoid = char and char:FindFirstChildWhichIsA("Humanoid")
 
-                -- [Sobrevivência] Desliga o farm se a HP estiver crítica
+                -- [Sobrevivência] Sai do combate se a HP estiver crítica
                 if humanoid and humanoid.Health <= LowHealthThreshold then
-                    AutoFarm = false
+                    shouldHeal = true
                     break
                 end
 
                 if hrp and targetEnemy:FindFirstChild("HumanoidRootPart") then
+                    local distance = (hrp.Position - targetEnemy.HumanoidRootPart.Position).Magnitude
+                    if distance > AttackRange then
+                        break -- fora de alcance: interrompe pra se reposicionar
+                    end
                     hrp.CFrame = getAttackCFrame(targetEnemy)
                     hrp.AssemblyLinearVelocity = Vector3.zero
                 end
@@ -253,6 +213,21 @@ farmTask = task.spawn(function()
                 end
 
                 task.wait(0.15)
+            end
+
+            -- [Sobrevivência] Se a HP caiu, volta ao spawn e aguarda curar
+            if shouldHeal and AutoFarm then
+                local charAfter = LocalPlayer.Character
+                local humAfter = charAfter and charAfter:FindFirstChildWhichIsA("Humanoid")
+                if humAfter and humAfter.Health <= LowHealthThreshold then
+                    local healPos = SpawnPoints[enemyName]
+                    if healPos then
+                        moveTo(healPos)
+                    end
+                    while AutoFarm and humAfter and humAfter.Health <= LowHealthThreshold do
+                        task.wait(1)
+                    end
+                end
             end
         end
 
