@@ -1,6 +1,5 @@
 -- ====================================================
--- Blox Fruits Auto Farm - Frozen Village (Lv. 90 - 120)
--- Estilo de UI e Automação idêntico ao vídeo (Stop Tween / Auto Quest / Tween)
+-- Blox Fruits Auto Farm - Frozen Village (Lv. 90 - 120) [Corrigido]
 -- Compatível com Delta Executor
 -- ====================================================
 
@@ -12,7 +11,7 @@ local TweenService = game:GetService("TweenService")
 
 getgenv().AutoFarmFrozen = true
 
--- Criar UI Flutuante com "Stop Tween" (idêntico ao vídeo)
+-- Criar UI Flutuante com "Stop Tween"
 local ScreenGui = Instance.new("ScreenGui")
 local StopButton = Instance.new("TextButton")
 
@@ -43,13 +42,13 @@ StopButton.MouseButton1Click:Connect(function()
     end
 end)
 
--- Anti-AFK para evitar desconexão
+-- Anti-AFK
 local connections = getconnections(LocalPlayer.Idled)
 for _, connection in ipairs(connections) do
     connection:Disable()
 end
 
--- Função para alternar o alvo e a missão de acordo com a progressão de nível (90 a 120+)
+-- Configuração de alvos por nível
 local function getTargetData()
     local level = LocalPlayer.Data.Level.Value
     if level < 100 then
@@ -57,83 +56,113 @@ local function getTargetData()
             Name = "Snow Bandit",
             QuestName = "SnowQuest",
             QuestIndex = 1,
-            CFrame = CFrame.new(1385, 105, -1300) -- NPC / Spawn dos Bandidos da Neve
+            CFrame = CFrame.new(1385, 105, -1300), -- NPC
+            SpawnPos = CFrame.new(1345, 105, -1320) -- Área dos mobs
         }
     elseif level < 110 then
         return {
             Name = "Snow Trooper",
             QuestName = "SnowQuest",
             QuestIndex = 2,
-            CFrame = CFrame.new(1150, 145, -1540) -- NPC / Spawn dos Snow Troopers
+            CFrame = CFrame.new(1150, 145, -1540),
+            SpawnPos = CFrame.new(1150, 145, -1540)
         }
     else
         return {
             Name = "Yeti",
             QuestName = "SnowQuest",
             QuestIndex = 3,
-            CFrame = CFrame.new(1185, 110, -1580) -- Chefe Yeti
+            CFrame = CFrame.new(1185, 110, -1580),
+            SpawnPos = CFrame.new(1185, 110, -1580)
         }
     end
 end
 
--- Loop Principal de Auto Farm
+-- Função para achar inimigos ignorando o sufixo de nível
+local function getNearestEnemy(name)
+    local targetEnemy = nil
+    local shortestDist = math.huge
+    local rootPart = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return nil end
+
+    for _, v in pairs(Workspace.Enemies:GetChildren()) do
+        if v:FindFirstChild("HumanoidRootPart") and v:FindFirstChild("Humanoid") then
+            if v.Humanoid.Health > 0 and string.find(v.Name, name) then
+                local dist = (rootPart.Position - v.HumanoidRootPart.Position).Magnitude
+                if dist < shortestDist then
+                    shortestDist = dist
+                    targetEnemy = v
+                end
+            end
+        end
+    end
+    return targetEnemy
+end
+
+-- Loop Principal de Farm
 task.spawn(function()
     while task.wait(0.1) do
         if getgenv().AutoFarmFrozen then
             pcall(function()
                 local target = getTargetData()
+                local rootPart = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if not rootPart then return end
                 
-                -- Ativar Haki (Buso) automaticamente
-                if not LocalPlayer.Character.HumanoidRootPart:FindFirstChild("HasBuso") then
+                -- Ativar Haki (Buso)
+                if not rootPart:FindFirstChild("HasBuso") then
                     ReplicatedStorage.Remotes.CommF_:InvokeServer("Buso")
                 end
 
-                -- Verificar se a UI de Quest está visível (se precisa pegar missão)
+                -- Verificar se tem quest ativa
                 local questGui = LocalPlayer.PlayerGui.Main.Quest
                 if not questGui.Visible then
-                    local rootPart = LocalPlayer.Character.HumanoidRootPart
+                    -- Ir até o NPC da Quest
                     local dist = (rootPart.Position - target.CFrame.Position).Magnitude
-                    local tweenInfo = TweenInfo.new(dist / 250, Enum.EasingStyle.Linear)
-                    local tween = TweenService:Create(rootPart, tweenInfo, {CFrame = target.CFrame})
-                    tween:Play()
-                    tween.Completed:Wait()
-                    
+                    if dist > 10 then
+                        local tween = TweenService:Create(rootPart, TweenInfo.new(dist / 250, Enum.EasingStyle.Linear), {CFrame = target.CFrame})
+                        tween:Play()
+                        tween.Completed:Wait()
+                    else
+                        rootPart.CFrame = target.CFrame
+                    end
                     task.wait(0.5)
                     ReplicatedStorage.Remotes.CommF_:InvokeServer("StartQuest", target.QuestName, target.QuestIndex)
                     task.wait(1)
                 else
-                    -- Procurar inimigo ativo no Workspace
-                    local enemyFolder = Workspace.Enemies:FindFirstChild(target.Name)
-                    if enemyFolder and enemyFolder:FindFirstChild("HumanoidRootPart") and enemyFolder:FindFirstChild("Humanoid") then
-                        if enemyFolder.Humanoid.Health > 0 then
-                            local rootPart = LocalPlayer.Character.HumanoidRootPart
-                            local enemyRoot = enemyFolder.HumanoidRootPart
-                            local dist = (rootPart.Position - enemyRoot.Position).Magnitude
+                    -- Procurar inimigo ativo no mapa
+                    local enemy = getNearestEnemy(target.Name)
+                    if enemy then
+                        local enemyRoot = enemy.HumanoidRootPart
+                        local dist = (rootPart.Position - enemyRoot.Position).Magnitude
+                        
+                        if dist > 15 then
+                            local tween = TweenService:Create(rootPart, TweenInfo.new(dist / 250, Enum.EasingStyle.Linear), {CFrame = enemyRoot.CFrame * CFrame.new(0, 25, 3)})
+                            tween:Play()
+                            tween.Completed:Wait()
+                        else
+                            rootPart.CFrame = enemyRoot.CFrame * CFrame.new(0, 15, 2)
                             
-                            if dist > 15 then
-                                local tweenInfo = TweenInfo.new(dist / 250, Enum.EasingStyle.Linear)
-                                local tween = TweenService:Create(rootPart, tweenInfo, {CFrame = enemyRoot.CFrame * CFrame.new(0, 25, 3)})
-                                tween:Play()
-                                tween.Completed:Wait()
-                            else
-                                rootPart.CFrame = enemyRoot.CFrame * CFrame.new(0, 15, 2)
-                                
-                                -- Executar ataques básicos e habilidades (Z, X, C, V)
-                                local vim = game:GetService("VirtualInputManager")
-                                vim:SendMouseButtonEvent(0, 0, 0, true, game, 0)
-                                task.wait(0.05)
-                                vim:SendMouseButtonEvent(0, 0, 0, false, game, 0)
-                                
-                                vim:SendKeyEvent(true, Enum.KeyCode.Z, false, game)
-                                vim:SendKeyEvent(true, Enum.KeyCode.X, false, game)
-                                vim:SendKeyEvent(true, Enum.KeyCode.C, false, game)
-                                vim:SendKeyEvent(true, Enum.KeyCode.V, false, game)
-                            end
+                            -- Executar ataques e habilidades
+                            local vim = game:GetService("VirtualInputManager")
+                            vim:SendMouseButtonEvent(0, 0, 0, true, game, 0)
+                            task.wait(0.05)
+                            vim:SendMouseButtonEvent(0, 0, 0, false, game, 0)
+                            
+                            vim:SendKeyEvent(true, Enum.KeyCode.Z, false, game)
+                            vim:SendKeyEvent(true, Enum.KeyCode.X, false, game)
+                            vim:SendKeyEvent(true, Enum.KeyCode.C, false, game)
+                            vim:SendKeyEvent(true, Enum.KeyCode.V, false, game)
                         end
                     else
-                        -- Se o mob não estiver visível, reposiciona no ponto padrão
-                        local rootPart = LocalPlayer.Character.HumanoidRootPart
-                        rootPart.CFrame = target.CFrame
+                        -- Se os mobs ainda não nasceram, aguarda na área de spawn
+                        local dist = (rootPart.Position - target.SpawnPos.Position).Magnitude
+                        if dist > 10 then
+                            local tween = TweenService:Create(rootPart, TweenInfo.new(dist / 250, Enum.EasingStyle.Linear), {CFrame = target.SpawnPos})
+                            tween:Play()
+                            tween.Completed:Wait()
+                        else
+                            rootPart.CFrame = target.SpawnPos
+                        end
                         task.wait(1)
                     end
                 end
