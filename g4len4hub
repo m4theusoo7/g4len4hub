@@ -1,4 +1,4 @@
--- OmegaCore | Módulo: Desert Auto-Farm (Lv. 60 ao 90 - Estrutura Limpa)
+-- OmegaCore | Módulo: Desert Auto-Farm (Lv. 60 ao 90 - Missão + Sobrevivência)
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
@@ -9,8 +9,14 @@ local LocalPlayer = Players.LocalPlayer
 local TargetLevel = 90
 local FarmHeight = 7 -- Distância vertical segura acima do NPC
 local TweenSpeed = 250
+local LowHealthThreshold = 60 -- HP mínimo para manter farmando; abaixo disso o módulo para
 
 local SpawnPoints = {
+    ["Desert Bandit"] = CFrame.new(932.5, 25.0, 4488.0),
+    ["Desert Officer"] = CFrame.new(1572.0, 15.0, 4373.0),
+}
+
+local QuestNPCs = {
     ["Desert Bandit"] = CFrame.new(932.5, 25.0, 4488.0),
     ["Desert Officer"] = CFrame.new(1572.0, 15.0, 4373.0),
 }
@@ -35,7 +41,10 @@ end
 
 -- Noclip enquanto o farm estiver ativo
 noclipConnection = RunService.Stepped:Connect(function()
-    if not AutoFarm then return end
+    if not AutoFarm then
+        if noclipConnection then noclipConnection:Disconnect() end
+        return
+    end
     local char = LocalPlayer.Character
     if not char then return end
     for _, part in ipairs(char:GetDescendants()) do
@@ -118,6 +127,39 @@ local function getAttackCFrame(enemy)
     return CFrame.lookAt(pos, hrp.Position, Vector3.new(0, 1, 0))
 end
 
+-- ===== Missões =====
+local function hasQuest(questKey)
+    local data = LocalPlayer:FindFirstChild("Data")
+    local quest = data and data:FindFirstChild("Quest")
+    if not quest then return false end
+    return quest.Value == questKey
+end
+
+local function acceptQuest(questKey)
+    local npcPos = QuestNPCs[questKey]
+    if not npcPos then return false end
+
+    moveTo(npcPos)
+    task.wait(2.5) -- tempo de chegada / prompt de interação
+
+    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+    task.wait(0.1)
+    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+    task.wait(3) -- aguarda o diálogo/aceite
+
+    return true
+end
+
+local function waitForQuest(questKey, timeout)
+    local waited = 0
+    while waited < timeout do
+        task.wait(1)
+        waited = waited + 1
+        if hasQuest(questKey) then return true end
+    end
+    return false
+end
+
 -- ===== Loop de Skills =====
 skillTask = task.spawn(function()
     while AutoFarm do
@@ -148,10 +190,19 @@ farmTask = task.spawn(function()
         end
 
         local enemyName = getEnemyName(currentLevel)
+
+        -- [Missão] Coletar missão do NPC antes de farmar
+        if not hasQuest(enemyName) then
+            acceptQuest(enemyName)
+            if not waitForQuest(enemyName, 20) then
+                task.wait(2)
+            end
+        end
+
         local targetEnemy = findEnemy(enemyName)
 
         if not targetEnemy then
-            -- Sem NPC renderizado: vai até a área de spawn
+            -- Se não encontrar o NPC renderizado, vai até a área de spawn dele
             local spawnPos = SpawnPoints[enemyName]
             if spawnPos then
                 moveTo(spawnPos)
@@ -178,7 +229,16 @@ farmTask = task.spawn(function()
                     break
                 end
 
-                local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                local char = LocalPlayer.Character
+                local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                local humanoid = char and char:FindFirstChildWhichIsA("Humanoid")
+
+                -- [Sobrevivência] Desliga o farm se a HP estiver crítica
+                if humanoid and humanoid.Health <= LowHealthThreshold then
+                    AutoFarm = false
+                    break
+                end
+
                 if hrp and targetEnemy:FindFirstChild("HumanoidRootPart") then
                     hrp.CFrame = getAttackCFrame(targetEnemy)
                     hrp.AssemblyLinearVelocity = Vector3.zero
@@ -186,6 +246,12 @@ farmTask = task.spawn(function()
 
                 equipWeapon()
                 basicAttack()
+
+                -- [Eficiência] Sai do loop se o inimigo morreu
+                if not (targetEnemy:FindFirstChild("Humanoid") and targetEnemy.Humanoid.Health > 0) then
+                    break
+                end
+
                 task.wait(0.15)
             end
         end
