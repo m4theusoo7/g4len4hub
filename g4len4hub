@@ -1,102 +1,114 @@
--- OmegaCore / Delta Executor - Desert Island Farm (Lv. 1 a 90)
--- Sem missões | Ataque automático + Skills Z, X, C, V
+-- ==========================================================
+-- OMEGACORE: Desert Island Auto-Farm (Level 1 a 90)
+-- Foco: Sem missões | Coordenadas atualizadas pós-update
+-- Compatível com Delta Executor
+-- ==========================================================
 
-getgenv().AutoDesertFarm = true
+getgenv().AutoFarmDesert = true
+getgenv().FastAttack = true
 
-local plr = game.Players.LocalPlayer
-local workspace = game:GetService("Workspace")
-local vim = game:GetService("VirtualInputManager")
-local vu = game:GetService("VirtualUser")
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local VirtualUser = game:GetService("VirtualUser")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local Player = Players.LocalPlayer
 
--- Sistema Anti-AFK
-plr.Idled:Connect(function()
-    vu:CaptureController()
-    vu:ClickButton2(Vector2.new())
+-- Proteção Anti-AFK
+local afkConnection
+afkConnection = Player.Idled:Connect(function()
+    VirtualUser:CaptureController()
+    VirtualUser:ClickButton2(Vector2.new(0, 0), Workspace.CurrentCamera.CFrame)
 end)
 
--- Equipa arma/melee principal da mochila
-local function equipWeapon()
-    pcall(function()
-        for _, v in pairs(plr.Backpack:GetChildren()) do
-            if v:IsA("Tool") and (v.ToolTip == "Melee" or v.ToolTip == "Sword" or v.ToolTip == "Blox Fruit") then
-                plr.Character.Humanoid:EquipTool(v)
-                break
-            end
+-- Equipar arma ou estilo de luta automaticamente
+local function EquipWeapon()
+    if not Player.Character then return end
+    for _, tool in ipairs(Player.Backpack:GetChildren()) do
+        if tool:IsA("Tool") and (tool.ToolTip == "Melee" or tool.ToolTip == "Sword" or tool.ToolTip == "Blox Fruit") then
+            Player.Character.Humanoid:EquipTool(tool)
+            break
         end
-    end)
-end
-
--- Seleção automática do alvo baseada no Level atual
-local function getTargetName()
-    local level = plr.Data.Level.Value
-    if level < 70 then
-        return "Desert Bandit"
-    else
-        return "Desert Officer"
     end
 end
 
--- Localiza o inimigo mais próximo na pasta Enemies
-local function getNearestEnemy(name)
-    local target = nil
-    local minDist = math.huge
-    pcall(function()
-        if workspace:FindFirstChild("Enemies") then
-            for _, v in pairs(workspace.Enemies:GetChildren()) do
-                if v:FindFirstChild("Humanoid") and v:FindFirstChild("HumanoidRootPart") and v.Humanoid.Health > 0 then
-                    if v.Name == name then
-                        local dist = (plr.Character.HumanoidRootPart.Position - v.HumanoidRootPart.Position).Magnitude
-                        if dist < minDist then
-                            minDist = dist
-                            target = v
+-- Loop Principal
+task.spawn(function()
+    while task.wait(0.15) do
+        if not getgenv().AutoFarmDesert then break end
+        
+        pcall(function()
+            local char = Player.Character
+            if not char or not char:FindFirstChild("HumanoidRootPart") or not char:FindFirstChild("Humanoid") then return end
+            if char.Humanoid.Health <= 0 then return end
+            
+            -- Leitura segura do Level atual
+            local currentLevel = 1
+            if Player:FindFirstChild("Data") and Player.Data:FindFirstChild("Level") then
+                currentLevel = Player.Data.Level.Value
+            elseif Player:FindFirstChild("leaderstats") and Player.leaderstats:FindFirstChild("Level") then
+                currentLevel = Player.leaderstats.Level.Value
+            end
+            
+            local targetName = ""
+            local spawnPos = CFrame.new()
+            
+            -- Lógica de transição de level e alvos com base na ilha atualizada
+            if currentLevel < 70 then
+                targetName = "Desert Bandit"
+                -- Área frontal / dunas dos Desert Bandits
+                spawnPos = CFrame.new(944.4, 20.9, 4350.2)
+            elseif currentLevel >= 70 and currentLevel < 90 then
+                targetName = "Desert Officer"
+                -- Coordenadas atualizadas e corrigidas: área nova atrás da pirâmide / casas do deserto
+                spawnPos = CFrame.new(1045.5, 27.2, 4420.1)
+            else
+                print("[OmegaCore]: Level 90 atingido! Farm do Deserto concluído.")
+                getgenv().AutoFarmDesert = false
+                return
+            end
+            
+            EquipWeapon()
+            
+            -- Buscar o mob correto na pasta Enemies usando string.find para segurança
+            local targetMob = nil
+            local enemiesFolder = Workspace:FindFirstChild("Enemies")
+            if enemiesFolder then
+                for _, enemy in ipairs(enemiesFolder:GetChildren()) do
+                    if enemy:FindFirstChild("Humanoid") and enemy:FindFirstChild("HumanoidRootPart") then
+                        if enemy.Humanoid.Health > 0 and string.find(enemy.Name, targetName) then
+                            targetMob = enemy
+                            break
                         end
                     end
                 end
             end
-        end
-    end)
-    return target
-end
-
--- Executa a rotação de skills Z, X, C, V
-local function useSkills()
-    local keys = {Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C, Enum.KeyCode.V}
-    for _, key in ipairs(keys) do
-        pcall(function()
-            vim:SendKeyEvent(true, key, false, game)
-            task.wait(0.05)
-            vim:SendKeyEvent(false, key, false, game)
-        end)
-        task.wait(0.1)
-    end
-end
-
--- Loop principal de farm
-task.spawn(function()
-    while task.wait(0.4) do
-        if not getgenv().AutoDesertFarm then break end
-        pcall(function()
-            if plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") and plr.Character:FindFirstChild("Humanoid") and plr.Character.Humanoid.Health > 0 then
-                equipWeapon()
+            
+            local hrp = char.HumanoidRootPart
+            
+            if targetMob and targetMob:FindFirstChild("HumanoidRootPart") then
+                local mobHrp = targetMob.HumanoidRootPart
                 
-                local currentTarget = getTargetName()
-                local enemy = getNearestEnemy(currentTarget)
+                -- Posicionamento estratégico flutuando acima do NPC para evitar dano corpo a corpo
+                hrp.CFrame = mobHrp.CFrame * CFrame.new(0, 12, 3)
+                char.Humanoid.PlatformStand = true
                 
-                if enemy and enemy:FindFirstChild("HumanoidRootPart") then
-                    -- Posicionamento seguro acima e ligeiramente atrás do NPC
-                    plr.Character.HumanoidRootPart.CFrame = enemy.HumanoidRootPart.CFrame * CFrame.new(0, 10, 3)
-                    
-                    -- Expande hitbox para facilitar o registro de dano
-                    enemy.HumanoidRootPart.Size = Vector3.new(60, 60, 60)
-                    enemy.HumanoidRootPart.CanCollide = false
-                    
-                    -- Clica para atacar
-                    vu:Button1Down(Vector2.new(500, 500), workspace.CurrentCamera.ViewportSize)
-                    
-                    -- Dispara habilidades
-                    useSkills()
+                -- Ataque Básico Automático (M1)
+                VirtualUser:CaptureController()
+                VirtualUser:Button1Down(Vector2.new(0, 0), Workspace.CurrentCamera.CFrame)
+                
+                -- Disparo de Habilidades (Z, X, C, V)
+                for _, skillKey in ipairs({Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C, Enum.KeyCode.V}) do
+                    VirtualInputManager:SendKeyEvent(true, skillKey, false, game)
+                    task.wait(0.03)
+                    VirtualInputManager:SendKeyEvent(false, skillKey, false, game)
                 end
+            else
+                -- Caso não haja mobs visíveis, deslocar para o ponto de spawn exato da categoria atual
+                char.Humanoid.PlatformStand = false
+                hrp.CFrame = spawnPos
             end
         end)
     end
 end)
+
+print("[OmegaCore]: Script iniciado com sucesso para a Desert Island!")
