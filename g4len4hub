@@ -1,235 +1,102 @@
--- ==========================================
--- AUTO FARM DESERT (LVL 60 - 90) | SEM MISSÃO
--- Desert Bandits (< 70) -> Desert Officers (< 90)
--- ==========================================
+-- OmegaCore / Delta Executor - Desert Island Farm (Lv. 1 a 90)
+-- Sem missões | Ataque automático + Skills Z, X, C, V
 
-_G.AutoFarmDeserto = true
+getgenv().AutoDesertFarm = true
 
-local Players = game:GetService("Players")
-local Workspace = game:GetService("Workspace")
-local TweenService = game:GetService("TweenService")
-local RunService = game:GetService("RunService")
-local VirtualInputManager = game:GetService("VirtualInputManager")
-local VirtualUser = game:GetService("VirtualUser")
+local plr = game.Players.LocalPlayer
+local workspace = game:GetService("Workspace")
+local vim = game:GetService("VirtualInputManager")
+local vu = game:GetService("VirtualUser")
 
-local LocalPlayer = Players.LocalPlayer
-local Camera = Workspace.CurrentCamera
-
-local CONFIG = {
-    VelocidadeTween = 300, -- Velocidade de deslocamento seguro
-    AlturaFarm = 12,       -- Distância vertical acima do NPC
-    UsarSkills = true,
-    TeclasSkills = {
-        Enum.KeyCode.Z,
-        Enum.KeyCode.X,
-        Enum.KeyCode.C,
-        Enum.KeyCode.V
-    },
-    IntervaloSkill = 0.45, -- Tempo entre cada skill para não travar o posicionamento
-    PosDesertBandit = Vector3.new(1094, 35, 4375),
-    PosDesertOfficer = Vector3.new(1572, 35, 4373)
-}
-
--- Anti-AFK
-LocalPlayer.Idled:Connect(function()
-    VirtualUser:CaptureController()
-    VirtualUser:ClickButton2(Vector2.new())
+-- Sistema Anti-AFK
+plr.Idled:Connect(function()
+    vu:CaptureController()
+    vu:ClickButton2(Vector2.new())
 end)
 
--- Noclip contínuo enquanto o farm estiver ativo
-local noclipConn
-noclipConn = RunService.Stepped:Connect(function()
-    if not _G.AutoFarmDeserto then
-        if noclipConn then noclipConn:Disconnect() end
-        return
-    end
-    local char = LocalPlayer.Character
-    if char then
-        for _, part in ipairs(char:GetDescendants()) do
-            if part:IsA("BasePart") and part.CanCollide then
-                part.CanCollide = false
+-- Equipa arma/melee principal da mochila
+local function equipWeapon()
+    pcall(function()
+        for _, v in pairs(plr.Backpack:GetChildren()) do
+            if v:IsA("Tool") and (v.ToolTip == "Melee" or v.ToolTip == "Sword" or v.ToolTip == "Blox Fruit") then
+                plr.Character.Humanoid:EquipTool(v)
+                break
             end
         end
-    end
-end)
-
--- Restaura física normal ao finalizar ou pausar
-local function RestaurarPersonagem()
-    local char = LocalPlayer.Character
-    if not char then return end
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    local root = char:FindFirstChild("HumanoidRootPart")
-
-    if hum then
-        hum.PlatformStand = false
-    end
-    if root then
-        local bv = root:FindFirstChild("DesertoFarmBV")
-        if bv then bv:Destroy() end
-        root.CanCollide = true
-    end
+    end)
 end
 
--- Mantém estabilidade aérea e evita queda/rollback
-local function AplicarEstabilidade(root, hum)
-    if hum then
-        hum.PlatformStand = true
-    end
-    local bv = root:FindFirstChild("DesertoFarmBV")
-    if not bv then
-        bv = Instance.new("BodyVelocity")
-        bv.Name = "DesertoFarmBV"
-        bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-        bv.Velocity = Vector3.zero
-        bv.Parent = root
-    else
-        bv.Velocity = Vector3.zero
-    end
-end
-
--- Equipa automaticamente estilo de luta (Melee) ou Espada
-local function EquiparArma()
-    local char = LocalPlayer.Character
-    local backpack = LocalPlayer:FindFirstChild("Backpack")
-    if not char or not backpack then return nil end
-
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    if not hum then return nil end
-
-    local equipada = char:FindFirstChildOfClass("Tool")
-    if equipada and (equipada.ToolTip == "Melee" or equipada.ToolTip == "Sword") then
-        return equipada
-    end
-
-    for _, tipo in ipairs({"Melee", "Sword"}) do
-        for _, tool in ipairs(backpack:GetChildren()) do
-            if tool:IsA("Tool") and tool.ToolTip == tipo then
-                hum:EquipTool(tool)
-                return tool
-            end
-        end
-    end
-
-    -- Fallback caso o ToolTip não esteja definido
-    local primeiraTool = backpack:FindFirstChildOfClass("Tool")
-    if primeiraTool then
-        hum:EquipTool(primeiraTool)
-        return primeiraTool
-    end
-
-    return equipada
-end
-
--- Deslocamento via Tween para longas distâncias e CFrame direto perto do alvo
-local tweenAtual
-local function MoverPara(root, destinoCFrame)
-    local distancia = (root.Position - destinoCFrame.Position).Magnitude
-    if distancia <= 25 then
-        if tweenAtual then
-            tweenAtual:Cancel()
-            tweenAtual = nil
-        end
-        root.CFrame = destinoCFrame
-        return true
-    else
-        local tempo = math.max(distancia / CONFIG.VelocidadeTween, 0.05)
-        if tweenAtual then tweenAtual:Cancel() end
-        tweenAtual = TweenService:Create(
-            root,
-            TweenInfo.new(tempo, Enum.EasingStyle.Linear),
-            {CFrame = destinoCFrame}
-        )
-        tweenAtual:Play()
-        return false
-    end
-end
-
--- Define alvo e coordenada de espera conforme o Level
-local function ObterConfigEstagio(level)
+-- Seleção automática do alvo baseada no Level atual
+local function getTargetName()
+    local level = plr.Data.Level.Value
     if level < 70 then
-        return "Desert Bandit", CONFIG.PosDesertBandit
-    elseif level < 90 then
-        return "Desert Officer", CONFIG.PosDesertOfficer
+        return "Desert Bandit"
+    else
+        return "Desert Officer"
     end
-    return nil, nil
 end
 
--- Busca o NPC vivo mais próximo dentro de Workspace.Enemies
-local function BuscarInimigoMaisProximo(nomeAlvo, origemPos)
-    local enemies = Workspace:FindFirstChild("Enemies")
-    if not enemies then return nil end
-
-    local maisProximo = nil
-    local menorDist = math.huge
-
-    for _, mob in ipairs(enemies:GetChildren()) do
-        if string.find(mob.Name, nomeAlvo) then
-            local hum = mob:FindFirstChildOfClass("Humanoid")
-            local hrp = mob:FindFirstChild("HumanoidRootPart")
-            if hum and hrp and hum.Health > 0 then
-                local dist = (hrp.Position - origemPos).Magnitude
-                if dist < menorDist then
-                    menorDist = dist
-                    maisProximo = mob
+-- Localiza o inimigo mais próximo na pasta Enemies
+local function getNearestEnemy(name)
+    local target = nil
+    local minDist = math.huge
+    pcall(function()
+        if workspace:FindFirstChild("Enemies") then
+            for _, v in pairs(workspace.Enemies:GetChildren()) do
+                if v:FindFirstChild("Humanoid") and v:FindFirstChild("HumanoidRootPart") and v.Humanoid.Health > 0 then
+                    if v.Name == name then
+                        local dist = (plr.Character.HumanoidRootPart.Position - v.HumanoidRootPart.Position).Magnitude
+                        if dist < minDist then
+                            minDist = dist
+                            target = v
+                        end
+                    end
                 end
             end
         end
-    end
-
-    return maisProximo
+    end)
+    return target
 end
 
--- Executa ataque básico e dispara uma skill por ciclo sem travar o loop
-local indiceSkill = 1
-local ultimoDisparoSkill = 0
-
-local function AtacarEUsarSkills(tool, alvoPos)
-    -- Mira a câmera para baixo na direção do NPC para acertar skills direcionais
-    if Camera then
-        Camera.CFrame = CFrame.new(Camera.CFrame.Position, alvoPos)
-    end
-
-    -- Ataque básico
-    VirtualUser:CaptureController()
-    VirtualUser:Button1Down(Vector2.new(1280, 672))
-    if tool and tool.Parent == LocalPlayer.Character then
-        tool:Activate()
-    end
-
-    -- Rotação de skills Z -> X -> C -> V
-    if CONFIG.UsarSkills and (tick() - ultimoDisparoSkill) >= CONFIG.IntervaloSkill then
-        ultimoDisparoSkill = tick()
-        local tecla = CONFIG.TeclasSkills[indiceSkill]
-
-        VirtualInputManager:SendKeyEvent(true, tecla, false, game)
-        task.defer(function()
+-- Executa a rotação de skills Z, X, C, V
+local function useSkills()
+    local keys = {Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C, Enum.KeyCode.V}
+    for _, key in ipairs(keys) do
+        pcall(function()
+            vim:SendKeyEvent(true, key, false, game)
             task.wait(0.05)
-            VirtualInputManager:SendKeyEvent(false, tecla, false, game)
+            vim:SendKeyEvent(false, key, false, game)
         end)
-
-        indiceSkill = (indiceSkill % #CONFIG.TeclasSkills) + 1
+        task.wait(0.1)
     end
 end
 
--- Loop principal
-while _G.AutoFarmDeserto and task.wait() do
-    local ok, err = pcall(function()
-        local data = LocalPlayer:FindFirstChild("Data")
-        local levelObj = data and data:FindFirstChild("Level")
-        if not levelObj then return end
-
-        local level = levelObj.Value
-        local nomeAlvo, posEspera = ObterConfigEstagio(level)
-
-        -- Encerra automaticamente ao atingir Level 90
-        if not nomeAlvo then
-            _G.AutoFarmDeserto = false
-            return
-        end
-
-        local char = LocalPlayer.Character
-        local hum = char and char:FindFirstChildOfClass("Humanoid")
-        local root = char and char:FindFirstChild("HumanoidRootPart")
-        if not (char and hum and root and hum.Health > 0) then return end
-
-        AplicarEstabilidade(root, hum)
+-- Loop principal de farm
+task.spawn(function()
+    while task.wait(0.4) do
+        if not getgenv().AutoDesertFarm then break end
+        pcall(function()
+            if plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") and plr.Character:FindFirstChild("Humanoid") and plr.Character.Humanoid.Health > 0 then
+                equipWeapon()
+                
+                local currentTarget = getTargetName()
+                local enemy = getNearestEnemy(currentTarget)
+                
+                if enemy and enemy:FindFirstChild("HumanoidRootPart") then
+                    -- Posicionamento seguro acima e ligeiramente atrás do NPC
+                    plr.Character.HumanoidRootPart.CFrame = enemy.HumanoidRootPart.CFrame * CFrame.new(0, 10, 3)
+                    
+                    -- Expande hitbox para facilitar o registro de dano
+                    enemy.HumanoidRootPart.Size = Vector3.new(60, 60, 60)
+                    enemy.HumanoidRootPart.CanCollide = false
+                    
+                    -- Clica para atacar
+                    vu:Button1Down(Vector2.new(500, 500), workspace.CurrentCamera.ViewportSize)
+                    
+                    -- Dispara habilidades
+                    useSkills()
+                end
+            end
+        end)
+    end
+end)
