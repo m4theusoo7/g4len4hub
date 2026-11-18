@@ -6,7 +6,7 @@ local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local LocalPlayer = Players.LocalPlayer
 local TargetLevel = 90
-local FarmHeight = 20 -- Distância vertical segura acima do NPC
+local FarmHeight = 9 -- Distância vertical segura acima do NPC
 local TweenSpeed = 250
 
 -- Pontos de referência caso os NPCs estejam longe para renderizar
