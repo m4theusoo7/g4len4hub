@@ -1,7 +1,6 @@
 -- ==========================================================
--- OMEGACORE: Desert Island Auto-Farm Dinâmico (1-90)
--- Foco: Sem missões | Rastreamento dinâmico de NPCs (Pós-Update)
--- Compatível com Delta Executor
+-- OMEGACORE: Desert Island Auto-Farm (1-90)
+-- Delta Executor | Sem Missões | Coordenadas Corrigidas
 -- ==========================================================
 
 getgenv().AutoFarmDesert = true
@@ -13,14 +12,13 @@ local VirtualUser = game:GetService("VirtualUser")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local Player = Players.LocalPlayer
 
--- Proteção Anti-AFK
+-- Anti-AFK
 local afkConnection
 afkConnection = Player.Idled:Connect(function()
     VirtualUser:CaptureController()
     VirtualUser:ClickButton2(Vector2.new(0, 0), Workspace.CurrentCamera.CFrame)
 end)
 
--- Equipar arma ou estilo de luta automaticamente
 local function EquipWeapon()
     if not Player.Character then return end
     for _, tool in ipairs(Player.Backpack:GetChildren()) do
@@ -31,7 +29,6 @@ local function EquipWeapon()
     end
 end
 
--- Loop Principal
 task.spawn(function()
     while task.wait(0.15) do
         if not getgenv().AutoFarmDesert then break end
@@ -41,7 +38,6 @@ task.spawn(function()
             if not char or not char:FindFirstChild("HumanoidRootPart") or not char:FindFirstChild("Humanoid") then return end
             if char.Humanoid.Health <= 0 then return end
             
-            -- Leitura segura do Level atual
             local currentLevel = 1
             if Player:FindFirstChild("Data") and Player.Data:FindFirstChild("Level") then
                 currentLevel = Player.Data.Level.Value
@@ -50,21 +46,22 @@ task.spawn(function()
             end
             
             local targetName = ""
+            local spawnPos = CFrame.new()
             
-            -- Definição do alvo por faixa de level
             if currentLevel < 70 then
                 targetName = "Desert Bandit"
+                spawnPos = CFrame.new(944.4, 20.9, 4350.2)
             elseif currentLevel >= 70 and currentLevel < 90 then
                 targetName = "Desert Officer"
+                -- Coordenadas exatas atualizadas pós-update para o Desert Officer
+                spawnPos = CFrame.new(1048.2, 27.2, 4425.6)
             else
-                print("[OmegaCore]: Level 90 atingido! Farm do Deserto concluído.")
                 getgenv().AutoFarmDesert = false
                 return
             end
             
             EquipWeapon()
             
-            -- Busca dinâmica por qualquer instância do mob na pasta Enemies (independente de onde o jogo o spawnou na ilha)
             local targetMob = nil
             local enemiesFolder = Workspace:FindFirstChild("Enemies")
             if enemiesFolder then
@@ -82,28 +79,21 @@ task.spawn(function()
             
             if targetMob and targetMob:FindFirstChild("HumanoidRootPart") then
                 local mobHrp = targetMob.HumanoidRootPart
-                
-                -- Teleporta exatamente para a posição real em tempo real do mob (evita erro de mapa atualizado)
-                hrp.CFrame = mobHrp.CFrame * CFrame.new(0, 10, 3)
+                hrp.CFrame = mobHrp.CFrame * CFrame.new(0, 12, 3)
                 char.Humanoid.PlatformStand = true
                 
-                -- Ataque Básico Automático (M1)
                 VirtualUser:CaptureController()
                 VirtualUser:Button1Down(Vector2.new(0, 0), Workspace.CurrentCamera.CFrame)
                 
-                -- Disparo de Habilidades (Z, X, C, V)
                 for _, skillKey in ipairs({Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C, Enum.KeyCode.V}) do
                     VirtualInputManager:SendKeyEvent(true, skillKey, false, game)
                     task.wait(0.03)
                     VirtualInputManager:SendKeyEvent(false, skillKey, false, game)
                 end
             else
-                -- Centro padrão da Desert Island caso nenhum mob esteja carregado na tela
                 char.Humanoid.PlatformStand = false
-                hrp.CFrame = CFrame.new(947.0, 15.0, 4390.0)
+                hrp.CFrame = spawnPos
             end
         end)
     end
 end)
-
-print("[OmegaCore]: Script dinâmico iniciado com sucesso!")
