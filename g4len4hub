@@ -1,70 +1,229 @@
--- OmegaCore | Módulo: Deslocamento Seguro para Ilha Desert (Sea 1)
+-- OmegaCore | Módulo: Desert Progression Auto-Farm (Lv. 60 ao 90 - Sem Missão)
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+local MaxTargetLevel = 90
 
--- Coordenada segura na entrada principal da Ilha Desert (próxima ao Desert Adventurer)
-local DesertCFrame = CFrame.new(944.1, 20.9, 4373.3)
-local TweenSpeed = 185 -- Velocidade segura anti-rollback para travessias longas
+-- Configurações de Distância Vertical e Deslocamento
+local FarmHeight = 7.5
+local TweenSpeed = 185 -- Velocidade segura anti-rollback
 
-local function teleportToDesert()
-    local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-    local hrp = char:WaitForChild("HumanoidRootPart")
-    local humanoid = char:WaitForChild("Humanoid")
+-- Coordenadas de spawn/patrulha na Ilha Desert
+local SpawnPoints = {
+    ["Desert Bandit"] = CFrame.new(932.5, 20.9, 4488.0),
+    ["Desert Officer"] = CFrame.new(1572.0, 10.5, 4373.0)
+}
 
+local Skills = {Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C, Enum.KeyCode.V}
+local _G_DesertFarm = true
+local CurrentLockedEnemy = nil
+
+-- Calcula o CFrame seguro acima do alvo
+local function getSafeAboveCFrame(enemy)
+    local enemyHRP = enemy:FindFirstChild("HumanoidRootPart")
+    if not enemyHRP then return nil end
+
+    return enemyHRP.CFrame * CFrame.new(0, FarmHeight, 0) * CFrame.Angles(math.rad(-90), 0, 0)
+end
+
+-- Aponta a câmera e o cursor virtual exatamente para o centro do NPC
+local function aimAtEnemy(enemy)
+    local enemyHRP = enemy and enemy:FindFirstChild("HumanoidRootPart")
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not enemyHRP or not hrp then return end
+
+    local camPos = hrp.Position + Vector3.new(0, 4, 0)
+    Camera.CFrame = CFrame.lookAt(camPos, enemyHRP.Position)
+
+    local screenPos, onScreen = Camera:WorldToViewportPoint(enemyHRP.Position)
+    if onScreen then
+        VirtualInputManager:SendMouseMoveEvent(screenPos.X, screenPos.Y, game)
+    end
+end
+
+-- Noclip contínuo
+local noclipConnection
+noclipConnection = RunService.Stepped:Connect(function()
+    if not _G_DesertFarm then
+        if noclipConnection then noclipConnection:Disconnect() end
+        return
+    end
+    local char = LocalPlayer.Character
+    if char then
+        for _, part in ipairs(char:GetDescendants()) do
+            if part:IsA("BasePart") and part.CanCollide then
+                part.CanCollide = false
+            end
+        end
+    end
+end)
+
+-- Equipa Melee ou Espada automaticamente
+local function equipWeapon()
+    local char = LocalPlayer.Character
+    local backpack = LocalPlayer:FindFirstChild("Backpack")
+    if not char or not backpack then return end
+
+    if char:FindFirstChildOfClass("Tool") then return end
+
+    for _, tool in ipairs(backpack:GetChildren()) do
+        if tool:IsA("Tool") and (tool.ToolTip == "Melee" or tool.ToolTip == "Sword" or tool.Name == "Combat") then
+            char.Humanoid:EquipTool(tool)
+            break
+        end
+    end
+end
+
+-- Deslocamento estabilizado com BodyVelocity + PlatformStand
+local function safeMoveTo(targetCFrame)
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    local humanoid = char and char:FindFirstChild("Humanoid")
     if not hrp or not humanoid then return end
 
-    local isMoving = true
+    local distance = (hrp.Position - targetCFrame.Position).Magnitude
+    if distance < 10 then
+        hrp.CFrame = targetCFrame
+        return
+    end
 
-    -- Trava a física do personagem para evitar estado de natação ou queda no mar
     humanoid.PlatformStand = true
-
     local bodyVel = Instance.new("BodyVelocity")
     bodyVel.Name = "OmegaCoreStabilizer"
     bodyVel.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
     bodyVel.Velocity = Vector3.zero
     bodyVel.Parent = hrp
 
-    -- Noclip contínuo durante todo o trajeto
-    local stepConnection
-    stepConnection = RunService.Stepped:Connect(function()
-        if not isMoving or not char or not char.Parent then
-            if stepConnection then stepConnection:Disconnect() end
-            return
-        end
-
-        for _, part in ipairs(char:GetDescendants()) do
-            if part:IsA("BasePart") and part.CanCollide then
-                part.CanCollide = false
-            end
-        end
-    end)
-
-    -- Eleva levemente antes de partir para evitar colisão com construções da Pirate Village
-    hrp.CFrame = hrp.CFrame + Vector3.new(0, 20, 0)
-
-    local distance = (hrp.Position - DesertCFrame.Position).Magnitude
-    local duration = distance / TweenSpeed
-
-    print(string.format("[OmegaCore] Iniciando rota para Ilha Desert (Distância: %.0f studs | Tempo: %.1fs)", distance, duration))
-
-    local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear)
-    local tween = TweenService:Create(hrp, tweenInfo, {CFrame = DesertCFrame})
-
+    local info = TweenInfo.new(distance / TweenSpeed, Enum.EasingStyle.Linear)
+    local tween = TweenService:Create(hrp, info, {CFrame = targetCFrame})
     tween:Play()
     tween.Completed:Wait()
 
-    -- Finaliza o trajeto e restaura física/colisões
-    isMoving = false
-    if stepConnection then stepConnection:Disconnect() end
     if bodyVel then bodyVel:Destroy() end
-
     humanoid.PlatformStand = false
-    hrp.CFrame = DesertCFrame
     hrp.AssemblyLinearVelocity = Vector3.zero
-    print("[OmegaCore] Chegou na Ilha Desert!")
 end
 
-teleportToDesert()
+-- Procura o inimigo pelo nome exato em workspace.Enemies
+local function findEnemy(enemyName)
+    local enemiesFolder = workspace:FindFirstChild("Enemies")
+    if enemiesFolder then
+        for _, enemy in ipairs(enemiesFolder:GetChildren()) do
+            if enemy.Name == enemyName and enemy:FindFirstChild("Humanoid") and enemy.Humanoid.Health > 0 and enemy:FindFirstChild("HumanoidRootPart") then
+                return enemy
+            end
+        end
+    end
+    return nil
+end
+
+-- Define o alvo atual com base no Level
+local function getCurrentTargetName(currentLevel)
+    if currentLevel < 70 then
+        return "Desert Bandit"
+    else
+        return "Desert Officer"
+    end
+end
+
+-- Ataque Básico
+local function basicAttack()
+    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 1)
+    task.wait(0.05)
+    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 1)
+end
+
+-- Thread paralela de Skills (dispara apenas quando há um inimigo travado abaixo do personagem)
+task.spawn(function()
+    while _G_DesertFarm do
+        local data = LocalPlayer:FindFirstChild("Data")
+        local level = data and data:FindFirstChild("Level")
+        if level and level.Value >= MaxTargetLevel then break end
+
+        if CurrentLockedEnemy and CurrentLockedEnemy.Parent and CurrentLockedEnemy:FindFirstChild("Humanoid") and CurrentLockedEnemy.Humanoid.Health > 0 then
+            for _, key in ipairs(Skills) do
+                if not _G_DesertFarm or not CurrentLockedEnemy or CurrentLockedEnemy.Humanoid.Health <= 0 then break end
+                
+                aimAtEnemy(CurrentLockedEnemy)
+                VirtualInputManager:SendKeyEvent(true, key, false, game)
+                task.wait(0.15)
+                VirtualInputManager:SendKeyEvent(false, key, false, game)
+                task.wait(0.35)
+            end
+        end
+        task.wait(0.2)
+    end
+end)
+
+-- Loop Principal de Farm
+task.spawn(function()
+    while _G_DesertFarm do
+        local data = LocalPlayer:FindFirstChild("Data")
+        local levelObj = data and data:FindFirstChild("Level")
+        local currentLevel = levelObj and levelObj.Value or 60
+
+        -- Para o script automaticamente ao atingir o Level 90
+        if currentLevel >= MaxTargetLevel then
+            _G_DesertFarm = false
+            CurrentLockedEnemy = nil
+            print("[OmegaCore] Level 90 atingido! Farm da Ilha Desert concluído.")
+            break
+        end
+
+        local targetName = getCurrentTargetName(currentLevel)
+        local targetEnemy = findEnemy(targetName)
+
+        if targetEnemy then
+            equipWeapon()
+            local initialPos = getSafeAboveCFrame(targetEnemy)
+            if initialPos then
+                safeMoveTo(initialPos)
+            end
+
+            CurrentLockedEnemy = targetEnemy
+
+            while targetEnemy and targetEnemy.Parent and targetEnemy:FindFirstChild("Humanoid") and targetEnemy.Humanoid.Health > 0 and _G_DesertFarm do
+                currentLevel = levelObj and levelObj.Value or currentLevel
+                if currentLevel >= MaxTargetLevel then
+                    _G_DesertFarm = false
+                    break
+                end
+
+                -- Troca imediatamente para Desert Officer ao atingir o Level 70
+                local updatedTarget = getCurrentTargetName(currentLevel)
+                if updatedTarget ~= targetName then
+                    break
+                end
+
+                local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                local safeCFrame = getSafeAboveCFrame(targetEnemy)
+                if hrp and safeCFrame then
+                    hrp.CFrame = safeCFrame
+                    hrp.AssemblyLinearVelocity = Vector3.zero
+                    aimAtEnemy(targetEnemy)
+                end
+
+                equipWeapon()
+                basicAttack()
+                task.wait(0.1)
+            end
+
+            CurrentLockedEnemy = nil
+        else
+            CurrentLockedEnemy = nil
+            -- Desloca até o ponto de spawn do alvo para carregar a área (Pirâmide dos Desert Officers fica mais afastada)
+            local spawnCFrame = SpawnPoints[targetName]
+            if spawnCFrame then
+                safeMoveTo(spawnCFrame + Vector3.new(0, FarmHeight + 3, 0))
+            end
+            task.wait(0.5)
+        end
+
+        task.wait(0.1)
+    end
+end)
