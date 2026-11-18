@@ -1,20 +1,105 @@
--- Monitor de CFrame (para entender como o script faz o movimento/tween)
-local player = game.Players.LocalPlayer
-local character = player.Character or player.CharacterAdded:Wait()
-local rootPart = character:WaitForChild("HumanoidRootPart")
+-- ==========================================
+-- OmegaCore: Frozen Village Auto-Farm (90-120)
+-- Target NPCs: Snow Bandit, Snow Trooper, Yeti
+-- Mode: Direct Auto-Farm (No Quests), Tween, Skills (Z,X,C,V)
+-- ==========================================
 
--- Monitora alterações diretas na posição do personagem
-local mt = getrawmetatable(game)
-setreadonly(mt, false)
+_G.AutoFarmFrozen = true
+_G.SelectWeapon = "Melee" -- Change to "Blox Fruit" or "Sword" if preferred
 
-local oldIndex = mt.__newindex
-mt.__newindex = newcclosure(function(self, property, value)
-    if self == rootPart and property == "CFrame" then
-        print("[LOG DE LÓGICA] O script tentou mover o player para: " .. tostring(value))
-        -- Aqui você rastreia a matemática ou o destino que o script calculou
-    end
-    return oldIndex(self, property, value)
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local TweenService = game:GetService("TweenService")
+local VirtualUser = game:GetService("VirtualUser")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+
+local Player = Players.LocalPlayer
+
+-- Anti-AFK protection
+Player.Idled:Connect(function()
+    VirtualUser:Button2Down(Vector2.new(0, 0), Workspace.CurrentCamera.CFrame)
+    task.wait(1)
+    VirtualUser:Button2Up(Vector2.new(0, 0), Workspace.CurrentCamera.CFrame)
 end)
 
-setreadonly(mt, true)
-print("Espião de movimento ativado!")
+-- Find nearest target in Frozen Village
+local function getTarget()
+    local char = Player.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return nil end
+    
+    local enemies = Workspace.Enemies:GetChildren()
+    local closestEnemy = nil
+    local shortestDist = math.huge
+    
+    for _, enemy in ipairs(enemies) do
+        local humanoid = enemy:FindFirstChildOfClass("Humanoid")
+        local rootPart = enemy:FindFirstChild("HumanoidRootPart")
+        
+        if humanoid and rootPart and humanoid.Health > 0 then
+            local name = enemy.Name
+            -- Target Frozen Village enemies up to level 120 transition
+            if name == "Snow Bandit" or name == "Snow Trooper" or name == "Yeti" then
+                local dist = (rootPart.Position - char.HumanoidRootPart.Position).Magnitude
+                if dist < shortestDist then
+                    shortestDist = dist
+                    closestEnemy = enemy
+                end
+            end
+        end
+    end
+    
+    return closestEnemy
+end
+
+-- Smooth Tween movement above targets
+local function tweenTo(targetCFrame)
+    local char = Player.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+    local rootPart = char.HumanoidRootPart
+    
+    local distance = (targetCFrame.Position - rootPart.Position).Magnitude
+    local speed = 320 -- Adjust tween speed if necessary
+    
+    local info = TweenInfo.new(distance / speed, Enum.EasingStyle.Linear)
+    local tween = TweenService:Create(rootPart, info, {CFrame = targetCFrame})
+    tween:Play()
+end
+
+-- Main Auto-Farm Loop
+task.spawn(function()
+    while task.wait(0.1) do
+        if _G.AutoFarmFrozen then
+            pcall(function()
+                local target = getTarget()
+                if target and target:FindFirstChild("HumanoidRootPart") then
+                    -- Hover safely 12 studs above the enemy
+                    local targetCF = target.HumanoidRootPart.CFrame + Vector3.new(0, 12, 0)
+                    tweenTo(targetCF)
+                    
+                    -- Ensure weapon is equipped
+                    local char = Player.Character
+                    if char then
+                        local weapon = char:FindFirstChild(_G.SelectWeapon) or char:FindFirstChildOfClass("Tool")
+                        if weapon and weapon.Parent ~= char then
+                            weapon.Parent = char
+                        end
+                    end
+                    
+                    -- Basic M1 Attack
+                    VirtualUser:Button1Down(Vector2.new(0, 0), Workspace.CurrentCamera.CFrame)
+                    task.wait(0.05)
+                    VirtualUser:Button1Up(Vector2.new(0, 0), Workspace.CurrentCamera.CFrame)
+                    
+                    -- Skill Rotation (Z, X, C, V)
+                    for _, key in ipairs({"Z", "X", "C", "V"}) do
+                        VirtualInputManager:SendKeyEvent(true, key, false, game)
+                        task.wait(0.05)
+                        VirtualInputManager:SendKeyEvent(false, key, false, game)
+                    end
+                end
+            end)
+        end
+    end
+end)
+
+print("OmegaCore: Frozen Village Auto-Farm running successfully!")
