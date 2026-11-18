@@ -1,100 +1,172 @@
--- OmegaCore | Módulo: Comprar Dark Step ($150,000 Beli)
+-- OmegaCore | Módulo: Desert Auto-Farm (Lv. 60 ao 90 - Estrutura Limpa)
 local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local LocalPlayer = Players.LocalPlayer
-local DarkStepCost = 150000
+local TargetLevel = 90
+local FarmHeight = 10 -- Distância vertical segura acima do NPC
+local TweenSpeed = 250
 
--- Coordenada do NPC Dark Step Teacher na Pirate Village (sala secreta atrás da parede)
-local TeacherCFrame = CFrame.new(-982.5, 14.5, 3982.8)
-local TweenSpeed = 185
+-- Pontos de referência caso os NPCs estejam longe para renderizar
+local SpawnPoints = {
+    ["Desert Bandit"] = CFrame.new(932.5, 25.0, 4488.0),
+    ["Desert Officer"] = CFrame.new(1572.0, 15.0, 4373.0)
+}
 
--- Deslocamento seguro até o NPC (caso prefira ir fisicamente ou para validar proximidade)
-local function moveToTeacher()
-    local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-    local hrp = char:WaitForChild("HumanoidRootPart")
-    local humanoid = char:WaitForChild("Humanoid")
-    if not hrp or not humanoid then return end
+-- Configurações de Combate
+local Skills = {Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C, Enum.KeyCode.V}
+local _G_AutoFarm = true
 
-    local isMoving = true
-    humanoid.PlatformStand = true
-
-    local bodyVel = Instance.new("BodyVelocity")
-    bodyVel.Name = "OmegaCoreStabilizer"
-    bodyVel.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-    bodyVel.Velocity = Vector3.zero
-    bodyVel.Parent = hrp
-
-    local noclipConn
-    noclipConn = RunService.Stepped:Connect(function()
-        if not isMoving or not char or not char.Parent then
-            if noclipConn then noclipConn:Disconnect() end
-            return
-        end
+-- Ativa Noclip para evitar colisões durante o deslocamento
+local noclipConnection
+noclipConnection = RunService.Stepped:Connect(function()
+    if not _G_AutoFarm then
+        if noclipConnection then noclipConnection:Disconnect() end
+        return
+    end
+    local char = LocalPlayer.Character
+    if char then
         for _, part in ipairs(char:GetDescendants()) do
             if part:IsA("BasePart") and part.CanCollide then
                 part.CanCollide = false
             end
         end
-    end)
-
-    hrp.CFrame = hrp.CFrame + Vector3.new(0, 15, 0)
-    local distance = (hrp.Position - TeacherCFrame.Position).Magnitude
-    local tween = TweenService:Create(hrp, TweenInfo.new(distance / TweenSpeed, Enum.EasingStyle.Linear), {CFrame = TeacherCFrame})
-    tween:Play()
-    tween.Completed:Wait()
-
-    isMoving = false
-    if noclipConn then noclipConn:Disconnect() end
-    if bodyVel then bodyVel:Destroy() end
-    humanoid.PlatformStand = false
-    hrp.CFrame = TeacherCFrame
-    hrp.AssemblyLinearVelocity = Vector3.zero
-end
-
-local function buyDarkStep()
-    local data = LocalPlayer:FindFirstChild("Data")
-    local beli = data and data:FindFirstChild("Beli")
-
-    if not beli or beli.Value < DarkStepCost then
-        local currentBeli = beli and beli.Value or 0
-        warn(string.format("[OmegaCore] Beli insuficiente para Dark Step! Atual: $%d | Necessário: $%d", currentBeli, DarkStepCost))
-        return false
     end
+end)
 
-    -- Verifica se já possui o Dark Step equipado ou na mochila
+-- Função para equipar a ferramenta de combate (Melee/Espada)
+local function equipWeapon()
     local char = LocalPlayer.Character
     local backpack = LocalPlayer:FindFirstChild("Backpack")
-    if (char and char:FindFirstChild("Dark Step")) or (backpack and backpack:FindFirstChild("Dark Step")) then
-        print("[OmegaCore] Dark Step já está adquirido!")
-        return true
-    end
+    if not char or not backpack then return end
 
-    -- Invoca o RemoteFunction oficial do Blox Fruits para comprar o estilo de luta
-    local remotes = ReplicatedStorage:FindFirstChild("Remotes")
-    local commF = remotes and remotes:FindFirstChild("CommF_")
+    if char:FindFirstChildOfClass("Tool") then return end
 
-    if commF then
-        local success, result = pcall(function()
-            return commF:InvokeServer("BuyBlackLeg")
-        end)
-
-        task.wait(0.3)
-
-        -- Confirma se o item entrou no inventário; se não, desloca até o NPC e tenta novamente
-        if (char and char:FindFirstChild("Dark Step")) or (backpack and backpack:FindFirstChild("Dark Step")) then
-            print("[OmegaCore] Dark Step comprado e equipado com sucesso!")
-            return true
-        else
-            print("[OmegaCore] Deslocando até o Dark Step Teacher para concluir a compra...")
-            moveToTeacher()
-            pcall(function()
-                commF:InvokeServer("BuyBlackLeg")
-            end)
+    for _, tool in ipairs(backpack:GetChildren()) do
+        if tool:IsA("Tool") and (tool.ToolTip == "Melee" or tool.ToolTip == "Sword" or tool.Name == "Combat") then
+            char.Humanoid:EquipTool(tool)
+            break
         end
     end
 end
 
-buyDarkStep()
+-- Função de movimento suave via Tween (igual ao primeiro script)
+local function moveTo(targetCFrame)
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    local distance = (hrp.Position - targetCFrame.Position).Magnitude
+    if distance < 5 then
+        hrp.CFrame = targetCFrame
+        return
+    end
+
+    local info = TweenInfo.new(distance / TweenSpeed, Enum.EasingStyle.Linear)
+    local tween = TweenService:Create(hrp, info, {CFrame = targetCFrame})
+    tween:Play()
+    tween.Completed:Wait()
+end
+
+-- Simula clique do mouse (Ataque Básico)
+local function basicAttack()
+    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 1)
+    task.wait(0.05)
+    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 1)
+end
+
+-- Define o alvo atual com base no Level
+local function getEnemyName(currentLevel)
+    if currentLevel < 70 then
+        return "Desert Bandit"
+    else
+        return "Desert Officer"
+    end
+end
+
+-- Rotação de Skills (Z, X, C, V)
+task.spawn(function()
+    while _G_AutoFarm do
+        local data = LocalPlayer:FindFirstChild("Data")
+        local level = data and data:FindFirstChild("Level")
+        if level and level.Value >= TargetLevel then break end
+
+        for _, key in ipairs(Skills) do
+            if not _G_AutoFarm then break end
+            VirtualInputManager:SendKeyEvent(true, key, false, game)
+            task.wait(0.1)
+            VirtualInputManager:SendKeyEvent(false, key, false, game)
+            task.wait(0.4)
+        end
+        task.wait(1)
+    end
+end)
+
+-- Loop Principal de Farm
+task.spawn(function()
+    while _G_AutoFarm do
+        local data = LocalPlayer:FindFirstChild("Data")
+        local level = data and data:FindFirstChild("Level")
+        local currentLevel = level and level.Value or 60
+
+        -- Para o script automaticamente ao atingir o Level 90
+        if currentLevel >= TargetLevel then
+            _G_AutoFarm = false
+            print("[OmegaCore] Level 90 atingido! Auto-Farm do Deserto finalizado.")
+            break
+        end
+
+        local enemyName = getEnemyName(currentLevel)
+        local enemiesFolder = workspace:FindFirstChild("Enemies")
+        local targetEnemy = nil
+
+        if enemiesFolder then
+            for _, enemy in ipairs(enemiesFolder:GetChildren()) do
+                if string.find(enemy.Name, enemyName) and enemy:FindFirstChild("Humanoid") and enemy.Humanoid.Health > 0 and enemy:FindFirstChild("HumanoidRootPart") then
+                    targetEnemy = enemy
+                    break
+                end
+            end
+        end
+
+        if targetEnemy then
+            equipWeapon()
+            local attackPos = targetEnemy.HumanoidRootPart.CFrame * CFrame.new(0, FarmHeight, 0) * CFrame.Angles(math.rad(-90), 0, 0)
+            moveTo(attackPos)
+
+            -- Mantém travado em cima enquanto ataca
+            while targetEnemy and targetEnemy.Parent and targetEnemy:FindFirstChild("Humanoid") and targetEnemy.Humanoid.Health > 0 and _G_AutoFarm do
+                currentLevel = level and level.Value or currentLevel
+                if currentLevel >= TargetLevel then
+                    _G_AutoFarm = false
+                    break
+                end
+
+                -- Troca para Desert Officer assim que bater Level 70
+                if getEnemyName(currentLevel) ~= enemyName then
+                    break
+                end
+
+                local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if hrp and targetEnemy:FindFirstChild("HumanoidRootPart") then
+                    hrp.CFrame = targetEnemy.HumanoidRootPart.CFrame * CFrame.new(0, FarmHeight, 0) * CFrame.Angles(math.rad(-90), 0, 0)
+                    hrp.AssemblyLinearVelocity = Vector3.zero
+                end
+
+                equipWeapon()
+                basicAttack()
+                task.wait(0.15)
+            end
+        else
+            -- Se não encontrar o NPC renderizado, vai até a área de spawn dele
+            local spawnPos = SpawnPoints[enemyName]
+            if spawnPos then
+                moveTo(spawnPos)
+            end
+            task.wait(0.5)
+        end
+        task.wait(0.1)
+    end
+end)
