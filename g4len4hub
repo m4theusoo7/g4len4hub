@@ -1,51 +1,50 @@
-_G.AutoFarmBandit = true
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local LocalPlayer = Players.LocalPlayer
+local Remotes = ReplicatedStorage:FindFirstChild("Remotes")
+local CommF = Remotes and Remotes:FindFirstChild("CommF_")
 
 local Config = {
-    TargetMob = "Bandit",
     QuestName = "BanditQuest1",
     QuestLevel = 1,
     QuestNpcName = "Bandit Quest Giver",
     DefaultQuestPos = Vector3.new(1060.5, 18.5, 1548.5),
-    BanditWaitPos = Vector3.new(1145, 28, 1635),
-    TweenSpeed = 200,
-    DistanceFarm = 8,
-    BringMobRadius = 250,
-    AttackDelay = 0.08
+    TweenSpeed = 200
 }
 
-local Players = game:GetService("Players")
-local TweenService = game:GetService("TweenService")
-local RunService = game:GetService("RunService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local VirtualInputManager = game:GetService("VirtualInputManager")
+local function GetQuestState()
+    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+    local main = playerGui and playerGui:FindFirstChild("Main")
+    local questGui = main and main:FindFirstChild("Quest")
 
-local LocalPlayer = Players.LocalPlayer
-local CurrentTween = nil
-local LastTweenTargetPos = nil
-
--- Remotes do Blox Fruits
-local Remotes = ReplicatedStorage:FindFirstChild("Remotes")
-local CommF = Remotes and Remotes:FindFirstChild("CommF_")
-local NetFolder = ReplicatedStorage:FindFirstChild("Modules") and ReplicatedStorage.Modules:FindFirstChild("Net")
-local RegisterAttack = NetFolder and NetFolder:FindFirstChild("RE/RegisterAttack")
-local RegisterHit = NetFolder and NetFolder:FindFirstChild("RE/RegisterHit")
-
--- Mantém o personagem estável no ar (sem cair) e com NoClip durante o farm
-local function SetPhysicsState(character, state)
-    if not character then return end
-    local hrp = character:FindFirstChild("HumanoidRootPart")
-    local hum = character:FindFirstChildOfClass("Humanoid")
-
-    if hum and state then
-        hum.Sit = false
+    if not questGui or not questGui.Visible then
+        return "None"
     end
 
+    for _, desc in ipairs(questGui:GetDescendants()) do
+        if desc:IsA("TextLabel") and desc.Text ~= "" then
+            local text = string.lower(desc.Text)
+            if string.find(text, "bandit") or string.find(text, "bandido") then
+                return "ActiveBandit"
+            end
+        end
+    end
+
+    return "OtherQuest"
+end
+
+local function SetTravelPhysics(character, enabled)
+    if not character then return end
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+
     if hrp then
-        local bv = hrp:FindFirstChild("FarmBodyVelocity")
-        if state then
+        local bv = hrp:FindFirstChild("QuestTravelBV")
+        if enabled then
             if not bv then
                 bv = Instance.new("BodyVelocity")
-                bv.Name = "FarmBodyVelocity"
+                bv.Name = "QuestTravelBV"
                 bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
                 bv.Velocity = Vector3.zero
                 bv.Parent = hrp
@@ -57,35 +56,12 @@ local function SetPhysicsState(character, state)
 
     for _, part in ipairs(character:GetDescendants()) do
         if part:IsA("BasePart") then
-            part.CanCollide = not state
+            part.CanCollide = not enabled
         end
     end
 end
 
--- Verifica o estado da missão em Português, Inglês ou Espanhol
-local function GetQuestStatus()
-    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
-    local main = playerGui and playerGui:FindFirstChild("Main")
-    local questGui = main and main:FindFirstChild("Quest")
-
-    if not questGui or not questGui.Visible then
-        return "None"
-    end
-
-    for _, desc in ipairs(questGui:GetDescendants()) do
-        if desc:IsA("TextLabel") and desc.Text ~= "" then
-            local lowerText = string.lower(desc.Text)
-            if string.find(lowerText, "bandit") or string.find(lowerText, "bandido") then
-                return "ActiveBandit"
-            end
-        end
-    end
-
-    return "OtherQuest"
-end
-
--- Retorna uma posição livre a 4 studs do NPC (nunca dentro dele)
-local function GetQuestGiverPos()
+local function GetQuestNpcPos()
     local npcs = workspace:FindFirstChild("NPCs")
     local npc = npcs and npcs:FindFirstChild(Config.QuestNpcName)
     if npc and npc:FindFirstChild("HumanoidRootPart") then
@@ -94,273 +70,48 @@ local function GetQuestGiverPos()
     return Config.DefaultQuestPos
 end
 
--- Equipa estilo de luta (Combat/Melee) ou espada
-local function EquipWeapon()
-    local character = LocalPlayer.Character
-    local backpack = LocalPlayer:FindFirstChild("Backpack")
-    local hum = character and character:FindFirstChildOfClass("Humanoid")
-    if not character or not backpack or not hum then return nil end
+local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+local hrp = character:WaitForChild("HumanoidRootPart")
 
-    local equipped = character:FindFirstChildOfClass("Tool")
-    if equipped and (equipped.ToolTip == "Melee" or equipped.ToolTip == "Sword" or equipped.Name == "Combat") then
-        return equipped
-    end
-
-    for _, tool in ipairs(backpack:GetChildren()) do
-        if tool:IsA("Tool") and (tool.ToolTip == "Melee" or tool.ToolTip == "Sword" or tool.Name == "Combat") then
-            hum:EquipTool(tool)
-            return tool
-        end
-    end
-
-    return nil
+if GetQuestState() == "ActiveBandit" then
+    return
 end
 
--- Localiza o Bandit vivo mais próximo
-local function GetClosestBandit()
-    local character = LocalPlayer.Character
-    local hrp = character and character:FindFirstChild("HumanoidRootPart")
-    local enemies = workspace:FindFirstChild("Enemies")
-    if not hrp or not enemies then return nil end
+local targetPos = GetQuestNpcPos()
+local distance = (hrp.Position - targetPos).Magnitude
 
-    local closestMob = nil
-    local shortestDist = math.huge
-
-    for _, mob in ipairs(enemies:GetChildren()) do
-        if mob.Name == Config.TargetMob then
-            local mobHum = mob:FindFirstChildOfClass("Humanoid")
-            local mobHrp = mob:FindFirstChild("HumanoidRootPart")
-            if mobHum and mobHrp and mobHum.Health > 0 then
-                local dist = (hrp.Position - mobHrp.Position).Magnitude
-                if dist < shortestDist then
-                    shortestDist = dist
-                    closestMob = mob
-                end
-            end
-        end
-    end
-
-    return closestMob
-end
-
--- Agrupa os Bandits sem colisão entre partes do corpo
-local function BringMobs(anchorMob)
-    local enemies = workspace:FindFirstChild("Enemies")
-    local anchorHrp = anchorMob and anchorMob:FindFirstChild("HumanoidRootPart")
-    if not enemies or not anchorHrp then return end
-
-    pcall(function()
-        sethiddenproperty(LocalPlayer, "SimulationRadius", math.huge)
-    end)
-
-    local anchorCFrame = anchorHrp.CFrame
-    anchorHrp.AssemblyLinearVelocity = Vector3.zero
-
-    for _, mob in ipairs(enemies:GetChildren()) do
-        if mob.Name == Config.TargetMob then
-            local mobHum = mob:FindFirstChildOfClass("Humanoid")
-            local mobHrp = mob:FindFirstChild("HumanoidRootPart")
-            if mobHum and mobHrp and mobHum.Health > 0 then
-                local dist = (mobHrp.Position - anchorCFrame.Position).Magnitude
-                if dist <= Config.BringMobRadius then
-                    for _, part in ipairs(mob:GetDescendants()) do
-                        if part:IsA("BasePart") then
-                            part.CanCollide = false
-                        end
-                    end
-
-                    if mob ~= anchorMob then
-                        mobHrp.CFrame = anchorCFrame
-                    end
-
-                    mobHrp.AssemblyLinearVelocity = Vector3.zero
-                    mobHrp.AssemblyAngularVelocity = Vector3.zero
-                    mobHum.WalkSpeed = 0
-                    mobHum.JumpPower = 0
-                end
-            end
-        end
-    end
-end
-
--- Coleta os Bandits no alcance do soco
-local function GetTargetsInRange(maxRange)
-    local character = LocalPlayer.Character
-    local hrp = character and character:FindFirstChild("HumanoidRootPart")
-    local enemies = workspace:FindFirstChild("Enemies")
-    local targets = {}
-    if not hrp or not enemies then return targets end
-
-    for _, mob in ipairs(enemies:GetChildren()) do
-        if mob.Name == Config.TargetMob then
-            local mobHum = mob:FindFirstChildOfClass("Humanoid")
-            local mobHrp = mob:FindFirstChild("HumanoidRootPart")
-            if mobHum and mobHrp and mobHum.Health > 0 then
-                if (hrp.Position - mobHrp.Position).Magnitude <= maxRange then
-                    table.insert(targets, { mob, mobHrp })
-                end
-            end
-        end
-    end
-
-    return targets
-end
-
--- Deslocamento com Tween 200
-local function MoveToTarget(targetCFrame, snapAtEnd)
-    local character = LocalPlayer.Character
-    local hrp = character and character:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-
-    local distance = (hrp.Position - targetCFrame.Position).Magnitude
-
-    if distance <= 3.5 then
-        if CurrentTween then
-            CurrentTween:Cancel()
-            CurrentTween = nil
-        end
-        LastTweenTargetPos = nil
-        if snapAtEnd then
-            hrp.CFrame = targetCFrame
-        end
-        return
-    end
-
-    local targetMoved = not LastTweenTargetPos or (LastTweenTargetPos - targetCFrame.Position).Magnitude > 4
-
-    if CurrentTween and CurrentTween.PlaybackState == Enum.PlaybackState.Playing and not targetMoved then
-        return
-    end
-
-    if CurrentTween then
-        CurrentTween:Cancel()
-    end
-
-    LastTweenTargetPos = targetCFrame.Position
+if distance > 10 then
+    SetTravelPhysics(character, true)
     local duration = math.max(distance / Config.TweenSpeed, 0.05)
-    local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear)
-    CurrentTween = TweenService:Create(hrp, tweenInfo, { CFrame = targetCFrame })
-    CurrentTween:Play()
+    local tween = TweenService:Create(
+        hrp,
+        TweenInfo.new(duration, Enum.EasingStyle.Linear),
+        { CFrame = CFrame.new(targetPos) }
+    )
+    tween:Play()
+    tween.Completed:Wait()
+    SetTravelPhysics(character, false)
 end
 
--- Thread 1: Física e Bring Mob (Heartbeat)
-task.spawn(function()
-    while _G.AutoFarmBandit do
-        local character = LocalPlayer.Character
-        local hrp = character and character:FindFirstChild("HumanoidRootPart")
-        local hum = character and character:FindFirstChildOfClass("Humanoid")
+hrp.AssemblyLinearVelocity = Vector3.zero
 
-        if character and hrp and hum and hum.Health > 0 then
-            SetPhysicsState(character, true)
-
-            if GetQuestStatus() == "ActiveBandit" then
-                local targetMob = GetClosestBandit()
-                if targetMob and targetMob:FindFirstChild("HumanoidRootPart") then
-                    if (hrp.Position - targetMob.HumanoidRootPart.Position).Magnitude <= 65 then
-                        BringMobs(targetMob)
-                    end
-                end
-            end
-        else
-            if CurrentTween then
-                CurrentTween:Cancel()
-                CurrentTween = nil
-            end
-            LastTweenTargetPos = nil
+if CommF then
+    for _ = 1, 5 do
+        local state = GetQuestState()
+        if state == "ActiveBandit" then
+            break
         end
 
-        RunService.Heartbeat:Wait()
-    end
-
-    if CurrentTween then
-        CurrentTween:Cancel()
-        CurrentTween = nil
-    end
-    SetPhysicsState(LocalPlayer.Character, false)
-end)
-
--- Thread 2: Fast Attack (só bate quando a missão está ativa e há Bandits perto)
-task.spawn(function()
-    while _G.AutoFarmBandit do
-        local character = LocalPlayer.Character
-        local hum = character and character:FindFirstChildOfClass("Humanoid")
-
-        if character and hum and hum.Health > 0 and GetQuestStatus() == "ActiveBandit" then
-            local tool = EquipWeapon()
-            local targets = GetTargetsInRange(25)
-
-            if tool and #targets > 0 then
-                pcall(function()
-                    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 1)
-                    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 1)
-                    tool:Activate()
-
-                    if RegisterAttack and RegisterHit then
-                        RegisterAttack:FireServer(0)
-                        RegisterHit:FireServer(targets[1][2], targets)
-                    end
-                end)
-            end
+        if state == "OtherQuest" then
+            pcall(function()
+                CommF:InvokeServer("AbandonQuest")
+            end)
+            task.wait(0.3)
         end
 
-        task.wait(Config.AttackDelay)
+        pcall(function()
+            CommF:InvokeServer("StartQuest", Config.QuestName, Config.QuestLevel)
+        end)
+        task.wait(0.5)
     end
-end)
-
--- Thread 3: Controle de Missão e Navegação (separado do Heartbeat para nunca travar no NPC)
-task.spawn(function()
-    while _G.AutoFarmBandit do
-        local character = LocalPlayer.Character
-        local hrp = character and character:FindFirstChild("HumanoidRootPart")
-        local hum = character and character:FindFirstChildOfClass("Humanoid")
-
-        if character and hrp and hum and hum.Health > 0 then
-            local questStatus = GetQuestStatus()
-
-            if questStatus == "ActiveBandit" then
-                local targetMob = GetClosestBandit()
-                if targetMob and targetMob:FindFirstChild("HumanoidRootPart") then
-                    local mobHrp = targetMob.HumanoidRootPart
-                    local farmPos = mobHrp.Position + Vector3.new(0, Config.DistanceFarm, 0)
-                    local farmCFrame = CFrame.new(farmPos) * CFrame.Angles(math.rad(-90), 0, 0)
-                    MoveToTarget(farmCFrame, true)
-                else
-                    -- Aguarda o respawn dos Bandits pairando acima do centro da área
-                    MoveToTarget(CFrame.new(Config.BanditWaitPos), false)
-                end
-            else
-                local questPos = GetQuestGiverPos()
-                local distToNpc = (hrp.Position - questPos).Magnitude
-
-                if distToNpc > 10 then
-                    MoveToTarget(CFrame.new(questPos), false)
-                else
-                    -- Chegou perto do NPC: cancela o Tween e deixa o avatar livre sem prender CFrame
-                    if CurrentTween then
-                        CurrentTween:Cancel()
-                        CurrentTween = nil
-                    end
-                    LastTweenTargetPos = nil
-                    hrp.AssemblyLinearVelocity = Vector3.zero
-
-                    if CommF then
-                        if questStatus == "OtherQuest" then
-                            pcall(function()
-                                CommF:InvokeServer("AbandonQuest")
-                            end)
-                            task.wait(0.4)
-                        end
-
-                        pcall(function()
-                            CommF:InvokeServer("StartQuest", Config.QuestName, Config.QuestLevel)
-                        end)
-                        -- Aguarda o servidor atualizar a interface da missão antes de repetir
-                        task.wait(0.8)
-                    end
-                end
-            end
-        end
-
-        task.wait(0.1)
-    end
-end)
+end
