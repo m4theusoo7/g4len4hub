@@ -3,7 +3,7 @@ _G.AutoFarmBandit = true
 local Config = {
     TargetMob = "Bandit",
     TweenSpeed = 200,
-    DistanceFarm = 13, -- 20 studs passa da hitbox do Combat; 12-14 acerta todos os golpes
+    DistanceFarm = 8, -- Alcance ideal para o Combat acertar sem tomar dano
     BringMobRadius = 250,
     AttackDelay = 0.08
 }
@@ -11,13 +11,19 @@ local Config = {
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
-local VirtualUser = game:GetService("VirtualUser")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local LocalPlayer = Players.LocalPlayer
 local CurrentTween = nil
 local LastTweenTargetPos = nil
 
--- Mantém o personagem estável no ar e sem colisão com paredes/árvores durante o farm
+-- Remotes nativos de ataque do Blox Fruits
+local NetFolder = ReplicatedStorage:FindFirstChild("Modules") and ReplicatedStorage.Modules:FindFirstChild("Net")
+local RegisterAttack = NetFolder and NetFolder:FindFirstChild("RE/RegisterAttack")
+local RegisterHit = NetFolder and NetFolder:FindFirstChild("RE/RegisterHit")
+
+-- Mantém o personagem estável no ar e sem colisão durante o farm
 local function SetPhysicsState(character, state)
     if not character then return end
     local hrp = character:FindFirstChild("HumanoidRootPart")
@@ -44,7 +50,7 @@ local function SetPhysicsState(character, state)
     end
 end
 
--- Equipa apenas estilo de luta (Melee/Combat) ou espada, ignorando frutas
+-- Equipa estilo de luta (Combat/Melee) ou espada
 local function EquipWeapon()
     local character = LocalPlayer.Character
     local backpack = LocalPlayer:FindFirstChild("Backpack")
@@ -66,7 +72,7 @@ local function EquipWeapon()
     return nil
 end
 
--- Busca apenas o "Bandit" exato (evita confundir com "Desert Bandit" ou "Sky Bandit")
+-- Localiza o Bandit vivo mais próximo
 local function GetClosestBandit()
     local character = LocalPlayer.Character
     local hrp = character and character:FindFirstChild("HumanoidRootPart")
@@ -93,7 +99,7 @@ local function GetClosestBandit()
     return closestMob
 end
 
--- Agrupa os outros Bandits na posição do alvo principal (ignorando o próprio alvo para não tremer)
+-- Agrupa os Bandits sem colisão entre membros (impede que subam para o céu)
 local function BringMobs(anchorMob)
     local enemies = workspace:FindFirstChild("Enemies")
     local anchorHrp = anchorMob and anchorMob:FindFirstChild("HumanoidRootPart")
@@ -103,16 +109,29 @@ local function BringMobs(anchorMob)
         sethiddenproperty(LocalPlayer, "SimulationRadius", math.huge)
     end)
 
+    local anchorCFrame = anchorHrp.CFrame
+    anchorHrp.AssemblyLinearVelocity = Vector3.zero
+
     for _, mob in ipairs(enemies:GetChildren()) do
-        if mob ~= anchorMob and mob.Name == Config.TargetMob then
+        if mob.Name == Config.TargetMob then
             local mobHum = mob:FindFirstChildOfClass("Humanoid")
             local mobHrp = mob:FindFirstChild("HumanoidRootPart")
             if mobHum and mobHrp and mobHum.Health > 0 then
-                local dist = (mobHrp.Position - anchorHrp.Position).Magnitude
+                local dist = (mobHrp.Position - anchorCFrame.Position).Magnitude
                 if dist <= Config.BringMobRadius then
-                    mobHrp.CFrame = anchorHrp.CFrame
-                    mobHrp.CanCollide = false
+                    -- Remove colisão de todas as partes do NPC para não empurrar para cima
+                    for _, part in ipairs(mob:GetDescendants()) do
+                        if part:IsA("BasePart") then
+                            part.CanCollide = false
+                        end
+                    end
+
+                    if mob ~= anchorMob then
+                        mobHrp.CFrame = anchorCFrame
+                    end
+
                     mobHrp.AssemblyLinearVelocity = Vector3.zero
+                    mobHrp.AssemblyAngularVelocity = Vector3.zero
                     mobHum.WalkSpeed = 0
                     mobHum.JumpPower = 0
                 end
@@ -121,7 +140,30 @@ local function BringMobs(anchorMob)
     end
 end
 
--- Move até o alvo com Tween de velocidade 200 e recalcula apenas se o NPC andar mais de 4 studs
+-- Coleta os Bandits no alcance do golpe para registrar o dano
+local function GetTargetsInRange(maxRange)
+    local character = LocalPlayer.Character
+    local hrp = character and character:FindFirstChild("HumanoidRootPart")
+    local enemies = workspace:FindFirstChild("Enemies")
+    local targets = {}
+    if not hrp or not enemies then return targets end
+
+    for _, mob in ipairs(enemies:GetChildren()) do
+        if mob.Name == Config.TargetMob then
+            local mobHum = mob:FindFirstChildOfClass("Humanoid")
+            local mobHrp = mob:FindFirstChild("HumanoidRootPart")
+            if mobHum and mobHrp and mobHum.Health > 0 then
+                if (hrp.Position - mobHrp.Position).Magnitude <= maxRange then
+                    table.insert(targets, { mob, mobHrp })
+                end
+            end
+        end
+    end
+
+    return targets
+end
+
+-- Deslocamento com Tween 200
 local function MoveToTarget(targetCFrame)
     local character = LocalPlayer.Character
     local hrp = character and character:FindFirstChild("HumanoidRootPart")
@@ -129,7 +171,6 @@ local function MoveToTarget(targetCFrame)
 
     local distance = (hrp.Position - targetCFrame.Position).Magnitude
 
-    -- Só trava no CFrame quando já está colado no ponto (<= 3 studs) para não ativar anti-cheat
     if distance <= 3 then
         if CurrentTween then
             CurrentTween:Cancel()
@@ -157,7 +198,7 @@ local function MoveToTarget(targetCFrame)
     CurrentTween:Play()
 end
 
--- Thread do Fast Attack com clique completo (Button1Down + Button1Up)
+-- Thread do Fast Attack (animação + registro de hit no servidor)
 task.spawn(function()
     while _G.AutoFarmBandit do
         local character = LocalPlayer.Character
@@ -165,12 +206,20 @@ task.spawn(function()
 
         if character and hum and hum.Health > 0 then
             local tool = EquipWeapon()
-            if tool then
+            local targets = GetTargetsInRange(25)
+
+            if tool and #targets > 0 then
                 pcall(function()
+                    -- Simula o toque/clique real (funciona no Mobile e PC)
+                    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 1)
+                    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 1)
                     tool:Activate()
-                    VirtualUser:CaptureController()
-                    VirtualUser:Button1Down(Vector2.new(1280, 672))
-                    VirtualUser:Button1Up(Vector2.new(1280, 672))
+
+                    -- Registra o hit diretamente nos Bandits agrupados
+                    if RegisterAttack and RegisterHit then
+                        RegisterAttack:FireServer(0)
+                        RegisterHit:FireServer(targets[1][2], targets)
+                    end
                 end)
             end
         end
@@ -186,19 +235,17 @@ task.spawn(function()
         local hrp = character and character:FindFirstChild("HumanoidRootPart")
         local hum = character and character:FindFirstChildOfClass("Humanoid")
 
-        if character and hrp and hum and hum.Health > 0 then
+        if character and hum and hum.Health > 0 then
             SetPhysicsState(character, true)
             local targetMob = GetClosestBandit()
 
             if targetMob and targetMob:FindFirstChild("HumanoidRootPart") then
                 local mobHrp = targetMob.HumanoidRootPart
-                -- Posição fixa no eixo Y global (não gira junto com o NPC)
                 local farmPos = mobHrp.Position + Vector3.new(0, Config.DistanceFarm, 0)
                 local farmCFrame = CFrame.new(farmPos) * CFrame.Angles(math.rad(-90), 0, 0)
 
                 MoveToTarget(farmCFrame)
 
-                -- Só puxa os mobs quando você já está perto para ter posse de rede (Network Ownership)
                 if (hrp.Position - mobHrp.Position).Magnitude <= 65 then
                     BringMobs(targetMob)
                 end
