@@ -26,7 +26,6 @@ local VirtualUser = game:GetService("VirtualUser")
 
 local LocalPlayer = Players.LocalPlayer
 local CurrentTween = nil
-local LastTweenGoal = nil
 
 -- Anti-AFK
 LocalPlayer.Idled:Connect(function()
@@ -34,7 +33,15 @@ LocalPlayer.Idled:Connect(function()
     VirtualUser:ClickButton2(Vector2.new())
 end)
 
--- Noclip e estabilização de física durante o farm
+-- Cancela o Tween ativo
+local function StopTween()
+    if CurrentTween then
+        CurrentTween:Cancel()
+        CurrentTween = nil
+    end
+end
+
+-- Noclip + Anti-Gravidade (impede o avatar de afundar pelo chão)
 RunService.Stepped:Connect(function()
     local char = LocalPlayer.Character
     if not char then return end
@@ -48,30 +55,41 @@ RunService.Stepped:Connect(function()
                 part.CanCollide = false
             end
         end
+
         if hum then
             hum.PlatformStand = true
         end
+
         if hrp then
             hrp.AssemblyLinearVelocity = Vector3.zero
             hrp.AssemblyAngularVelocity = Vector3.zero
+
+            local bv = hrp:FindFirstChild("OmegaAntiGravity")
+            if not bv then
+                bv = Instance.new("BodyVelocity")
+                bv.Name = "OmegaAntiGravity"
+                bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+                bv.Velocity = Vector3.zero
+                bv.Parent = hrp
+            else
+                bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+                bv.Velocity = Vector3.zero
+            end
         end
     else
         if hum and hum.PlatformStand then
             hum.PlatformStand = false
         end
+        if hrp then
+            local bv = hrp:FindFirstChild("OmegaAntiGravity")
+            if bv then
+                bv:Destroy()
+            end
+        end
     end
 end)
 
--- Cancela o Tween ativo
-local function StopTween()
-    if CurrentTween then
-        CurrentTween:Cancel()
-        CurrentTween = nil
-    end
-    LastTweenGoal = nil
-end
-
--- Movimentação suave com Tween 200 até encostar no ponto (evita rollback do servidor)
+-- Movimentação suave com Tween 200
 local function MoveTo(targetCFrame)
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
@@ -79,20 +97,14 @@ local function MoveTo(targetCFrame)
 
     local distance = (hrp.Position - targetCFrame.Position).Magnitude
 
-    if distance <= 2.5 then
+    -- Curta distância: posiciona direto sem reiniciar Tween
+    if distance <= 25 then
         StopTween()
         hrp.CFrame = targetCFrame
         return
     end
 
-    -- Evita reiniciar o Tween se o destino mudou pouco
-    if CurrentTween and LastTweenGoal and (LastTweenGoal - targetCFrame.Position).Magnitude < 6 then
-        return
-    end
-
     StopTween()
-    LastTweenGoal = targetCFrame.Position
-
     local duration = distance / Settings.TweenSpeed
     local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear)
     CurrentTween = TweenService:Create(hrp, tweenInfo, { CFrame = targetCFrame })
@@ -122,7 +134,7 @@ local function EquipMelee()
     return equipped
 end
 
--- Bring Mob (agrupa todos os Bandits no alvo principal)
+-- Bring Mob ancorado acima do solo (evita que os mobs caiam no limbo)
 local function BringEnemies(mainTarget)
     if not Settings.BringMob or not mainTarget then return end
     local mainHRP = mainTarget:FindFirstChild("HumanoidRootPart")
@@ -132,6 +144,12 @@ local function BringEnemies(mainTarget)
         sethiddenproperty(LocalPlayer, "SimulationRadius", math.huge)
     end)
 
+    -- Garante que a âncora nunca fique abaixo do nível do chão da ilha
+    local safeY = math.max(mainHRP.Position.Y, 16.5)
+    local anchorCFrame = CFrame.new(mainHRP.Position.X, safeY, mainHRP.Position.Z)
+    mainHRP.CFrame = anchorCFrame
+    mainHRP.AssemblyLinearVelocity = Vector3.zero
+
     local enemiesFolder = workspace:FindFirstChild("Enemies")
     if not enemiesFolder then return end
 
@@ -139,11 +157,10 @@ local function BringEnemies(mainTarget)
         if mob ~= mainTarget and string.find(mob.Name, Settings.MobName) then
             local mobHum = mob:FindFirstChildOfClass("Humanoid")
             local mobHRP = mob:FindFirstChild("HumanoidRootPart")
-            if mobHum and mobHum.Health > 0 and mobHRP then
-                local dist = (mobHRP.Position - mainHRP.Position).Magnitude
+            if mobHum and mobHum.Health > 0 and mobHRP and mobHRP.Position.Y > 5 then
+                local dist = (mobHRP.Position - anchorCFrame.Position).Magnitude
                 if dist <= Settings.BringRadius then
-                    mobHRP.CFrame = mainHRP.CFrame
-                    mobHRP.CanCollide = false
+                    mobHRP.CFrame = anchorCFrame
                     mobHRP.AssemblyLinearVelocity = Vector3.zero
                     mobHum.WalkSpeed = 0
                     mobHum.JumpPower = 0
@@ -153,7 +170,7 @@ local function BringEnemies(mainTarget)
     end
 end
 
--- Busca o Bandit vivo mais próximo
+-- Busca apenas Bandits vivos que estejam acima do chão (Y > 5)
 local function GetClosestBandit()
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
@@ -167,7 +184,7 @@ local function GetClosestBandit()
         if string.find(mob.Name, Settings.MobName) then
             local hum = mob:FindFirstChildOfClass("Humanoid")
             local mobHRP = mob:FindFirstChild("HumanoidRootPart")
-            if hum and hum.Health > 0 and mobHRP then
+            if hum and hum.Health > 0 and mobHRP and mobHRP.Position.Y > 5 then
                 local dist = (hrp.Position - mobHRP.Position).Magnitude
                 if dist < shortestDist then
                     shortestDist = dist
@@ -180,7 +197,7 @@ local function GetClosestBandit()
     return closestMob
 end
 
--- Localiza a frente do NPC da missão (Workspace ou ReplicatedStorage)
+-- Localiza a frente do NPC da missão
 local function GetQuestNPCCFrame()
     local wsNPCs = workspace:FindFirstChild("NPCs")
     local rsNPCs = ReplicatedStorage:FindFirstChild("NPCs")
@@ -189,13 +206,12 @@ local function GetQuestNPCCFrame()
 
     local npcHRP = questNPC and questNPC:FindFirstChild("HumanoidRootPart")
     if npcHRP then
-        -- -4 no eixo Z posiciona exatamente na frente do NPC
         return npcHRP.CFrame * CFrame.new(0, 0, -4)
     end
     return Settings.QuestNPC_Fallback
 end
 
--- Só libera o farm depois que a missão estiver visível e confirmada
+-- Pega a missão e aguarda confirmação visual
 local function EnsureQuest()
     local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
     local mainGui = playerGui and playerGui:FindFirstChild("Main")
@@ -212,12 +228,11 @@ local function EnsureQuest()
     local npcCFrame = GetQuestNPCCFrame()
     local distToNPC = (hrp.Position - npcCFrame.Position).Magnitude
 
-    if distToNPC > 5 then
+    if distToNPC > 6 then
         MoveTo(npcCFrame)
         return false
     end
 
-    -- Chegou na frente do NPC: para completamente antes de pedir a quest
     StopTween()
     hrp.CFrame = npcCFrame
     task.wait(0.15)
@@ -226,7 +241,6 @@ local function EnsureQuest()
         ReplicatedStorage.Remotes.CommF_:InvokeServer("StartQuest", Settings.QuestName, Settings.QuestLevel)
     end)
 
-    -- Aguarda a interface Quest abrir antes de sair do NPC
     for _ = 1, 20 do
         if questFrame and questFrame.Visible then
             task.wait(0.15)
@@ -279,8 +293,10 @@ task.spawn(function()
                 StopTween()
                 local char = LocalPlayer.Character
                 local hum = char and char:FindFirstChildOfClass("Humanoid")
-                if hum then
-                    hum.PlatformStand = false
+                local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                if hum then hum.PlatformStand = false end
+                if hrp and hrp:FindFirstChild("OmegaAntiGravity") then
+                    hrp.OmegaAntiGravity:Destroy()
                 end
                 print("[OmegaCore] Level 10 atingido! Auto-farm finalizado.")
                 return
@@ -293,7 +309,9 @@ task.spawn(function()
                     if targetHRP then
                         EquipMelee()
                         BringEnemies(target)
-                        local farmCFrame = targetHRP.CFrame * CFrame.new(0, Settings.DistanceFarm, 0) * CFrame.Angles(math.rad(-90), 0, 0)
+                        local safeY = math.max(targetHRP.Position.Y, 16.5)
+                        local farmPos = Vector3.new(targetHRP.Position.X, safeY + Settings.DistanceFarm, targetHRP.Position.Z)
+                        local farmCFrame = CFrame.new(farmPos) * CFrame.Angles(math.rad(-90), 0, 0)
                         MoveTo(farmCFrame)
                     end
                 else
