@@ -34,23 +34,35 @@ LocalPlayer.Idled:Connect(function()
     VirtualUser:ClickButton2(Vector2.new())
 end)
 
--- Noclip e estabilização de física durante o farm
+-- Noclip e estabilização de voo durante o farm
 RunService.Stepped:Connect(function()
-    if _G.AutoFarmPirateStarter and LocalPlayer.Character then
-        for _, part in ipairs(LocalPlayer.Character:GetDescendants()) do
+    local char = LocalPlayer.Character
+    if not char then return end
+
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+
+    if _G.AutoFarmPirateStarter then
+        for _, part in ipairs(char:GetDescendants()) do
             if part:IsA("BasePart") and part.CanCollide then
                 part.CanCollide = false
             end
         end
-        local hrp = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if hum then
+            hum.PlatformStand = true
+        end
         if hrp then
             hrp.AssemblyLinearVelocity = Vector3.zero
             hrp.AssemblyAngularVelocity = Vector3.zero
         end
+    else
+        if hum and hum.PlatformStand then
+            hum.PlatformStand = false
+        end
     end
 end)
 
--- Para qualquer Tween em andamento
+-- Cancela o Tween ativo
 local function StopTween()
     if CurrentTween then
         CurrentTween:Cancel()
@@ -59,7 +71,7 @@ local function StopTween()
     LastTweenGoal = nil
 end
 
--- Movimentação suave com Tween sem engasgos
+-- Movimentação com Tween 200 sem reiniciar a cada passo do mob
 local function MoveTo(targetCFrame)
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
@@ -67,15 +79,14 @@ local function MoveTo(targetCFrame)
 
     local distance = (hrp.Position - targetCFrame.Position).Magnitude
 
-    -- Apenas encaixa direto se estiver bem próximo (<= 10 studs) para evitar rollback
-    if distance <= 10 then
+    if distance <= 12 then
         StopTween()
         hrp.CFrame = targetCFrame
         return
     end
 
-    -- Evita recriar o mesmo Tween se o destino quase não mudou
-    if CurrentTween and LastTweenGoal and (LastTweenGoal - targetCFrame.Position).Magnitude < 4 then
+    -- Só recria o Tween se o destino mudar mais de 15 studs
+    if CurrentTween and LastTweenGoal and (LastTweenGoal - targetCFrame.Position).Magnitude < 15 then
         return
     end
 
@@ -88,7 +99,7 @@ local function MoveTo(targetCFrame)
     CurrentTween:Play()
 end
 
--- Equipar estilo de luta / arma corpo a corpo
+-- Equipa Combat / Melee automaticamente
 local function EquipMelee()
     local char = LocalPlayer.Character
     local backpack = LocalPlayer:FindFirstChild("Backpack")
@@ -111,7 +122,7 @@ local function EquipMelee()
     return equipped
 end
 
--- Bring Mob
+-- Bring Mob (agrupa todos os Bandits no alvo principal)
 local function BringEnemies(mainTarget)
     if not Settings.BringMob or not mainTarget then return end
     local mainHRP = mainTarget:FindFirstChild("HumanoidRootPart")
@@ -125,7 +136,7 @@ local function BringEnemies(mainTarget)
     if not enemiesFolder then return end
 
     for _, mob in ipairs(enemiesFolder:GetChildren()) do
-        if mob ~= mainTarget and mob.Name == Settings.MobName then
+        if mob ~= mainTarget and string.find(mob.Name, Settings.MobName) then
             local mobHum = mob:FindFirstChildOfClass("Humanoid")
             local mobHRP = mob:FindFirstChild("HumanoidRootPart")
             if mobHum and mobHum.Health > 0 and mobHRP then
@@ -153,7 +164,7 @@ local function GetClosestBandit()
     local shortestDist = math.huge
 
     for _, mob in ipairs(enemiesFolder:GetChildren()) do
-        if mob.Name == Settings.MobName then
+        if string.find(mob.Name, Settings.MobName) then
             local hum = mob:FindFirstChildOfClass("Humanoid")
             local mobHRP = mob:FindFirstChild("HumanoidRootPart")
             if hum and hum.Health > 0 and mobHRP then
@@ -169,7 +180,7 @@ local function GetClosestBandit()
     return closestMob
 end
 
--- Obtém a posição exata do NPC da missão
+-- Posição do NPC da missão
 local function GetQuestNPCCFrame()
     local npcsFolder = workspace:FindFirstChild("NPCs")
     local questNPC = npcsFolder and npcsFolder:FindFirstChild(Settings.QuestNPCName)
@@ -181,25 +192,13 @@ local function GetQuestNPCCFrame()
     return Settings.QuestNPC_Fallback
 end
 
--- Verifica e aceita a quest sem travar no NPC
+-- Aceita a quest sem abandonar missões traduzidas em PT-BR
 local function HandleQuest()
     local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
     local mainGui = playerGui and playerGui:FindFirstChild("Main")
     local questFrame = mainGui and mainGui:FindFirstChild("Quest")
 
     if questFrame and questFrame.Visible then
-        -- Se tiver outra quest ativa de outra ilha, abandona para pegar a certa
-        local titleLabel = questFrame:FindFirstChild("Container")
-            and questFrame.Container:FindFirstChild("QuestTitle")
-            and questFrame.Container.QuestTitle:FindFirstChild("Title")
-
-        if titleLabel and not string.find(titleLabel.Text, Settings.MobName) then
-            pcall(function()
-                ReplicatedStorage.Remotes.CommF_:InvokeServer("AbandonQuest")
-            end)
-            task.wait(0.3)
-            return false
-        end
         return true
     end
 
@@ -210,12 +209,11 @@ local function HandleQuest()
     local npcCFrame = GetQuestNPCCFrame()
     local distToNPC = (hrp.Position - npcCFrame.Position).Magnitude
 
-    if distToNPC > 10 then
+    if distToNPC > 12 then
         MoveTo(npcCFrame)
         return false
     end
 
-    -- Chegou no NPC: para o Tween, encaixa e pede a quest
     StopTween()
     hrp.CFrame = npcCFrame
 
@@ -223,7 +221,6 @@ local function HandleQuest()
         ReplicatedStorage.Remotes.CommF_:InvokeServer("StartQuest", Settings.QuestName, Settings.QuestLevel)
     end)
 
-    -- Aguarda até 1.5s pela resposta do servidor antes de repetir
     for _ = 1, 15 do
         if questFrame and questFrame.Visible then
             return true
@@ -273,7 +270,12 @@ task.spawn(function()
             if data.Level.Value >= Settings.MaxLevel then
                 _G.AutoFarmPirateStarter = false
                 StopTween()
-                print("[OmegaCore] Level 10 atingido! Auto-farm da Pirate Starter Island finalizado.")
+                local char = LocalPlayer.Character
+                local hum = char and char:FindFirstChildOfClass("Humanoid")
+                if hum then
+                    hum.PlatformStand = false
+                end
+                print("[OmegaCore] Level 10 atingido! Auto-farm finalizado.")
                 return
             end
 
