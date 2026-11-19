@@ -26,6 +26,7 @@ local Config = {
 
 local CurrentTween = nil
 local LastTweenTargetPos = nil
+local NoClipConnection = nil
 
 local QuestInProgress = false
 local ActiveTask = nil
@@ -49,7 +50,7 @@ end
 local function GetDesertTaskForLevel()
     local level = GetLevel()
 
-    if level < 75 then
+    if level < 70 then
         return {
             TargetMob = "Desert Bandit",
             QuestLevel = 1,
@@ -61,7 +62,7 @@ local function GetDesertTaskForLevel()
             TargetMob = "Desert Officer",
             QuestLevel = 2,
             RequiredKills = 6,
-            WaitPos = Vector3.new(1048.2, 35, 4425.6)
+            WaitPos = Vector3.new(1544.0, 35.0, 4241.0)
         }
     end
 end
@@ -97,6 +98,26 @@ local function SetPhysicsState(character, enabled)
     end
 end
 
+-- Mantém NoClip ativo antes de cada passo de física para atravessar dunas e muros até a pirâmide
+NoClipConnection = RunService.Stepped:Connect(function()
+    if not _G.AutoFarmDesert then
+        if NoClipConnection then
+            NoClipConnection:Disconnect()
+            NoClipConnection = nil
+        end
+        return
+    end
+
+    local character = LocalPlayer.Character
+    if character then
+        for _, part in ipairs(character:GetDescendants()) do
+            if part:IsA("BasePart") and part.CanCollide then
+                part.CanCollide = false
+            end
+        end
+    end
+end)
+
 local function HasAnyActiveQuest()
     local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
     local main = playerGui and playerGui:FindFirstChild("Main")
@@ -129,7 +150,7 @@ local function CheckGuiQuestProgress(taskInfo)
                 if taskInfo.TargetMob == "Desert Bandit" then
                     matchesMob = string.find(txt, "bandit") or string.find(txt, "bandido")
                 elseif taskInfo.TargetMob == "Desert Officer" then
-                    matchesMob = string.find(txt, "officer") or string.find(txt, "oficial")
+                    matchesMob = string.find(txt, "officer") or string.find(txt, "oficial") or string.find(txt, "policial")
                 end
 
                 if matchesMob then
@@ -433,6 +454,10 @@ task.spawn(function()
     end
 
     _G.AutoFarmDesert = false
+    if NoClipConnection then
+        NoClipConnection:Disconnect()
+        NoClipConnection = nil
+    end
     CancelTween()
     SetPhysicsState(LocalPlayer.Character, false)
 end)
