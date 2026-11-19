@@ -30,9 +30,6 @@ local ActiveTask = nil
 local MobsKilledInQuest = 0
 local CountedDeadMobs = setmetatable({}, { __mode = "k" })
 
-local PatrolIndex = 1
-local LastPatrolSwitch = 0
-
 local function GetLevel()
     local data = LocalPlayer:FindFirstChild("Data")
     local level = data and data:FindFirstChild("Level")
@@ -50,11 +47,12 @@ end
 local function IsBossAvailable(bossName)
     local enemies = workspace:FindFirstChild("Enemies")
     if enemies then
-        local enemyBoss = enemies:FindFirstChild(bossName)
-        if enemyBoss then
-            local hum = enemyBoss:FindFirstChildOfClass("Humanoid")
-            if hum and hum.Health > 0 then
-                return true
+        for _, mob in ipairs(enemies:GetChildren()) do
+            if mob.Name == bossName then
+                local hum = mob:FindFirstChildOfClass("Humanoid")
+                if hum and hum.Health > 0 then
+                    return true
+                end
             end
         end
     end
@@ -80,10 +78,7 @@ local function GetAllPrisonTasks()
             QuestLevel = 3,
             RequiredKills = 1,
             IsBoss = true,
-            PatrolPoints = {
-                Vector3.new(5315.0, 42.0, 745.0),
-                Vector3.new(5236.0, 22.0, 735.0)
-            }
+            WaitPos = Vector3.new(5315, 42, 745)
         },
         ChiefWarden = {
             TargetMob = "Chief Warden",
@@ -93,10 +88,7 @@ local function GetAllPrisonTasks()
             QuestLevel = 2,
             RequiredKills = 1,
             IsBoss = true,
-            PatrolPoints = {
-                Vector3.new(5236.0, 22.0, 735.0),
-                Vector3.new(5200.0, 22.0, 720.0)
-            }
+            WaitPos = Vector3.new(5236, 22, 735)
         },
         Warden = {
             TargetMob = "Warden",
@@ -106,10 +98,7 @@ local function GetAllPrisonTasks()
             QuestLevel = 1,
             RequiredKills = 1,
             IsBoss = true,
-            PatrolPoints = {
-                Vector3.new(5236.0, 22.0, 735.0),
-                Vector3.new(5265.0, 22.0, 715.0)
-            }
+            WaitPos = Vector3.new(5236, 22, 735)
         },
         DangerousPrisoner = {
             TargetMob = "Dangerous Prisoner",
@@ -119,11 +108,7 @@ local function GetAllPrisonTasks()
             QuestLevel = 2,
             RequiredKills = 8,
             IsBoss = false,
-            PatrolPoints = {
-                Vector3.new(5430.0, 22.0, 650.0),
-                Vector3.new(5350.0, 22.0, 820.0),
-                Vector3.new(5120.0, 22.0, 780.0)
-            }
+            WaitPos = Vector3.new(5430, 22, 650)
         },
         Prisoner = {
             TargetMob = "Prisoner",
@@ -133,11 +118,7 @@ local function GetAllPrisonTasks()
             QuestLevel = 1,
             RequiredKills = 8,
             IsBoss = false,
-            PatrolPoints = {
-                Vector3.new(5410.0, 22.0, 500.0),
-                Vector3.new(5280.0, 22.0, 380.0),
-                Vector3.new(5150.0, 22.0, 480.0)
-            }
+            WaitPos = Vector3.new(5410, 22, 500)
         }
     }
 end
@@ -148,21 +129,15 @@ local function GetPrisonTaskForLevel()
 
     if level >= 240 and IsBossAvailable("Swan") then
         return tasks.Swan
-    end
-
-    if level >= 230 and IsBossAvailable("Chief Warden") then
+    elseif level >= 230 and IsBossAvailable("Chief Warden") then
         return tasks.ChiefWarden
-    end
-
-    if level >= 220 and IsBossAvailable("Warden") then
+    elseif level >= 220 and IsBossAvailable("Warden") then
         return tasks.Warden
-    end
-
-    if level >= 210 then
+    elseif level >= 210 then
         return tasks.DangerousPrisoner
+    else
+        return tasks.Prisoner
     end
-
-    return tasks.Prisoner
 end
 
 local function SetPhysicsState(character, enabled)
@@ -222,29 +197,6 @@ local function HasAnyActiveQuest()
     return questGui and questGui.Visible or false
 end
 
-local function MatchesTaskMobText(txt, targetMob)
-    if targetMob == "Prisoner" then
-        local hasBase = string.find(txt, "prisoner") or string.find(txt, "prisioneiro")
-        local isDangerous = string.find(txt, "dangerous") or string.find(txt, "perigoso")
-        return hasBase and not isDangerous
-    elseif targetMob == "Dangerous Prisoner" then
-        local hasBase = string.find(txt, "prisoner") or string.find(txt, "prisioneiro")
-        local isDangerous = string.find(txt, "dangerous") or string.find(txt, "perigoso")
-        return hasBase and isDangerous
-    elseif targetMob == "Warden" then
-        local hasBase = string.find(txt, "warden") or string.find(txt, "diretor") or string.find(txt, "carcereiro")
-        local isChief = string.find(txt, "chief") or string.find(txt, "chefe")
-        return hasBase and not isChief
-    elseif targetMob == "Chief Warden" then
-        local hasBase = string.find(txt, "warden") or string.find(txt, "diretor") or string.find(txt, "carcereiro")
-        local isChief = string.find(txt, "chief") or string.find(txt, "chefe")
-        return hasBase and isChief
-    elseif targetMob == "Swan" then
-        return string.find(txt, "swan") or string.find(txt, "cisne")
-    end
-    return false
-end
-
 local function CheckGuiQuestProgress(taskInfo)
     local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
     local main = playerGui and playerGui:FindFirstChild("Main")
@@ -265,9 +217,31 @@ local function CheckGuiQuestProgress(taskInfo)
 
             if not isDialogue then
                 local txt = string.lower((obj.Text or "") .. " " .. (obj.ContentText or ""))
-                if MatchesTaskMobText(txt, taskInfo.TargetMob) then
+                local matchesMob = false
+
+                if taskInfo.TargetMob == "Prisoner" then
+                    local hasBase = string.find(txt, "prisoner") or string.find(txt, "prisioneiro")
+                    local isDangerous = string.find(txt, "dangerous") or string.find(txt, "perigoso")
+                    matchesMob = hasBase and not isDangerous
+                elseif taskInfo.TargetMob == "Dangerous Prisoner" then
+                    local hasBase = string.find(txt, "prisoner") or string.find(txt, "prisioneiro")
+                    local isDangerous = string.find(txt, "dangerous") or string.find(txt, "perigoso")
+                    matchesMob = hasBase and isDangerous
+                elseif taskInfo.TargetMob == "Warden" then
+                    local hasBase = string.find(txt, "warden") or string.find(txt, "diretor") or string.find(txt, "carcereiro")
+                    local isChief = string.find(txt, "chief") or string.find(txt, "chefe")
+                    matchesMob = hasBase and not isChief
+                elseif taskInfo.TargetMob == "Chief Warden" then
+                    local hasBase = string.find(txt, "warden") or string.find(txt, "diretor") or string.find(txt, "carcereiro")
+                    local isChief = string.find(txt, "chief") or string.find(txt, "chefe")
+                    matchesMob = hasBase and isChief
+                elseif taskInfo.TargetMob == "Swan" then
+                    matchesMob = string.find(txt, "swan") or string.find(txt, "cisne")
+                end
+
+                if matchesMob then
                     local donePattern = taskInfo.RequiredKills .. "/" .. taskInfo.RequiredKills
-                    if string.find(txt, donePattern, 1, true) then
+                    if string.find(txt, donePattern) then
                         return "Completed"
                     elseif string.find(txt, "[0-" .. (taskInfo.RequiredKills - 1) .. "]/" .. taskInfo.RequiredKills) then
                         return "Active"
@@ -280,76 +254,30 @@ local function CheckGuiQuestProgress(taskInfo)
     return "Unknown"
 end
 
+-- Localiza o NPC de missão correspondente da Prison (Prisoner Quest Giver ou Warden Quest Giver)
 local function GetQuestNpcPos(taskInfo)
     local npcs = workspace:FindFirstChild("NPCs")
-    local npc = npcs and npcs:FindFirstChild(taskInfo.QuestNpcName)
-    if npc and npc:FindFirstChild("HumanoidRootPart") then
-        return npc.HumanoidRootPart.Position + Vector3.new(0, 3, 3.5)
-    end
+    if npcs then
+        local closestNpcPos = nil
+        local shortestDist = 300
 
-    local storedNpc = ReplicatedStorage:FindFirstChild(taskInfo.QuestNpcName)
-    if storedNpc and storedNpc:FindFirstChild("HumanoidRootPart") then
-        return storedNpc.HumanoidRootPart.Position + Vector3.new(0, 3, 3.5)
+        for _, npc in ipairs(npcs:GetChildren()) do
+            if npc.Name == taskInfo.QuestNpcName and npc:FindFirstChild("HumanoidRootPart") then
+                local pos = npc.HumanoidRootPart.Position + Vector3.new(0, 3, 3.5)
+                local dist = (pos - taskInfo.DefaultQuestPos).Magnitude
+                if dist < shortestDist then
+                    shortestDist = dist
+                    closestNpcPos = pos
+                end
+            end
+        end
+
+        if closestNpcPos then
+            return closestNpcPos
+        end
     end
 
     return taskInfo.DefaultQuestPos
-end
-
-local function GetDynamicMobAreaPos(taskInfo, currentPos)
-    local targetLower = string.lower(taskInfo.TargetMob)
-
-    for _, obj in ipairs(ReplicatedStorage:GetChildren()) do
-        if obj.Name == taskInfo.TargetMob then
-            local mobHrp = obj:FindFirstChild("HumanoidRootPart")
-            if mobHrp then
-                return mobHrp.Position + Vector3.new(0, 14, 0)
-            end
-        end
-    end
-
-    local worldOrigin = workspace:FindFirstChild("_WorldOrigin")
-    local enemySpawns = worldOrigin and worldOrigin:FindFirstChild("EnemySpawns")
-    if enemySpawns then
-        local bestPos = nil
-        local bestDist = math.huge
-        for _, spawnObj in ipairs(enemySpawns:GetChildren()) do
-            if spawnObj:IsA("BasePart") then
-                local spawnLower = string.lower(spawnObj.Name)
-                local matches = false
-
-                if taskInfo.TargetMob == "Prisoner" then
-                    matches = string.find(spawnLower, "prisoner", 1, true) and not string.find(spawnLower, "dangerous", 1, true)
-                elseif taskInfo.TargetMob == "Warden" then
-                    matches = string.find(spawnLower, "warden", 1, true) and not string.find(spawnLower, "chief", 1, true)
-                else
-                    matches = string.find(spawnLower, targetLower, 1, true) ~= nil
-                end
-
-                if matches then
-                    local dist = currentPos and (currentPos - spawnObj.Position).Magnitude or 0
-                    if dist < bestDist then
-                        bestDist = dist
-                        bestPos = spawnObj.Position + Vector3.new(0, 14, 0)
-                    end
-                end
-            end
-        end
-        if bestPos then
-            return bestPos
-        end
-    end
-
-    local points = taskInfo.PatrolPoints
-    local targetPoint = points[PatrolIndex] or points[1]
-    if currentPos and (currentPos - targetPoint).Magnitude <= 18 then
-        if os.clock() - LastPatrolSwitch >= 1.5 then
-            LastPatrolSwitch = os.clock()
-            PatrolIndex = (PatrolIndex % #points) + 1
-            targetPoint = points[PatrolIndex]
-        end
-    end
-
-    return targetPoint
 end
 
 local function EquipWeapon()
@@ -509,7 +437,7 @@ local function MoveToCFrame(targetCFrame, snapAtEnd)
     CurrentTween:Play()
 end
 
--- Se já houver missão de Prison ativa ao executar o script, inicia direto no modo farm
+-- Se já houver missão da Prison ativa ao executar o script, inicia direto no modo farm
 local allTasks = GetAllPrisonTasks()
 for _, taskCandidate in pairs(allTasks) do
     if CheckGuiQuestProgress(taskCandidate) == "Active" then
@@ -551,7 +479,7 @@ task.spawn(function()
     end
 end)
 
--- Loop principal sequencial (Lv. 190 ao Lv. 275 em Prison)
+-- Loop principal sequencial (Lv. 190 ao Lv. 275 na Prison)
 task.spawn(function()
     while _G.AutoFarmPrison and GetLevel() < Config.MaxLevel do
         local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
@@ -597,21 +525,16 @@ task.spawn(function()
 
                 ActiveTask = nextTask
                 MobsKilledInQuest = 0
-                PatrolIndex = 1
                 QuestInProgress = true
             end
         else
             UpdateKillCounter(ActiveTask.TargetMob)
             local guiState = CheckGuiQuestProgress(ActiveTask)
+            local nearBossArena = (hrp.Position - ActiveTask.WaitPos).Magnitude <= 150
+            local bossDisappeared = ActiveTask.IsBoss and nearBossArena and not IsBossAvailable(ActiveTask.TargetMob)
 
-            if guiState == "Completed" or MobsKilledInQuest >= ActiveTask.RequiredKills then
-                QuestInProgress = false
-                ActiveTask = nil
-                MobsKilledInQuest = 0
-                CancelTween()
-            elseif ActiveTask.IsBoss and not IsBossAvailable(ActiveTask.TargetMob) then
-                -- Caso outro jogador derrote o Boss antes, cancela e volta para o fluxo normal
-                if CommF and HasAnyActiveQuest() then
+            if guiState == "Completed" or MobsKilledInQuest >= ActiveTask.RequiredKills or bossDisappeared then
+                if bossDisappeared and CommF and HasAnyActiveQuest() then
                     pcall(function()
                         CommF:InvokeServer("AbandonQuest")
                     end)
@@ -635,8 +558,7 @@ task.spawn(function()
                         BringMobs(targetMob, ActiveTask.TargetMob)
                     end
                 else
-                    local searchPos = GetDynamicMobAreaPos(ActiveTask, hrp.Position)
-                    MoveToCFrame(CFrame.new(searchPos), false)
+                    MoveToCFrame(CFrame.new(ActiveTask.WaitPos), false)
                 end
 
                 RunService.Heartbeat:Wait()
