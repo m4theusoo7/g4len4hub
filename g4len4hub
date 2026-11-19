@@ -13,7 +13,7 @@ local Settings = {
     QuestLevel = 1,
     QuestNPCName = "Bandit Quest Giver",
     MobName = "Bandit",
-    QuestNPC_Fallback = CFrame.new(1060.9, 16.5, 1547.9),
+    QuestNPC_Fallback = CFrame.new(1059.37, 16.5, 1550.42),
     MobSpawn_CFrame = CFrame.new(1145.0, 17.0, 1634.0)
 }
 
@@ -34,7 +34,7 @@ LocalPlayer.Idled:Connect(function()
     VirtualUser:ClickButton2(Vector2.new())
 end)
 
--- Noclip e estabilização de voo durante o farm
+-- Noclip e estabilização de física durante o farm
 RunService.Stepped:Connect(function()
     local char = LocalPlayer.Character
     if not char then return end
@@ -71,7 +71,7 @@ local function StopTween()
     LastTweenGoal = nil
 end
 
--- Movimentação com Tween 200 sem reiniciar a cada passo do mob
+-- Movimentação suave com Tween 200 até encostar no ponto (evita rollback do servidor)
 local function MoveTo(targetCFrame)
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
@@ -79,14 +79,14 @@ local function MoveTo(targetCFrame)
 
     local distance = (hrp.Position - targetCFrame.Position).Magnitude
 
-    if distance <= 12 then
+    if distance <= 2.5 then
         StopTween()
         hrp.CFrame = targetCFrame
         return
     end
 
-    -- Só recria o Tween se o destino mudar mais de 15 studs
-    if CurrentTween and LastTweenGoal and (LastTweenGoal - targetCFrame.Position).Magnitude < 15 then
+    -- Evita reiniciar o Tween se o destino mudou pouco
+    if CurrentTween and LastTweenGoal and (LastTweenGoal - targetCFrame.Position).Magnitude < 6 then
         return
     end
 
@@ -180,20 +180,23 @@ local function GetClosestBandit()
     return closestMob
 end
 
--- Posição do NPC da missão
+-- Localiza a frente do NPC da missão (Workspace ou ReplicatedStorage)
 local function GetQuestNPCCFrame()
-    local npcsFolder = workspace:FindFirstChild("NPCs")
-    local questNPC = npcsFolder and npcsFolder:FindFirstChild(Settings.QuestNPCName)
-    local npcHRP = questNPC and questNPC:FindFirstChild("HumanoidRootPart")
+    local wsNPCs = workspace:FindFirstChild("NPCs")
+    local rsNPCs = ReplicatedStorage:FindFirstChild("NPCs")
+    local questNPC = (wsNPCs and wsNPCs:FindFirstChild(Settings.QuestNPCName))
+        or (rsNPCs and rsNPCs:FindFirstChild(Settings.QuestNPCName))
 
+    local npcHRP = questNPC and questNPC:FindFirstChild("HumanoidRootPart")
     if npcHRP then
-        return npcHRP.CFrame * CFrame.new(0, 0, 3)
+        -- -4 no eixo Z posiciona exatamente na frente do NPC
+        return npcHRP.CFrame * CFrame.new(0, 0, -4)
     end
     return Settings.QuestNPC_Fallback
 end
 
--- Aceita a quest sem abandonar missões traduzidas em PT-BR
-local function HandleQuest()
+-- Só libera o farm depois que a missão estiver visível e confirmada
+local function EnsureQuest()
     local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
     local mainGui = playerGui and playerGui:FindFirstChild("Main")
     local questFrame = mainGui and mainGui:FindFirstChild("Quest")
@@ -209,20 +212,24 @@ local function HandleQuest()
     local npcCFrame = GetQuestNPCCFrame()
     local distToNPC = (hrp.Position - npcCFrame.Position).Magnitude
 
-    if distToNPC > 12 then
+    if distToNPC > 5 then
         MoveTo(npcCFrame)
         return false
     end
 
+    -- Chegou na frente do NPC: para completamente antes de pedir a quest
     StopTween()
     hrp.CFrame = npcCFrame
+    task.wait(0.15)
 
     pcall(function()
         ReplicatedStorage.Remotes.CommF_:InvokeServer("StartQuest", Settings.QuestName, Settings.QuestLevel)
     end)
 
-    for _ = 1, 15 do
+    -- Aguarda a interface Quest abrir antes de sair do NPC
+    for _ = 1, 20 do
         if questFrame and questFrame.Visible then
+            task.wait(0.15)
             return true
         end
         task.wait(0.1)
@@ -279,8 +286,7 @@ task.spawn(function()
                 return
             end
 
-            local hasQuest = HandleQuest()
-            if hasQuest then
+            if EnsureQuest() then
                 local target = GetClosestBandit()
                 if target then
                     local targetHRP = target:FindFirstChild("HumanoidRootPart")
