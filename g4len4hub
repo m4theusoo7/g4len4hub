@@ -1,195 +1,252 @@
--- ====================================================
--- Blox Fruits Auto Farm - Frozen Village (Lv. 90 - 120) [Versão Corrigida]
--- Compatível com Delta Executor
--- ====================================================
+-- Configuração Principal
+_G.AutoFarmPirateStarter = true
 
+local Settings = {
+    MaxLevel = 10,
+    TweenSpeed = 200,
+    DistanceFarm = 20,
+    FastAttack = true,
+    AttackDelay = 0.08,
+    BringMob = true,
+    BringRadius = 250,
+    QuestName = "BanditQuest1",
+    QuestLevel = 1,
+    MobName = "Bandit",
+    QuestNPC_CFrame = CFrame.new(1059.37, 16.5, 1550.42),
+    MobSpawn_CFrame = CFrame.new(1145.0, 17.0, 1634.0)
+}
+
+-- Serviços
 local Players = game:GetService("Players")
-local LocalPlayer = Players.LocalPlayer
-local Workspace = game:GetService("Workspace")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local VirtualUser = game:GetService("VirtualUser")
 
-getgenv().AutoFarmFrozen = true
+local LocalPlayer = Players.LocalPlayer
+local CurrentTween = nil
 
--- Variável para controlar o Tween atual e evitar sobreposição
-local currentTween = nil
+-- Anti-AFK
+LocalPlayer.Idled:Connect(function()
+    VirtualUser:CaptureController()
+    VirtualUser:ClickButton2(Vector2.new())
+end)
 
-local function stopCurrentTween()
-    if currentTween then
-        pcall(function() currentTween:Cancel() end)
-        currentTween = nil
-    end
-end
-
--- Criar UI Flutuante com "Stop Tween"
-local ScreenGui = Instance.new("ScreenGui")
-local StopButton = Instance.new("TextButton")
-
-ScreenGui.Name = "AutoFarmUI"
-ScreenGui.Parent = game.CoreGui
-ScreenGui.ResetOnSpawn = false
-
-StopButton.Name = "StopTweenButton"
-StopButton.Parent = ScreenGui
-StopButton.BackgroundColor3 = Color3.fromRGB(0, 120, 215)
-StopButton.Position = UDim2.new(0, 20, 0, 50)
-StopButton.Size = UDim2.new(0, 110, 0, 45)
-StopButton.Font = Enum.Font.SourceSansBold
-StopButton.Text = "Stop Tween"
-StopButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-StopButton.TextSize = 16
-StopButton.Active = true
-StopButton.Draggable = true
-
-StopButton.MouseButton1Click:Connect(function()
-    getgenv().AutoFarmFrozen = not getgenv().AutoFarmFrozen
-    if getgenv().AutoFarmFrozen then
-        StopButton.Text = "Stop Tween"
-        StopButton.BackgroundColor3 = Color3.fromRGB(0, 120, 215)
-    else
-        StopButton.Text = "Resumir Farm"
-        StopButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-        stopCurrentTween()
+-- Noclip e estabilização de física durante o farm
+RunService.Stepped:Connect(function()
+    if _G.AutoFarmPirateStarter and LocalPlayer.Character then
+        for _, part in ipairs(LocalPlayer.Character:GetDescendants()) do
+            if part:IsA("BasePart") and part.CanCollide then
+                part.CanCollide = false
+            end
+        end
+        local hrp = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            hrp.AssemblyLinearVelocity = Vector3.zero
+            hrp.AssemblyAngularVelocity = Vector3.zero
+        end
     end
 end)
 
--- Anti-AFK seguro
-pcall(function()
-    for _, connection in ipairs(getconnections(LocalPlayer.Idled)) do
-        connection:Disable()
-    end
-end)
+-- Movimentação suave com Tween (evita micro-tweens a curta distância)
+local function MoveTo(targetCFrame)
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
 
--- Configuração de alvos por nível na Frozen Village
-local function getTargetData()
-    local level = (LocalPlayer:FindFirstChild("Data") and LocalPlayer.Data:FindFirstChild("Level")) and LocalPlayer.Data.Level.Value or 90
-    if level < 100 then
-        return {
-            Name = "Snow Bandit",
-            QuestName = "SnowQuest",
-            QuestIndex = 1,
-            NPC_CFrame = CFrame.new(1385, 105, -1300),
-            Farm_CFrame = CFrame.new(1345, 105, -1320)
-        }
-    elseif level < 110 then
-        return {
-            Name = "Snow Trooper",
-            QuestName = "SnowQuest",
-            QuestIndex = 2,
-            NPC_CFrame = CFrame.new(1150, 145, -1540),
-            Farm_CFrame = CFrame.new(1150, 145, -1540)
-        }
-    else
-        return {
-            Name = "Yeti",
-            QuestName = "SnowQuest",
-            QuestIndex = 3,
-            NPC_CFrame = CFrame.new(1185, 110, -1580),
-            Farm_CFrame = CFrame.new(1185, 110, -1580)
-        }
+    local distance = (hrp.Position - targetCFrame.Position).Magnitude
+    if distance <= 25 then
+        if CurrentTween then
+            CurrentTween:Cancel()
+            CurrentTween = nil
+        end
+        hrp.CFrame = targetCFrame
+        return
     end
+
+    local duration = distance / Settings.TweenSpeed
+    if CurrentTween then
+        CurrentTween:Cancel()
+    end
+
+    local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear)
+    CurrentTween = TweenService:Create(hrp, tweenInfo, { CFrame = targetCFrame })
+    CurrentTween:Play()
 end
 
--- Função para encontrar o inimigo mais próximo
-local function getNearestEnemy(name)
-    local targetEnemy = nil
-    local shortestDist = math.huge
-    local rootPart = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    if not rootPart then return nil end
+-- Equipar estilo de luta / arma corpo a corpo automaticamente
+local function EquipMelee()
+    local char = LocalPlayer.Character
+    local backpack = LocalPlayer:FindFirstChild("Backpack")
+    if not char or not backpack then return end
 
-    if Workspace:FindFirstChild("Enemies") then
-        for _, v in pairs(Workspace.Enemies:GetChildren()) do
-            local enemyRoot = v:FindFirstChild("HumanoidRootPart")
-            local humanoid = v:FindFirstChild("Humanoid")
-            if enemyRoot and humanoid and humanoid.Health > 0 and string.find(v.Name, name) then
-                local dist = (rootPart.Position - enemyRoot.Position).Magnitude
-                if dist < shortestDist then
-                    shortestDist = dist
-                    targetEnemy = v
+    local equipped = char:FindFirstChildOfClass("Tool")
+    if equipped and equipped.ToolTip == "Melee" then
+        return equipped
+    end
+
+    for _, tool in ipairs(backpack:GetChildren()) do
+        if tool:IsA("Tool") and (tool.ToolTip == "Melee" or tool.Name == "Combat") then
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            if hum then
+                hum:EquipTool(tool)
+                return tool
+            end
+        end
+    end
+    return equipped
+end
+
+-- Bring Mob (agrupa todos os Bandits próximos no alvo principal)
+local function BringEnemies(mainTarget)
+    if not Settings.BringMob or not mainTarget then return end
+    local mainHRP = mainTarget:FindFirstChild("HumanoidRootPart")
+    if not mainHRP then return end
+
+    pcall(function()
+        sethiddenproperty(LocalPlayer, "SimulationRadius", math.huge)
+    end)
+
+    local enemiesFolder = workspace:FindFirstChild("Enemies")
+    if not enemiesFolder then return end
+
+    for _, mob in ipairs(enemiesFolder:GetChildren()) do
+        if mob ~= mainTarget and mob.Name == Settings.MobName then
+            local mobHum = mob:FindFirstChildOfClass("Humanoid")
+            local mobHRP = mob:FindFirstChild("HumanoidRootPart")
+            if mobHum and mobHum.Health > 0 and mobHRP then
+                local dist = (mobHRP.Position - mainHRP.Position).Magnitude
+                if dist <= Settings.BringRadius then
+                    mobHRP.CFrame = mainHRP.CFrame
+                    mobHRP.CanCollide = false
+                    mobHRP.AssemblyLinearVelocity = Vector3.zero
+                    mobHum.WalkSpeed = 0
+                    mobHum.JumpPower = 0
                 end
             end
         end
     end
-    return targetEnemy
 end
 
-local lastQuestTick = 0
+-- Busca o Bandit vivo mais próximo
+local function GetClosestBandit()
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    local enemiesFolder = workspace:FindFirstChild("Enemies")
+    if not hrp or not enemiesFolder then return nil end
 
--- Loop Principal de Farm Otimizado
-task.spawn(function()
-    while task.wait(0.1) do
-        if getgenv().AutoFarmFrozen then
-            pcall(function()
-                local character = LocalPlayer.Character
-                if not character or not character:FindFirstChild("HumanoidRootPart") then return end
-                local rootPart = character.HumanoidRootPart
-                
-                local target = getTargetData()
-                
-                -- Ativar Haki (Buso) automaticamente se não estiver ativo
-                if not rootPart:FindFirstChild("HasBuso") then
-                    ReplicatedStorage.Remotes.CommF_:InvokeServer("Buso")
+    local closestMob = nil
+    local shortestDist = math.huge
+
+    for _, mob in ipairs(enemiesFolder:GetChildren()) do
+        if mob.Name == Settings.MobName then
+            local hum = mob:FindFirstChildOfClass("Humanoid")
+            local mobHRP = mob:FindFirstChild("HumanoidRootPart")
+            if hum and hum.Health > 0 and mobHRP then
+                local dist = (hrp.Position - mobHRP.Position).Magnitude
+                if dist < shortestDist then
+                    shortestDist = dist
+                    closestMob = mob
                 end
+            end
+        end
+    end
 
-                local questGui = LocalPlayer.PlayerGui.Main.Quest
-                
-                -- Se não tem quest ativa
-                if not questGui.Visible then
-                    if tick() - lastQuestTick > 3 then
-                        lastQuestTick = tick()
-                        stopCurrentTween()
-                        
-                        local dist = (rootPart.Position - target.NPC_CFrame.Position).Magnitude
-                        if dist > 15 then
-                            currentTween = TweenService:Create(rootPart, TweenInfo.new(dist / 280, Enum.EasingStyle.Linear), {CFrame = target.NPC_CFrame})
-                            currentTween:Play()
-                            currentTween.Completed:Wait()
-                        else
-                            rootPart.CFrame = target.NPC_CFrame
+    return closestMob
+end
+
+-- Verifica e aceita a quest da Pirate Starter Island
+local function HandleQuest()
+    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+    local mainGui = playerGui and playerGui:FindFirstChild("Main")
+    local questFrame = mainGui and mainGui:FindFirstChild("Quest")
+
+    if questFrame and questFrame.Visible then
+        return true
+    end
+
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false end
+
+    local distToNPC = (hrp.Position - Settings.QuestNPC_CFrame.Position).Magnitude
+    if distToNPC > 15 then
+        MoveTo(Settings.QuestNPC_CFrame)
+        return false
+    end
+
+    pcall(function()
+        ReplicatedStorage.Remotes.CommF_:InvokeServer("StartQuest", Settings.QuestName, Settings.QuestLevel)
+    end)
+    task.wait(0.3)
+    return true
+end
+
+-- Loop separado para Fast Attack
+task.spawn(function()
+    while _G.AutoFarmPirateStarter do
+        if Settings.FastAttack then
+            pcall(function()
+                local data = LocalPlayer:FindFirstChild("Data")
+                if data and data.Level.Value >= Settings.MaxLevel then return end
+
+                local target = GetClosestBandit()
+                local char = LocalPlayer.Character
+                local hrp = char and char:FindFirstChild("HumanoidRootPart")
+
+                if target and hrp then
+                    local targetHRP = target:FindFirstChild("HumanoidRootPart")
+                    if targetHRP and (hrp.Position - targetHRP.Position).Magnitude <= (Settings.DistanceFarm + 15) then
+                        local tool = EquipMelee()
+                        if tool then
+                            tool:Activate()
                         end
-                        task.wait(0.3)
-                        ReplicatedStorage.Remotes.CommF_:InvokeServer("StartQuest", target.QuestName, target.QuestIndex)
-                        task.wait(0.5)
-                    end
-                else
-                    -- Quest ativa: procurar inimigos
-                    local enemy = getNearestEnemy(target.Name)
-                    if enemy and enemy:FindFirstChild("HumanoidRootPart") then
-                        local enemyRoot = enemy.HumanoidRootPart
-                        local dist = (rootPart.Position - enemyRoot.Position).Magnitude
-                        
-                        if dist > 15 then
-                            stopCurrentTween()
-                            currentTween = TweenService:Create(rootPart, TweenInfo.new(dist / 280, Enum.EasingStyle.Linear), {CFrame = enemyRoot.CFrame * CFrame.new(0, 25, 3)})
-                            currentTween:Play()
-                        else
-                            stopCurrentTween()
-                            rootPart.CFrame = enemyRoot.CFrame * CFrame.new(0, 15, 2)
-                            
-                            -- Usar ferramenta equipada (ataque básico) e soltar skills via VirtualUser
-                            local vu = game:GetService("VirtualUser")
-                            vu:Button1Down(Vector2.new(0,0), Workspace.CurrentCamera.CFrame)
-                            
-                            for _, key in ipairs({Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C, Enum.KeyCode.V}) do
-                                vu:Button1Down(Vector2.new(0,0), Workspace.CurrentCamera.CFrame)
-                                game:GetService("VirtualInputManager"):SendKeyEvent(true, key, false, game)
-                                task.wait(0.02)
-                                game:GetService("VirtualInputManager"):SendKeyEvent(false, key, false, game)
-                            end
-                        end
-                    else
-                        -- Aguardar spawn na área da ilha
-                        stopCurrentTween()
-                        local dist = (rootPart.Position - target.Farm_CFrame.Position).Magnitude
-                        if dist > 15 then
-                            currentTween = TweenService:Create(rootPart, TweenInfo.new(dist / 280, Enum.EasingStyle.Linear), {CFrame = target.Farm_CFrame})
-                            currentTween:Play()
-                        else
-                            rootPart.CFrame = target.Farm_CFrame
-                        end
+                        VirtualUser:CaptureController()
+                        VirtualUser:Button1Down(Vector2.new(1280, 672))
                     end
                 end
             end)
         end
+        task.wait(Settings.AttackDelay)
+    end
+end)
+
+-- Loop Principal de Farm (Level 1 ao 10)
+task.spawn(function()
+    while _G.AutoFarmPirateStarter do
+        pcall(function()
+            local data = LocalPlayer:FindFirstChild("Data")
+            if not data then return end
+
+            -- Para automaticamente ao atingir Level 10
+            if data.Level.Value >= Settings.MaxLevel then
+                _G.AutoFarmPirateStarter = false
+                if CurrentTween then
+                    CurrentTween:Cancel()
+                    CurrentTween = nil
+                end
+                print("[OmegaCore] Level 10 atingido! Auto-farm da Pirate Starter Island finalizado.")
+                return
+            end
+
+            local hasQuest = HandleQuest()
+            if hasQuest then
+                local target = GetClosestBandit()
+                if target then
+                    local targetHRP = target:FindFirstChild("HumanoidRootPart")
+                    if targetHRP then
+                        EquipMelee()
+                        BringEnemies(target)
+                        -- Posiciona exatamente 20 studs acima do NPC olhando para baixo
+                        local farmCFrame = targetHRP.CFrame * CFrame.new(0, Settings.DistanceFarm, 0) * CFrame.Angles(math.rad(-90), 0, 0)
+                        MoveTo(farmCFrame)
+                    end
+                else
+                    -- Aguarda respawn próximo ao centro dos Bandits
+                    MoveTo(Settings.MobSpawn_CFrame * CFrame.new(0, Settings.DistanceFarm, 0))
+                end
+            end
+        end)
+        task.wait(0.1)
     end
 end)
