@@ -1,4 +1,4 @@
--- Controle de Sessão (encerra loops e conexões de execuções anteriores no Delta)
+-- Controle de Sessão (encerra loops e conexões anteriores no Delta)
 local SessionId = tick()
 _G.OmegaSessionId = SessionId
 _G.AutoFarmPirateStarter = true
@@ -34,7 +34,7 @@ local VirtualUser = game:GetService("VirtualUser")
 
 local LocalPlayer = Players.LocalPlayer
 
--- Estados de controle do avatar
+-- Estados de controle
 local FlyActive = false
 local GoalPos = nil
 local LookDown = false
@@ -45,7 +45,7 @@ table.insert(_G.OmegaConnections, LocalPlayer.Idled:Connect(function()
     VirtualUser:ClickButton2(Vector2.new())
 end))
 
--- Deixa o avatar 100% livre (remove forças de voo, Noclip e PlatformStand)
+-- Deixa o avatar livre no chão sem travar no piso
 local function ReleaseAvatar()
     FlyActive = false
     GoalPos = nil
@@ -78,7 +78,7 @@ local function ReleaseAvatar()
     end
 end
 
--- Noclip ativo APENAS enquanto FlyActive estiver ligado
+-- Noclip ativo apenas durante o deslocamento/farm aéreo
 table.insert(_G.OmegaConnections, RunService.Stepped:Connect(function()
     if _G.OmegaSessionId ~= SessionId or not _G.AutoFarmPirateStarter then return end
     if not FlyActive then return end
@@ -98,7 +98,7 @@ table.insert(_G.OmegaConnections, RunService.Stepped:Connect(function()
     end
 end))
 
--- Deslocamento suave a 200 studs/s apenas quando FlyActive = true
+-- Deslocamento suave a 200 studs/s quando FlyActive = true
 table.insert(_G.OmegaConnections, RunService.Heartbeat:Connect(function(dt)
     if _G.OmegaSessionId ~= SessionId or not _G.AutoFarmPirateStarter then
         ReleaseAvatar()
@@ -237,7 +237,7 @@ local function GetClosestBandit()
     return closestMob
 end
 
--- Retorna posição na frente do Bandit Quest Giver
+-- Posição elevada na frente do Bandit Quest Giver para não prender no chão
 local function GetQuestNPCPos()
     local wsNPCs = workspace:FindFirstChild("NPCs")
     local rsNPCs = ReplicatedStorage:FindFirstChild("NPCs")
@@ -246,20 +246,47 @@ local function GetQuestNPCPos()
 
     local npcHRP = questNPC and questNPC:FindFirstChild("HumanoidRootPart")
     if npcHRP then
-        return (npcHRP.CFrame * CFrame.new(0, 0, -4)).Position
+        return (npcHRP.CFrame * CFrame.new(0, 3, -4)).Position
     end
-    return Settings.QuestNPC_Fallback
+    return Settings.QuestNPC_Fallback + Vector3.new(0, 3, 0)
 end
 
--- Verifica se a missão já está ativa na tela
+-- Verifica hierarquia real de visibilidade na UI
+local function IsGuiVisible(obj, root)
+    local current = obj
+    while current and current ~= root do
+        if current:IsA("GuiObject") and not current.Visible then
+            return false
+        end
+        current = current.Parent
+    end
+    return true
+end
+
+-- Verifica se a missão já está ativa (compatível com UI clássica e atualizada)
 local function HasActiveQuest()
     local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
     local mainGui = playerGui and playerGui:FindFirstChild("Main")
-    local questFrame = mainGui and mainGui:FindFirstChild("Quest")
-    return questFrame and questFrame.Visible == true
+    if not mainGui then return false end
+
+    local questFrame = mainGui:FindFirstChild("Quest")
+    if questFrame and questFrame.Visible then
+        return true
+    end
+
+    for _, guiObj in ipairs(mainGui:GetDescendants()) do
+        if guiObj:IsA("TextLabel") and IsGuiVisible(guiObj, mainGui) then
+            local txt = guiObj.Text or ""
+            if string.match(txt, "%d+/5") then
+                return true
+            end
+        end
+    end
+
+    return false
 end
 
--- Loop separado para Fast Attack (só ataca quando estiver na etapa de farm)
+-- Loop separado para Fast Attack
 task.spawn(function()
     while _G.AutoFarmPirateStarter and _G.OmegaSessionId == SessionId do
         if Settings.FastAttack and HasActiveQuest() then
@@ -288,14 +315,13 @@ task.spawn(function()
     end
 end)
 
--- Loop Principal em Etapas (Ir ao NPC -> Soltar Avatar e Pegar Missão -> Farmar)
+-- Loop Principal em Etapas
 task.spawn(function()
     while _G.AutoFarmPirateStarter and _G.OmegaSessionId == SessionId do
         pcall(function()
             local data = LocalPlayer:FindFirstChild("Data")
             if not data then return end
 
-            -- Finaliza ao atingir Level 10 e deixa o avatar livre
             if data.Level.Value >= Settings.MaxLevel then
                 _G.AutoFarmPirateStarter = false
                 ReleaseAvatar()
@@ -308,31 +334,30 @@ task.spawn(function()
             if not hrp then return end
 
             if not HasActiveQuest() then
-                -- ETAPA 1: Leva o avatar até a frente do NPC
                 local npcPos = GetQuestNPCPos()
                 local distToNPC = (hrp.Position - npcPos).Magnitude
 
-                if distToNPC > 6 then
+                if distToNPC > 7 then
                     LookDown = false
                     GoalPos = npcPos
                     FlyActive = true
                 else
-                    -- ETAPA 2: Chegou no NPC -> Solta o avatar completamente e pega a missão
                     ReleaseAvatar()
-                    task.wait(0.15)
+                    task.wait(0.25)
 
                     pcall(function()
                         ReplicatedStorage.Remotes.CommF_:InvokeServer("StartQuest", Settings.QuestName, Settings.QuestLevel)
                     end)
 
-                    -- Aguarda até 2s a missão aparecer com o avatar livre
                     for _ = 1, 20 do
-                        if HasActiveQuest() then break end
+                        if HasActiveQuest() then
+                            print("[OmegaCore] Missão aceita! Iniciando farm...")
+                            break
+                        end
                         task.wait(0.1)
                     end
                 end
             else
-                -- ETAPA 3: Missão ativa -> Parte para o farm dos Bandits
                 local target = GetClosestBandit()
                 if target then
                     local targetHRP = target:FindFirstChild("HumanoidRootPart")
@@ -345,7 +370,6 @@ task.spawn(function()
                         FlyActive = true
                     end
                 else
-                    -- Aguarda respawn 20 studs acima do centro dos Bandits
                     GoalPos = Settings.MobSpawn_Pos + Vector3.new(0, Settings.DistanceFarm, 0)
                     LookDown = false
                     FlyActive = true
