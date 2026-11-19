@@ -1,198 +1,113 @@
-local Session = tick()
-_G.OmegaFarmSession = Session
-_G.AutoFarm = true
+_G.AutoFarmBandit = true
 
-local Settings = {
-    MaxLevel = 10,
+local Config = {
+    TargetMob = "Bandit",
     TweenSpeed = 200,
     DistanceFarm = 20,
-    FastAttack = true,
-    AttackDelay = 0.06,
-    BringMob = true,
-    BringRadius = 250,
-    QuestName = "BanditQuest1",
-    QuestLevel = 1,
-    MobName = "Bandit",
-    QuestNPC_CFrame = CFrame.new(1059.37, 18.5, 1550.42),
-    MobSpawn_CFrame = CFrame.new(1145, 18, 1634)
+    BringMobRadius = 250,
+    AttackDelay = 0.08
 }
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local VirtualUser = game:GetService("VirtualUser")
 
 local LocalPlayer = Players.LocalPlayer
-local ActiveTween = nil
-local ActiveGoal = nil
-local HoldPhysics = false
+local CurrentTween = nil
 
-local Modules = ReplicatedStorage:FindFirstChild("Modules")
-local NetFolder = Modules and Modules:FindFirstChild("Net")
-local RegisterAttack = NetFolder and NetFolder:FindFirstChild("RE/RegisterAttack")
-local RegisterHit = NetFolder and NetFolder:FindFirstChild("RE/RegisterHit")
-
-local function CancelTween()
-    if ActiveTween then
-        ActiveTween:Cancel()
-        ActiveTween = nil
-    end
-    ActiveGoal = nil
-end
-
-local function SetFlyState(enabled)
-    HoldPhysics = enabled
-    if not enabled then
-        CancelTween()
-    end
-
-    local char = LocalPlayer.Character
-    if not char then return end
-
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if hrp then
-        local bv = hrp:FindFirstChild("OmegaAntiGravity")
-        if enabled then
-            if not bv then
-                bv = Instance.new("BodyVelocity")
-                bv.Name = "OmegaAntiGravity"
-                bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-                bv.Velocity = Vector3.zero
-                bv.Parent = hrp
-            else
-                bv.Velocity = Vector3.zero
-            end
-        else
-            if bv then bv:Destroy() end
-            hrp.AssemblyLinearVelocity = Vector3.zero
-            hrp.AssemblyAngularVelocity = Vector3.zero
-        end
-    end
-
-    if not enabled then
-        for _, partName in ipairs({"HumanoidRootPart", "Torso", "UpperTorso", "LowerTorso"}) do
-            local part = char:FindFirstChild(partName)
-            if part and part:IsA("BasePart") then
-                part.CanCollide = true
-            end
-        end
-    end
-end
-
-local idledConn
-idledConn = LocalPlayer.Idled:Connect(function()
-    if _G.OmegaFarmSession ~= Session or not _G.AutoFarm then
-        idledConn:Disconnect()
-        return
-    end
-    VirtualUser:CaptureController()
-    VirtualUser:ClickButton2(Vector2.new())
-end)
-
-local steppedConn
-steppedConn = RunService.Stepped:Connect(function()
-    if _G.OmegaFarmSession ~= Session or not _G.AutoFarm then
-        steppedConn:Disconnect()
-        SetFlyState(false)
-        return
-    end
-
-    if not HoldPhysics then return end
-
-    local char = LocalPlayer.Character
-    if not char then return end
-
-    for _, part in ipairs(char:GetDescendants()) do
-        if part:IsA("BasePart") and part.CanCollide then
-            part.CanCollide = false
-        end
-    end
-
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if hrp then
-        hrp.AssemblyLinearVelocity = Vector3.zero
-        hrp.AssemblyAngularVelocity = Vector3.zero
-    end
-end)
-
-local function TweenTo(targetCFrame)
-    local char = LocalPlayer.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+-- Mantém o personagem estável no ar sem sofrer gravidade durante o farm
+local function SetAntiGravity(character, state)
+    local hrp = character and character:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
 
-    SetFlyState(true)
-
-    local distance = (hrp.Position - targetCFrame.Position).Magnitude
-    if distance <= 15 then
-        CancelTween()
-        hrp.CFrame = targetCFrame
-        return
+    local bv = hrp:FindFirstChild("FarmBodyVelocity")
+    if state then
+        if not bv then
+            bv = Instance.new("BodyVelocity")
+            bv.Name = "FarmBodyVelocity"
+            bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+            bv.Velocity = Vector3.new(0, 0, 0)
+            bv.Parent = hrp
+        end
+    else
+        if bv then
+            bv:Destroy()
+        end
     end
-
-    if ActiveTween and ActiveGoal and (ActiveGoal - targetCFrame.Position).Magnitude <= 12 then
-        return
-    end
-
-    CancelTween()
-    ActiveGoal = targetCFrame.Position
-
-    local duration = distance / Settings.TweenSpeed
-    local info = TweenInfo.new(duration, Enum.EasingStyle.Linear)
-    ActiveTween = TweenService:Create(hrp, info, { CFrame = targetCFrame })
-    ActiveTween:Play()
 end
 
-local function EquipMelee()
-    local char = LocalPlayer.Character
+-- Equipa automaticamente o estilo de luta (Combat) ou espada disponível
+local function EquipWeapon()
+    local character = LocalPlayer.Character
     local backpack = LocalPlayer:FindFirstChild("Backpack")
-    if not char or not backpack then return nil end
+    if not character or not backpack then return nil end
 
-    local equipped = char:FindFirstChildOfClass("Tool")
-    if equipped and (equipped.ToolTip == "Melee" or equipped.Name == "Combat") then
-        return equipped
-    end
+    local equipped = character:FindFirstChildOfClass("Tool")
+    if equipped then return equipped end
 
     for _, tool in ipairs(backpack:GetChildren()) do
-        if tool:IsA("Tool") and (tool.ToolTip == "Melee" or tool.Name == "Combat") then
-            local hum = char:FindFirstChildOfClass("Humanoid")
-            if hum then
-                hum:EquipTool(tool)
-                return tool
+        if tool:IsA("Tool") and (tool.ToolTip == "Melee" or tool.ToolTip == "Sword" or tool.Name == "Combat") then
+            character.Humanoid:EquipTool(tool)
+            return tool
+        end
+    end
+
+    local fallback = backpack:FindFirstChildOfClass("Tool")
+    if fallback then
+        character.Humanoid:EquipTool(fallback)
+        return fallback
+    end
+
+    return nil
+end
+
+-- Localiza o Bandit vivo mais próximo
+local function GetClosestBandit()
+    local character = LocalPlayer.Character
+    local hrp = character and character:FindFirstChild("HumanoidRootPart")
+    local enemies = workspace:FindFirstChild("Enemies")
+    if not hrp or not enemies then return nil end
+
+    local closestMob = nil
+    local shortestDist = math.huge
+
+    for _, mob in ipairs(enemies:GetChildren()) do
+        if mob.Name == Config.TargetMob or string.find(mob.Name, Config.TargetMob) then
+            local mobHum = mob:FindFirstChildOfClass("Humanoid")
+            local mobHrp = mob:FindFirstChild("HumanoidRootPart")
+            if mobHum and mobHrp and mobHum.Health > 0 then
+                local dist = (hrp.Position - mobHrp.Position).Magnitude
+                if dist < shortestDist then
+                    shortestDist = dist
+                    closestMob = mob
+                end
             end
         end
     end
-    return equipped
+
+    return closestMob
 end
 
-local function BringBandits(mainTarget)
-    if not Settings.BringMob or not mainTarget then return end
-    local mainHRP = mainTarget:FindFirstChild("HumanoidRootPart")
-    if not mainHRP then return end
-
-    if type(sethiddenproperty) == "function" then
-        pcall(sethiddenproperty, LocalPlayer, "SimulationRadius", math.huge)
-    end
-
-    local safeY = math.max(mainHRP.Position.Y, 16.5)
-    local anchorCF = CFrame.new(mainHRP.Position.X, safeY, mainHRP.Position.Z)
-
-    mainHRP.CFrame = anchorCF
-    mainHRP.CanCollide = false
-    mainHRP.AssemblyLinearVelocity = Vector3.zero
-
+-- Agrupa os Bandits próximos na posição do alvo principal
+local function BringMobs(targetCFrame)
     local enemies = workspace:FindFirstChild("Enemies")
     if not enemies then return end
 
+    pcall(function()
+        sethiddenproperty(LocalPlayer, "SimulationRadius", math.huge)
+    end)
+
     for _, mob in ipairs(enemies:GetChildren()) do
-        if mob ~= mainTarget and string.find(mob.Name, Settings.MobName) then
+        if mob.Name == Config.TargetMob or string.find(mob.Name, Config.TargetMob) then
             local mobHum = mob:FindFirstChildOfClass("Humanoid")
-            local mobHRP = mob:FindFirstChild("HumanoidRootPart")
-            if mobHum and mobHum.Health > 0 and mobHRP and mobHRP.Position.Y > 5 then
-                if (mobHRP.Position - anchorCF.Position).Magnitude <= Settings.BringRadius then
-                    mobHRP.CFrame = anchorCF
-                    mobHRP.CanCollide = false
-                    mobHRP.AssemblyLinearVelocity = Vector3.zero
+            local mobHrp = mob:FindFirstChild("HumanoidRootPart")
+            if mobHum and mobHrp and mobHum.Health > 0 then
+                local dist = (mobHrp.Position - targetCFrame.Position).Magnitude
+                if dist <= Config.BringMobRadius then
+                    mobHrp.CFrame = targetCFrame
+                    mobHrp.CanCollide = false
+                    mobHrp.AssemblyLinearVelocity = Vector3.zero
                     mobHum.WalkSpeed = 0
                     mobHum.JumpPower = 0
                 end
@@ -201,119 +116,83 @@ local function BringBandits(mainTarget)
     end
 end
 
-local function GetBanditTargets()
-    local char = LocalPlayer.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    local enemies = workspace:FindFirstChild("Enemies")
-    if not hrp or not enemies then return nil, {} end
+-- Deslocamento com Tween (evita travamentos por criação excessiva de instâncias)
+local function MoveToTarget(targetCFrame)
+    local character = LocalPlayer.Character
+    local hrp = character and character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
 
-    local closestMob = nil
-    local shortestDist = math.huge
-    local bladeHits = {}
+    local distance = (hrp.Position - targetCFrame.Position).Magnitude
 
-    for _, mob in ipairs(enemies:GetChildren()) do
-        if string.find(mob.Name, Settings.MobName) then
-            local hum = mob:FindFirstChildOfClass("Humanoid")
-            local mobHRP = mob:FindFirstChild("HumanoidRootPart")
-            local head = mob:FindFirstChild("Head")
-            if hum and hum.Health > 0 and mobHRP and head and mobHRP.Position.Y > 5 then
-                local dist = (hrp.Position - mobHRP.Position).Magnitude
-                if dist < shortestDist then
-                    shortestDist = dist
-                    closestMob = mob
-                end
-                if dist <= 60 then
-                    table.insert(bladeHits, { mob, head })
-                end
-            end
+    if distance <= Config.DistanceFarm + 5 then
+        if CurrentTween then
+            CurrentTween:Cancel()
+            CurrentTween = nil
         end
+        hrp.CFrame = targetCFrame
+        return
     end
 
-    return closestMob, bladeHits
+    if CurrentTween and CurrentTween.PlaybackState == Enum.PlaybackState.Playing then
+        return
+    end
+
+    local duration = distance / Config.TweenSpeed
+    local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear)
+    CurrentTween = TweenService:Create(hrp, tweenInfo, { CFrame = targetCFrame })
+    CurrentTween:Play()
 end
 
-local function HasQuest()
-    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
-    local mainGui = playerGui and playerGui:FindFirstChild("Main")
-    local questFrame = mainGui and mainGui:FindFirstChild("Quest")
-    return questFrame and questFrame.Visible == true
-end
-
+-- Thread separada para Fast Attack
 task.spawn(function()
-    while _G.AutoFarm and _G.OmegaFarmSession == Session do
-        if Settings.FastAttack and HasQuest() then
-            pcall(function()
-                local data = LocalPlayer:FindFirstChild("Data")
-                if not data or data.Level.Value >= Settings.MaxLevel then return end
+    while _G.AutoFarmBandit do
+        local character = LocalPlayer.Character
+        local hum = character and character:FindFirstChildOfClass("Humanoid")
 
-                local target, bladeHits = GetBanditTargets()
-                if target and #bladeHits > 0 then
-                    local tool = EquipMelee()
-                    if tool then
-                        if RegisterAttack and RegisterHit then
-                            local mainHead = target:FindFirstChild("Head")
-                            if mainHead then
-                                RegisterAttack:FireServer(0)
-                                RegisterHit:FireServer(mainHead, bladeHits)
-                            end
-                        end
-                        tool:Activate()
-                    end
-                end
-            end)
+        if character and hum and hum.Health > 0 then
+            local tool = EquipWeapon()
+            if tool then
+                pcall(function()
+                    tool:Activate()
+                    VirtualUser:CaptureController()
+                    VirtualUser:Button1Down(Vector2.new(1280, 672))
+                end)
+            end
         end
-        task.wait(Settings.AttackDelay)
+
+        task.wait(Config.AttackDelay)
     end
 end)
 
+-- Loop principal de movimentação, posicionamento e Bring Mob
 task.spawn(function()
-    while _G.AutoFarm and _G.OmegaFarmSession == Session do
-        pcall(function()
-            local data = LocalPlayer:FindFirstChild("Data")
-            if not data then return end
+    while _G.AutoFarmBandit do
+        local character = LocalPlayer.Character
+        local hum = character and character:FindFirstChildOfClass("Humanoid")
 
-            if data.Level.Value >= Settings.MaxLevel then
-                _G.AutoFarm = false
-                SetFlyState(false)
-                print("OmegaCore: Level 10 atingido")
-                return
+        if character and hum and hum.Health > 0 then
+            SetAntiGravity(character, true)
+            local targetMob = GetClosestBandit()
+
+            if targetMob and targetMob:FindFirstChild("HumanoidRootPart") then
+                local mobHrp = targetMob.HumanoidRootPart
+                local farmCFrame = mobHrp.CFrame * CFrame.new(0, Config.DistanceFarm, 0) * CFrame.Angles(math.rad(-90), 0, 0)
+
+                MoveToTarget(farmCFrame)
+                BringMobs(mobHrp.CFrame)
             end
-
-            local char = LocalPlayer.Character
-            local hum = char and char:FindFirstChildOfClass("Humanoid")
-            local hrp = char and char:FindFirstChild("HumanoidRootPart")
-            if not char or not hum or not hrp or hum.Health <= 0 then return end
-
-            if not HasQuest() then
-                local distToNPC = (hrp.Position - Settings.QuestNPC_CFrame.Position).Magnitude
-                if distToNPC > 8 then
-                    TweenTo(Settings.QuestNPC_CFrame)
-                else
-                    SetFlyState(false)
-                    task.wait(0.2)
-                    ReplicatedStorage.Remotes.CommF_:InvokeServer("StartQuest", Settings.QuestName, Settings.QuestLevel)
-
-                    for _ = 1, 20 do
-                        if HasQuest() then break end
-                        task.wait(0.1)
-                    end
-                end
-            else
-                local target = GetBanditTargets()
-                if target then
-                    local targetHRP = target:FindFirstChild("HumanoidRootPart")
-                    if targetHRP then
-                        EquipMelee()
-                        BringBandits(target)
-                        local safeY = math.max(targetHRP.Position.Y, 16.5)
-                        local farmCF = CFrame.new(targetHRP.Position.X, safeY + Settings.DistanceFarm, targetHRP.Position.Z)
-                        TweenTo(farmCF)
-                    end
-                else
-                    TweenTo(Settings.MobSpawn_CFrame * CFrame.new(0, Settings.DistanceFarm, 0))
-                end
+        else
+            if CurrentTween then
+                CurrentTween:Cancel()
+                CurrentTween = nil
             end
-        end)
-        task.wait(0.1)
+        end
+
+        RunService.Heartbeat:Wait()
     end
+
+    if CurrentTween then
+        CurrentTween:Cancel()
+    end
+    SetAntiGravity(LocalPlayer.Character, false)
 end)
