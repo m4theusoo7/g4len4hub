@@ -1,4 +1,4 @@
-_G.AutoFarmFrozenVillage = true
+_G.AutoFarmMarineFortress = true
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
@@ -14,10 +14,10 @@ local RegisterAttack = NetFolder and NetFolder:FindFirstChild("RE/RegisterAttack
 local RegisterHit = NetFolder and NetFolder:FindFirstChild("RE/RegisterHit")
 
 local Config = {
-    QuestName = "SnowQuest",
-    QuestNpcName = "Ice Quest Giver",
-    DefaultQuestPos = Vector3.new(1389.8, 90.5, -1298.6),
-    MaxLevel = 120,
+    QuestName = "MarineQuest2",
+    QuestNpcName = "Marine",
+    DefaultQuestPos = Vector3.new(-5036.24, 31.68, 4324.57),
+    MaxLevel = 150,
     TweenSpeed = 200,
     DistanceFarm = 8,
     BringMobRadius = 250,
@@ -36,7 +36,7 @@ local CountedDeadMobs = setmetatable({}, { __mode = "k" })
 local function GetLevel()
     local data = LocalPlayer:FindFirstChild("Data")
     local level = data and data:FindFirstChild("Level")
-    return level and level.Value or 90
+    return level and level.Value or 120
 end
 
 local function CancelTween()
@@ -71,29 +71,22 @@ local function IsBossAvailable(bossName)
     return false
 end
 
-local function GetFrozenVillageTaskForLevel()
+local function GetMarineFortressTaskForLevel()
     local level = GetLevel()
 
-    if level < 100 then
+    if level >= 130 and IsBossAvailable("Vice Admiral") then
         return {
-            TargetMob = "Snow Bandit",
-            QuestLevel = 1,
-            RequiredKills = 7,
-            WaitPos = Vector3.new(1354, 115, -1392)
-        }
-    elseif level >= 105 and IsBossAvailable("Yeti") then
-        return {
-            TargetMob = "Yeti",
-            QuestLevel = 3,
+            TargetMob = "Vice Admiral",
+            QuestLevel = 2,
             RequiredKills = 1,
-            WaitPos = Vector3.new(1218, 145, -1488)
+            WaitPos = Vector3.new(-4845, 55, 4310)
         }
     else
         return {
-            TargetMob = "Snowman",
-            QuestLevel = 2,
+            TargetMob = "Chief Petty Officer",
+            QuestLevel = 1,
             RequiredKills = 8,
-            WaitPos = Vector3.new(1201, 150, -1550)
+            WaitPos = Vector3.new(-4855, 45, 4308)
         }
     end
 end
@@ -130,7 +123,7 @@ local function SetPhysicsState(character, enabled)
 end
 
 NoClipConnection = RunService.Stepped:Connect(function()
-    if not _G.AutoFarmFrozenVillage then
+    if not _G.AutoFarmMarineFortress then
         if NoClipConnection then
             NoClipConnection:Disconnect()
             NoClipConnection = nil
@@ -177,12 +170,10 @@ local function CheckGuiQuestProgress(taskInfo)
                 local txt = string.lower((obj.Text or "") .. " " .. (obj.ContentText or ""))
                 local matchesMob = false
 
-                if taskInfo.TargetMob == "Snow Bandit" then
-                    matchesMob = string.find(txt, "bandit") or string.find(txt, "bandido")
-                elseif taskInfo.TargetMob == "Snowman" then
-                    matchesMob = string.find(txt, "snowman") or string.find(txt, "boneco")
-                elseif taskInfo.TargetMob == "Yeti" then
-                    matchesMob = string.find(txt, "yeti")
+                if taskInfo.TargetMob == "Chief Petty Officer" then
+                    matchesMob = string.find(txt, "chief") or string.find(txt, "petty") or string.find(txt, "suboficial")
+                elseif taskInfo.TargetMob == "Vice Admiral" then
+                    matchesMob = string.find(txt, "vice") or string.find(txt, "admiral") or string.find(txt, "almirante")
                 end
 
                 if matchesMob then
@@ -200,12 +191,29 @@ local function CheckGuiQuestProgress(taskInfo)
     return "Unknown"
 end
 
+-- Garante que seleciona o NPC "Marine" da Marine Fortress (e não o da Marine Starter)
 local function GetQuestNpcPos()
     local npcs = workspace:FindFirstChild("NPCs")
-    local npc = npcs and npcs:FindFirstChild(Config.QuestNpcName)
-    if npc and npc:FindFirstChild("HumanoidRootPart") then
-        return npc.HumanoidRootPart.Position + Vector3.new(0, 3, 3.5)
+    if npcs then
+        local closestNpcPos = nil
+        local shortestDist = 300
+
+        for _, npc in ipairs(npcs:GetChildren()) do
+            if npc.Name == Config.QuestNpcName and npc:FindFirstChild("HumanoidRootPart") then
+                local pos = npc.HumanoidRootPart.Position + Vector3.new(0, 3, 3.5)
+                local dist = (pos - Config.DefaultQuestPos).Magnitude
+                if dist < shortestDist then
+                    shortestDist = dist
+                    closestNpcPos = pos
+                end
+            end
+        end
+
+        if closestNpcPos then
+            return closestNpcPos
+        end
     end
+
     return Config.DefaultQuestPos
 end
 
@@ -366,8 +374,8 @@ local function MoveToCFrame(targetCFrame, snapAtEnd)
     CurrentTween:Play()
 end
 
--- Se já houver missão da Frozen Village ativa ao executar o script, inicia direto no modo farm
-local initialTask = GetFrozenVillageTaskForLevel()
+-- Se já houver missão da Marine Fortress ativa ao executar o script, inicia direto no modo farm
+local initialTask = GetMarineFortressTaskForLevel()
 if CheckGuiQuestProgress(initialTask) == "Active" then
     ActiveTask = initialTask
     QuestInProgress = true
@@ -375,7 +383,7 @@ end
 
 -- Thread do Fast Attack
 task.spawn(function()
-    while _G.AutoFarmFrozenVillage and GetLevel() < Config.MaxLevel do
+    while _G.AutoFarmMarineFortress and GetLevel() < Config.MaxLevel do
         local character = LocalPlayer.Character
         local hum = character and character:FindFirstChildOfClass("Humanoid")
 
@@ -405,9 +413,9 @@ task.spawn(function()
     end
 end)
 
--- Loop principal sequencial (Lv. 90 ao Lv. 120 na Frozen Village)
+-- Loop principal sequencial (Lv. 120 ao Lv. 150 na Marine Fortress)
 task.spawn(function()
-    while _G.AutoFarmFrozenVillage and GetLevel() < Config.MaxLevel do
+    while _G.AutoFarmMarineFortress and GetLevel() < Config.MaxLevel do
         local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
         local hrp = character:WaitForChild("HumanoidRootPart")
         local hum = character:WaitForChild("Humanoid")
@@ -416,7 +424,7 @@ task.spawn(function()
             CancelTween()
             task.wait(0.5)
         elseif not QuestInProgress then
-            local nextTask = GetFrozenVillageTaskForLevel()
+            local nextTask = GetMarineFortressTaskForLevel()
             local npcPos = GetQuestNpcPos()
             local distToNpc = (hrp.Position - npcPos).Magnitude
 
@@ -457,7 +465,7 @@ task.spawn(function()
             UpdateKillCounter(ActiveTask.TargetMob)
             local guiState = CheckGuiQuestProgress(ActiveTask)
             local nearBossArena = (hrp.Position - ActiveTask.WaitPos).Magnitude <= 150
-            local bossDisappeared = (ActiveTask.TargetMob == "Yeti") and nearBossArena and not IsBossAvailable("Yeti")
+            local bossDisappeared = (ActiveTask.TargetMob == "Vice Admiral") and nearBossArena and not IsBossAvailable("Vice Admiral")
 
             if guiState == "Completed" or MobsKilledInQuest >= ActiveTask.RequiredKills or bossDisappeared then
                 QuestInProgress = false
@@ -487,7 +495,7 @@ task.spawn(function()
         end
     end
 
-    _G.AutoFarmFrozenVillage = false
+    _G.AutoFarmMarineFortress = false
     if NoClipConnection then
         NoClipConnection:Disconnect()
         NoClipConnection = nil
