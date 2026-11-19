@@ -16,7 +16,7 @@ local RegisterHit = NetFolder and NetFolder:FindFirstChild("RE/RegisterHit")
 local Config = {
     QuestName = "SkyQuest",
     QuestNpcName = "Sky Quest Giver",
-    DefaultQuestPos = Vector3.new(-4841.83, 720.67, -2620.46),
+    DefaultQuestPos = Vector3.new(-4841.83, 717.67, -2623.96),
     MaxLevel = 190,
     TweenSpeed = 200,
     DistanceFarm = 8,
@@ -32,6 +32,9 @@ local QuestInProgress = false
 local ActiveTask = nil
 local MobsKilledInQuest = 0
 local CountedDeadMobs = setmetatable({}, { __mode = "k" })
+
+local PatrolIndex = 1
+local LastPatrolSwitch = 0
 
 local function GetLevel()
     local data = LocalPlayer:FindFirstChild("Data")
@@ -55,14 +58,22 @@ local function GetSkylandsTaskForLevel()
             TargetMob = "Sky Bandit",
             QuestLevel = 1,
             RequiredKills = 7,
-            WaitPos = Vector3.new(-4981.14, 295.0, -2830.67)
+            PatrolPoints = {
+                Vector3.new(-4981.14, 305.0, -2830.67),
+                Vector3.new(-4955.0, 725.0, -2620.0),
+                Vector3.new(-4890.0, 305.0, -2750.0)
+            }
         }
     else
         return {
             TargetMob = "Dark Master",
             QuestLevel = 2,
             RequiredKills = 8,
-            WaitPos = Vector3.new(-5259.84, 395.0, -2229.04)
+            PatrolPoints = {
+                Vector3.new(-5259.84, 395.0, -2229.04),
+                Vector3.new(-5180.0, 395.0, -2310.0),
+                Vector3.new(-5220.0, 575.0, -2250.0)
+            }
         }
     end
 end
@@ -167,13 +178,65 @@ local function CheckGuiQuestProgress(taskInfo)
     return "Unknown"
 end
 
+-- Busca o NPC em workspace.NPCs e também em ReplicatedStorage (caso ainda esteja fora do StreamingEnabled)
 local function GetQuestNpcPos()
     local npcs = workspace:FindFirstChild("NPCs")
     local npc = npcs and npcs:FindFirstChild(Config.QuestNpcName)
     if npc and npc:FindFirstChild("HumanoidRootPart") then
         return npc.HumanoidRootPart.Position + Vector3.new(0, 3, 3.5)
     end
+
+    local storedNpc = ReplicatedStorage:FindFirstChild(Config.QuestNpcName)
+    if storedNpc and storedNpc:FindFirstChild("HumanoidRootPart") then
+        return storedNpc.HumanoidRootPart.Position + Vector3.new(0, 3, 3.5)
+    end
+
     return Config.DefaultQuestPos
+end
+
+-- Localiza dinamicamente a posição exata de spawn do mob no mapa (_WorldOrigin.EnemySpawns / ReplicatedStorage)
+local function GetDynamicMobAreaPos(taskInfo, currentPos)
+    local targetLower = string.lower(taskInfo.TargetMob)
+
+    local worldOrigin = workspace:FindFirstChild("_WorldOrigin")
+    local enemySpawns = worldOrigin and worldOrigin:FindFirstChild("EnemySpawns")
+    if enemySpawns then
+        local bestPos = nil
+        local bestDist = math.huge
+        for _, spawnObj in ipairs(enemySpawns:GetChildren()) do
+            if spawnObj:IsA("BasePart") and string.find(string.lower(spawnObj.Name), targetLower, 1, true) then
+                local dist = currentPos and (currentPos - spawnObj.Position).Magnitude or 0
+                if dist < bestDist then
+                    bestDist = dist
+                    bestPos = spawnObj.Position + Vector3.new(0, 14, 0)
+                end
+            end
+        end
+        if bestPos then
+            return bestPos
+        end
+    end
+
+    for _, obj in ipairs(ReplicatedStorage:GetChildren()) do
+        if obj.Name == taskInfo.TargetMob then
+            local mobHrp = obj:FindFirstChild("HumanoidRootPart")
+            if mobHrp then
+                return mobHrp.Position + Vector3.new(0, 14, 0)
+            end
+        end
+    end
+
+    local points = taskInfo.PatrolPoints
+    local targetPoint = points[PatrolIndex] or points[1]
+    if currentPos and (currentPos - targetPoint).Magnitude <= 18 then
+        if os.clock() - LastPatrolSwitch >= 1.5 then
+            LastPatrolSwitch = os.clock()
+            PatrolIndex = (PatrolIndex % #points) + 1
+            targetPoint = points[PatrolIndex]
+        end
+    end
+
+    return targetPoint
 end
 
 local function EquipWeapon()
@@ -418,6 +481,7 @@ task.spawn(function()
 
                 ActiveTask = nextTask
                 MobsKilledInQuest = 0
+                PatrolIndex = 1
                 QuestInProgress = true
             end
         else
@@ -444,7 +508,8 @@ task.spawn(function()
                         BringMobs(targetMob, ActiveTask.TargetMob)
                     end
                 else
-                    MoveToCFrame(CFrame.new(ActiveTask.WaitPos), false)
+                    local searchPos = GetDynamicMobAreaPos(ActiveTask, hrp.Position)
+                    MoveToCFrame(CFrame.new(searchPos), false)
                 end
 
                 RunService.Heartbeat:Wait()
