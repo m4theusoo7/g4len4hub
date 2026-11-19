@@ -1,4 +1,4 @@
-_G.AutoFarmPirateVillage = true
+_G.AutoFarmDesert = true
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
@@ -14,10 +14,10 @@ local RegisterAttack = NetFolder and NetFolder:FindFirstChild("RE/RegisterAttack
 local RegisterHit = NetFolder and NetFolder:FindFirstChild("RE/RegisterHit")
 
 local Config = {
-    QuestName = "BuggyQuest1",
-    QuestNpcName = "Pirate Adventurer",
-    DefaultQuestPos = Vector3.new(-1140.17, 10.5, 3827.4),
-    MaxLevel = 60,
+    QuestName = "DesertQuest",
+    QuestNpcName = "Desert Adventurer",
+    DefaultQuestPos = Vector3.new(894.48, 9.5, 4392.43),
+    MaxLevel = 90,
     TweenSpeed = 200,
     DistanceFarm = 8,
     BringMobRadius = 250,
@@ -35,7 +35,7 @@ local CountedDeadMobs = setmetatable({}, { __mode = "k" })
 local function GetLevel()
     local data = LocalPlayer:FindFirstChild("Data")
     local level = data and data:FindFirstChild("Level")
-    return level and level.Value or 30
+    return level and level.Value or 60
 end
 
 local function CancelTween()
@@ -46,54 +46,22 @@ local function CancelTween()
     LastTweenTargetPos = nil
 end
 
--- Verifica tanto em workspace.Enemies quanto em ReplicatedStorage (evita falha por StreamingEnabled)
-local function IsBossAvailable(bossName)
-    local enemies = workspace:FindFirstChild("Enemies")
-    if enemies then
-        for _, mob in ipairs(enemies:GetChildren()) do
-            if mob.Name == bossName then
-                local hum = mob:FindFirstChildOfClass("Humanoid")
-                if hum and hum.Health > 0 then
-                    return true
-                end
-            end
-        end
-    end
-
-    local storedBoss = ReplicatedStorage:FindFirstChild(bossName)
-    if storedBoss then
-        local hum = storedBoss:FindFirstChildOfClass("Humanoid")
-        if not hum or hum.Health > 0 then
-            return true
-        end
-    end
-
-    return false
-end
-
-local function GetPirateVillageTaskForLevel()
+local function GetDesertTaskForLevel()
     local level = GetLevel()
 
-    if level < 40 then
+    if level < 75 then
         return {
-            TargetMob = "Pirate",
+            TargetMob = "Desert Bandit",
             QuestLevel = 1,
             RequiredKills = 8,
-            WaitPos = Vector3.new(-1115, 35, 3930)
-        }
-    elseif level >= 55 and IsBossAvailable("Bobby") then
-        return {
-            TargetMob = "Bobby",
-            QuestLevel = 3,
-            RequiredKills = 1,
-            WaitPos = Vector3.new(-1145, 35, 4755)
+            WaitPos = Vector3.new(932, 35, 4488)
         }
     else
         return {
-            TargetMob = "Brute",
+            TargetMob = "Desert Officer",
             QuestLevel = 2,
-            RequiredKills = 8,
-            WaitPos = Vector3.new(-1145, 35, 4310)
+            RequiredKills = 6,
+            WaitPos = Vector3.new(1048.2, 35, 4425.6)
         }
     end
 end
@@ -158,12 +126,10 @@ local function CheckGuiQuestProgress(taskInfo)
                 local txt = string.lower((obj.Text or "") .. " " .. (obj.ContentText or ""))
                 local matchesMob = false
 
-                if taskInfo.TargetMob == "Pirate" then
-                    matchesMob = string.find(txt, "pirate") or string.find(txt, "pirata")
-                elseif taskInfo.TargetMob == "Brute" then
-                    matchesMob = string.find(txt, "brute") or string.find(txt, "bruto")
-                elseif taskInfo.TargetMob == "Bobby" then
-                    matchesMob = string.find(txt, "bobby")
+                if taskInfo.TargetMob == "Desert Bandit" then
+                    matchesMob = string.find(txt, "bandit") or string.find(txt, "bandido")
+                elseif taskInfo.TargetMob == "Desert Officer" then
+                    matchesMob = string.find(txt, "officer") or string.find(txt, "oficial")
                 end
 
                 if matchesMob then
@@ -181,7 +147,6 @@ local function CheckGuiQuestProgress(taskInfo)
     return "Unknown"
 end
 
--- Mantém altura segura acima da doca/água da Pirate Village
 local function GetQuestNpcPos()
     local npcs = workspace:FindFirstChild("NPCs")
     local npc = npcs and npcs:FindFirstChild(Config.QuestNpcName)
@@ -348,7 +313,8 @@ local function MoveToCFrame(targetCFrame, snapAtEnd)
     CurrentTween:Play()
 end
 
-local initialTask = GetPirateVillageTaskForLevel()
+-- Se já houver missão do Desert ativa ao executar o script, inicia direto no modo farm
+local initialTask = GetDesertTaskForLevel()
 if CheckGuiQuestProgress(initialTask) == "Active" then
     ActiveTask = initialTask
     QuestInProgress = true
@@ -356,7 +322,7 @@ end
 
 -- Thread do Fast Attack
 task.spawn(function()
-    while _G.AutoFarmPirateVillage and GetLevel() < Config.MaxLevel do
+    while _G.AutoFarmDesert and GetLevel() < Config.MaxLevel do
         local character = LocalPlayer.Character
         local hum = character and character:FindFirstChildOfClass("Humanoid")
 
@@ -386,9 +352,9 @@ task.spawn(function()
     end
 end)
 
--- Loop principal sequencial (Lv. 30 ao Lv. 60 na Pirate Village)
+-- Loop principal sequencial (Lv. 60 ao Lv. 90 no Desert)
 task.spawn(function()
-    while _G.AutoFarmPirateVillage and GetLevel() < Config.MaxLevel do
+    while _G.AutoFarmDesert and GetLevel() < Config.MaxLevel do
         local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
         local hrp = character:WaitForChild("HumanoidRootPart")
         local hum = character:WaitForChild("Humanoid")
@@ -397,7 +363,7 @@ task.spawn(function()
             CancelTween()
             task.wait(0.5)
         elseif not QuestInProgress then
-            local nextTask = GetPirateVillageTaskForLevel()
+            local nextTask = GetDesertTaskForLevel()
             local npcPos = GetQuestNpcPos()
             local distToNpc = (hrp.Position - npcPos).Magnitude
 
@@ -437,10 +403,8 @@ task.spawn(function()
         else
             UpdateKillCounter(ActiveTask.TargetMob)
             local guiState = CheckGuiQuestProgress(ActiveTask)
-            local nearBossArena = (hrp.Position - ActiveTask.WaitPos).Magnitude <= 150
-            local bossDisappeared = (ActiveTask.TargetMob == "Bobby") and nearBossArena and not IsBossAvailable("Bobby")
 
-            if guiState == "Completed" or MobsKilledInQuest >= ActiveTask.RequiredKills or bossDisappeared then
+            if guiState == "Completed" or MobsKilledInQuest >= ActiveTask.RequiredKills then
                 QuestInProgress = false
                 ActiveTask = nil
                 MobsKilledInQuest = 0
@@ -468,7 +432,7 @@ task.spawn(function()
         end
     end
 
-    _G.AutoFarmPirateVillage = false
+    _G.AutoFarmDesert = false
     CancelTween()
     SetPhysicsState(LocalPlayer.Character, false)
 end)
