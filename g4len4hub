@@ -1,4 +1,4 @@
-_G.AutoFarmMarineFortress = true
+_G.AutoFarmSkylands = true
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
@@ -14,10 +14,10 @@ local RegisterAttack = NetFolder and NetFolder:FindFirstChild("RE/RegisterAttack
 local RegisterHit = NetFolder and NetFolder:FindFirstChild("RE/RegisterHit")
 
 local Config = {
-    QuestName = "MarineQuest2",
-    QuestNpcName = "Marine",
-    DefaultQuestPos = Vector3.new(-5036.24, 31.68, 4324.57),
-    MaxLevel = 150,
+    QuestName = "SkyQuest",
+    QuestNpcName = "Sky Quest Giver",
+    DefaultQuestPos = Vector3.new(-4841.83, 720.67, -2620.46),
+    MaxLevel = 190,
     TweenSpeed = 200,
     DistanceFarm = 8,
     BringMobRadius = 250,
@@ -36,7 +36,7 @@ local CountedDeadMobs = setmetatable({}, { __mode = "k" })
 local function GetLevel()
     local data = LocalPlayer:FindFirstChild("Data")
     local level = data and data:FindFirstChild("Level")
-    return level and level.Value or 120
+    return level and level.Value or 150
 end
 
 local function CancelTween()
@@ -47,46 +47,22 @@ local function CancelTween()
     LastTweenTargetPos = nil
 end
 
-local function IsBossAvailable(bossName)
-    local enemies = workspace:FindFirstChild("Enemies")
-    if enemies then
-        for _, mob in ipairs(enemies:GetChildren()) do
-            if mob.Name == bossName then
-                local hum = mob:FindFirstChildOfClass("Humanoid")
-                if hum and hum.Health > 0 then
-                    return true
-                end
-            end
-        end
-    end
-
-    local storedBoss = ReplicatedStorage:FindFirstChild(bossName)
-    if storedBoss then
-        local hum = storedBoss:FindFirstChildOfClass("Humanoid")
-        if not hum or hum.Health > 0 then
-            return true
-        end
-    end
-
-    return false
-end
-
-local function GetMarineFortressTaskForLevel()
+local function GetSkylandsTaskForLevel()
     local level = GetLevel()
 
-    if level >= 130 and IsBossAvailable("Vice Admiral") then
+    if level < 175 then
         return {
-            TargetMob = "Vice Admiral",
-            QuestLevel = 2,
-            RequiredKills = 1,
-            WaitPos = Vector3.new(-4845, 55, 4310)
+            TargetMob = "Sky Bandit",
+            QuestLevel = 1,
+            RequiredKills = 7,
+            WaitPos = Vector3.new(-4970, 740, -2815)
         }
     else
         return {
-            TargetMob = "Chief Petty Officer",
-            QuestLevel = 1,
+            TargetMob = "Dark Master",
+            QuestLevel = 2,
             RequiredKills = 8,
-            WaitPos = Vector3.new(-4855, 45, 4308)
+            WaitPos = Vector3.new(-5250, 815, -2280)
         }
     end
 end
@@ -123,7 +99,7 @@ local function SetPhysicsState(character, enabled)
 end
 
 NoClipConnection = RunService.Stepped:Connect(function()
-    if not _G.AutoFarmMarineFortress then
+    if not _G.AutoFarmSkylands then
         if NoClipConnection then
             NoClipConnection:Disconnect()
             NoClipConnection = nil
@@ -170,10 +146,10 @@ local function CheckGuiQuestProgress(taskInfo)
                 local txt = string.lower((obj.Text or "") .. " " .. (obj.ContentText or ""))
                 local matchesMob = false
 
-                if taskInfo.TargetMob == "Chief Petty Officer" then
-                    matchesMob = string.find(txt, "chief") or string.find(txt, "petty") or string.find(txt, "suboficial")
-                elseif taskInfo.TargetMob == "Vice Admiral" then
-                    matchesMob = string.find(txt, "vice") or string.find(txt, "admiral") or string.find(txt, "almirante")
+                if taskInfo.TargetMob == "Sky Bandit" then
+                    matchesMob = string.find(txt, "bandit") or string.find(txt, "bandido")
+                elseif taskInfo.TargetMob == "Dark Master" then
+                    matchesMob = string.find(txt, "master") or string.find(txt, "mestre")
                 end
 
                 if matchesMob then
@@ -191,29 +167,12 @@ local function CheckGuiQuestProgress(taskInfo)
     return "Unknown"
 end
 
--- Garante que seleciona o NPC "Marine" da Marine Fortress (e não o da Marine Starter)
 local function GetQuestNpcPos()
     local npcs = workspace:FindFirstChild("NPCs")
-    if npcs then
-        local closestNpcPos = nil
-        local shortestDist = 300
-
-        for _, npc in ipairs(npcs:GetChildren()) do
-            if npc.Name == Config.QuestNpcName and npc:FindFirstChild("HumanoidRootPart") then
-                local pos = npc.HumanoidRootPart.Position + Vector3.new(0, 3, 3.5)
-                local dist = (pos - Config.DefaultQuestPos).Magnitude
-                if dist < shortestDist then
-                    shortestDist = dist
-                    closestNpcPos = pos
-                end
-            end
-        end
-
-        if closestNpcPos then
-            return closestNpcPos
-        end
+    local npc = npcs and npcs:FindFirstChild(Config.QuestNpcName)
+    if npc and npc:FindFirstChild("HumanoidRootPart") then
+        return npc.HumanoidRootPart.Position + Vector3.new(0, 3, 3.5)
     end
-
     return Config.DefaultQuestPos
 end
 
@@ -374,8 +333,8 @@ local function MoveToCFrame(targetCFrame, snapAtEnd)
     CurrentTween:Play()
 end
 
--- Se já houver missão da Marine Fortress ativa ao executar o script, inicia direto no modo farm
-local initialTask = GetMarineFortressTaskForLevel()
+-- Se já houver missão de Skylands ativa ao executar o script, inicia direto no modo farm
+local initialTask = GetSkylandsTaskForLevel()
 if CheckGuiQuestProgress(initialTask) == "Active" then
     ActiveTask = initialTask
     QuestInProgress = true
@@ -383,7 +342,7 @@ end
 
 -- Thread do Fast Attack
 task.spawn(function()
-    while _G.AutoFarmMarineFortress and GetLevel() < Config.MaxLevel do
+    while _G.AutoFarmSkylands and GetLevel() < Config.MaxLevel do
         local character = LocalPlayer.Character
         local hum = character and character:FindFirstChildOfClass("Humanoid")
 
@@ -413,9 +372,9 @@ task.spawn(function()
     end
 end)
 
--- Loop principal sequencial (Lv. 120 ao Lv. 150 na Marine Fortress)
+-- Loop principal sequencial (Lv. 150 ao Lv. 190 em Skylands)
 task.spawn(function()
-    while _G.AutoFarmMarineFortress and GetLevel() < Config.MaxLevel do
+    while _G.AutoFarmSkylands and GetLevel() < Config.MaxLevel do
         local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
         local hrp = character:WaitForChild("HumanoidRootPart")
         local hum = character:WaitForChild("Humanoid")
@@ -424,7 +383,7 @@ task.spawn(function()
             CancelTween()
             task.wait(0.5)
         elseif not QuestInProgress then
-            local nextTask = GetMarineFortressTaskForLevel()
+            local nextTask = GetSkylandsTaskForLevel()
             local npcPos = GetQuestNpcPos()
             local distToNpc = (hrp.Position - npcPos).Magnitude
 
@@ -464,10 +423,8 @@ task.spawn(function()
         else
             UpdateKillCounter(ActiveTask.TargetMob)
             local guiState = CheckGuiQuestProgress(ActiveTask)
-            local nearBossArena = (hrp.Position - ActiveTask.WaitPos).Magnitude <= 150
-            local bossDisappeared = (ActiveTask.TargetMob == "Vice Admiral") and nearBossArena and not IsBossAvailable("Vice Admiral")
 
-            if guiState == "Completed" or MobsKilledInQuest >= ActiveTask.RequiredKills or bossDisappeared then
+            if guiState == "Completed" or MobsKilledInQuest >= ActiveTask.RequiredKills then
                 QuestInProgress = false
                 ActiveTask = nil
                 MobsKilledInQuest = 0
@@ -495,7 +452,7 @@ task.spawn(function()
         end
     end
 
-    _G.AutoFarmMarineFortress = false
+    _G.AutoFarmSkylands = false
     if NoClipConnection then
         NoClipConnection:Disconnect()
         NoClipConnection = nil
