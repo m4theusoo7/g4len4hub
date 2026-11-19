@@ -29,7 +29,11 @@ local Config = {
 
 local CurrentTween = nil
 local LastTweenTargetPos = nil
-local LastQuestInvoke = 0
+
+-- Controle de estado da missão (independente de falha na GUI)
+local QuestInProgress = false
+local MobsKilledInQuest = 0
+local CountedDeadMobs = setmetatable({}, { __mode = "k" })
 
 local function GetLevel()
     local data = LocalPlayer:FindFirstChild("Data")
@@ -45,7 +49,6 @@ local function CancelTween()
     LastTweenTargetPos = nil
 end
 
--- Mantém flutuação e NoClip contínuos (impede o avatar de prender no NPC ou no chão)
 local function SetPhysicsState(character, enabled)
     if not character then return end
     local hrp = character:FindFirstChild("HumanoidRootPart")
@@ -77,35 +80,46 @@ local function SetPhysicsState(character, enabled)
     end
 end
 
--- Verifica a missão lendo Text e ContentText (funciona com tradução automática do Roblox)
-local function GetQuestState()
+-- Lê qualquer indicador ativo de missão na tela (0/5 a 4/5) ignorando caixas de diálogo
+local function CheckGuiQuestProgress()
     local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
     local main = playerGui and playerGui:FindFirstChild("Main")
-    local questGui = main and main:FindFirstChild("Quest")
+    if not main then return "Unknown" end
 
-    if not questGui or not questGui.Visible then
-        return "None"
-    end
+    for _, obj in ipairs(main:GetDescendants()) do
+        if obj:IsA("TextLabel") and obj.Visible then
+            local isDialogue = false
+            local parent = obj.Parent
+            while parent and parent ~= main do
+                local pName = string.lower(parent.Name)
+                if string.find(pName, "dialogue") or string.find(pName, "questc") then
+                    isDialogue = true
+                    break
+                end
+                parent = parent.Parent
+            end
 
-    for _, desc in ipairs(questGui:GetDescendants()) do
-        if desc:IsA("TextLabel") then
-            local rawText = string.lower(desc.Text or "")
-            local contentText = string.lower(desc.ContentText or "")
-            if string.find(rawText, "bandit") or string.find(rawText, "bandido")
-                or string.find(contentText, "bandit") or string.find(contentText, "bandido") then
-                return "ActiveBandit"
+            if not isDialogue then
+                local txt = string.lower((obj.Text or "") .. " " .. (obj.ContentText or ""))
+                if string.find(txt, "bandit") or string.find(txt, "bandido") then
+                    if string.find(txt, "5/5") then
+                        return "Completed"
+                    elseif string.find(txt, "[0-4]/5") then
+                        return "Active"
+                    end
+                end
             end
         end
     end
 
-    return "OtherQuest"
+    return "Unknown"
 end
 
 local function GetQuestNpcPos()
     local npcs = workspace:FindFirstChild("NPCs")
     local npc = npcs and npcs:FindFirstChild(Config.QuestNpcName)
     if npc and npc:FindFirstChild("HumanoidRootPart") then
-        return npc.HumanoidRootPart.Position + Vector3.new(0, 1.5, 3)
+        return npc.HumanoidRootPart.Position + Vector3.new(0, 1, 3.5)
     end
     return Config.DefaultQuestPos
 end
@@ -129,6 +143,23 @@ local function EquipWeapon()
     end
 
     return nil
+end
+
+local function UpdateKillCounter()
+    local enemies = workspace:FindFirstChild("Enemies")
+    if not enemies then return end
+
+    for _, mob in ipairs(enemies:GetChildren()) do
+        if mob.Name == Config.TargetMob and not CountedDeadMobs[mob] then
+            local mobHum = mob:FindFirstChildOfClass("Humanoid")
+            if mobHum and mobHum.Health <= 0 then
+                CountedDeadMobs[mob] = true
+                if QuestInProgress then
+                    MobsKilledInQuest += 1
+                end
+            end
+        end
+    end
 end
 
 local function GetClosestBandit()
@@ -250,13 +281,18 @@ local function MoveToCFrame(targetCFrame, snapAtEnd)
     CurrentTween:Play()
 end
 
--- Thread do Fast Attack (ativa somente com a missão em andamento e Bandits perto)
+-- Se já houver missão ativa ao executar o script, inicia direto no modo farm
+if CheckGuiQuestProgress() == "Active" then
+    QuestInProgress = true
+end
+
+-- Thread do Fast Attack
 task.spawn(function()
     while _G.AutoFarmBandit and GetLevel() < Config.MaxLevel do
         local character = LocalPlayer.Character
         local hum = character and character:FindFirstChildOfClass("Humanoid")
 
-        if character and hum and hum.Health > 0 and GetQuestState() == "ActiveBandit" then
+        if character and hum and hum.Health > 0 and QuestInProgress then
             local tool = EquipWeapon()
             local targets = GetTargetsInRange(25)
 
@@ -282,18 +318,57 @@ task.spawn(function()
     end
 end)
 
--- Loop único unificado (Missão <-> Farm) sem bloqueios
+-- Loop principal sequencial (Ir ao NPC -> Aceitar Missão -> Farmar 5 Bandits -> Repetir até Lv. 10)
 task.spawn(function()
     while _G.AutoFarmBandit and GetLevel() < Config.MaxLevel do
-        local character = LocalPlayer.Character
-        local hrp = character and character:FindFirstChild("HumanoidRootPart")
-        local hum = character and character:FindFirstChildOfClass("Humanoid")
+        local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+        local hrp = character:WaitForChild("HumanoidRootPart")
+        local hum = character:WaitForChild("Humanoid")
 
-        if character and hrp and hum and hum.Health > 0 then
-            SetPhysicsState(character, true)
-            local questState = GetQuestState()
+        if hum.Health <= 0 then
+            CancelTween()
+            task.wait(0.5)
+        elseif not QuestInProgress then
+            -- ETAPA 1: Deslocar até o NPC
+            local npcPos = GetQuestNpcPos()
+            local distToNpc = (hrp.Position - npcPos).Magnitude
 
-            if questState == "ActiveBandit" then
+            if distToNpc > 6 then
+                SetPhysicsState(character, true)
+                MoveToCFrame(CFrame.new(npcPos), false)
+                RunService.Heartbeat:Wait()
+            else
+                -- Chegou no NPC: pousa no chão normalmente para o servidor aceitar o StartQuest
+                CancelTween()
+                SetPhysicsState(character, false)
+                hrp.AssemblyLinearVelocity = Vector3.zero
+                task.wait(0.25)
+
+                if CommF then
+                    pcall(function()
+                        CommF:InvokeServer("AbandonQuest")
+                    end)
+                    task.wait(0.15)
+                    pcall(function()
+                        CommF:InvokeServer("StartQuest", Config.QuestName, Config.QuestLevel)
+                    end)
+                    task.wait(0.3)
+                end
+
+                MobsKilledInQuest = 0
+                QuestInProgress = true
+            end
+        else
+            -- ETAPA 2: Farmar os 5 Bandits até concluir a missão
+            UpdateKillCounter()
+            local guiState = CheckGuiQuestProgress()
+
+            if guiState == "Completed" or MobsKilledInQuest >= 5 then
+                QuestInProgress = false
+                MobsKilledInQuest = 0
+                CancelTween()
+            else
+                SetPhysicsState(character, true)
                 local targetMob = GetClosestBandit()
 
                 if targetMob and targetMob:FindFirstChild("HumanoidRootPart") then
@@ -309,37 +384,10 @@ task.spawn(function()
                 else
                     MoveToCFrame(CFrame.new(Config.BanditWaitPos), false)
                 end
-            else
-                local npcPos = GetQuestNpcPos()
-                local distToNpc = (hrp.Position - npcPos).Magnitude
 
-                if distToNpc > 6 then
-                    MoveToCFrame(CFrame.new(npcPos), false)
-                else
-                    CancelTween()
-                    hrp.AssemblyLinearVelocity = Vector3.zero
-
-                    if CommF and (tick() - LastQuestInvoke) >= 0.6 then
-                        LastQuestInvoke = tick()
-                        task.spawn(function()
-                            if questState == "OtherQuest" then
-                                pcall(function()
-                                    CommF:InvokeServer("AbandonQuest")
-                                end)
-                                task.wait(0.2)
-                            end
-                            pcall(function()
-                                CommF:InvokeServer("StartQuest", Config.QuestName, Config.QuestLevel)
-                            end)
-                        end)
-                    end
-                end
+                RunService.Heartbeat:Wait()
             end
-        else
-            CancelTween()
         end
-
-        RunService.Heartbeat:Wait()
     end
 
     _G.AutoFarmBandit = false
