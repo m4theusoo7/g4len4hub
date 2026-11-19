@@ -2,8 +2,12 @@ _G.AutoFarmBandit = true
 
 local Config = {
     TargetMob = "Bandit",
+    QuestName = "BanditQuest1",
+    QuestLevel = 1,
+    QuestNpcName = "Bandit Quest Giver",
+    DefaultQuestCFrame = CFrame.new(1059.37, 16.5, 1550.42),
     TweenSpeed = 200,
-    DistanceFarm = 8, -- Alcance ideal para o Combat acertar sem tomar dano
+    DistanceFarm = 8,
     BringMobRadius = 250,
     AttackDelay = 0.08
 }
@@ -17,13 +21,16 @@ local VirtualInputManager = game:GetService("VirtualInputManager")
 local LocalPlayer = Players.LocalPlayer
 local CurrentTween = nil
 local LastTweenTargetPos = nil
+local LastQuestAttempt = 0
 
--- Remotes nativos de ataque do Blox Fruits
+-- Remotes do Blox Fruits
+local Remotes = ReplicatedStorage:FindFirstChild("Remotes")
+local CommF = Remotes and Remotes:FindFirstChild("CommF_")
 local NetFolder = ReplicatedStorage:FindFirstChild("Modules") and ReplicatedStorage.Modules:FindFirstChild("Net")
 local RegisterAttack = NetFolder and NetFolder:FindFirstChild("RE/RegisterAttack")
 local RegisterHit = NetFolder and NetFolder:FindFirstChild("RE/RegisterHit")
 
--- Mantém o personagem estável no ar e sem colisão durante o farm
+-- Mantém o personagem estável no ar e sem colisão durante o farm/deslocamento
 local function SetPhysicsState(character, state)
     if not character then return end
     local hrp = character:FindFirstChild("HumanoidRootPart")
@@ -48,6 +55,35 @@ local function SetPhysicsState(character, state)
             part.CanCollide = not state
         end
     end
+end
+
+-- Verifica se a missão de Bandit já está ativa na tela
+local function GetQuestStatus()
+    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+    local main = playerGui and playerGui:FindFirstChild("Main")
+    local questGui = main and main:FindFirstChild("Quest")
+
+    if questGui and questGui.Visible then
+        local container = questGui:FindFirstChild("Container")
+        local questTitle = container and container:FindFirstChild("QuestTitle")
+        local titleLabel = questTitle and questTitle:FindFirstChild("Title")
+        if titleLabel and string.find(titleLabel.Text, Config.TargetMob) then
+            return "ActiveBandit"
+        end
+        return "OtherQuest"
+    end
+
+    return "None"
+end
+
+-- Obtém a posição atualizada do Bandit Quest Giver
+local function GetQuestGiverCFrame()
+    local npcs = workspace:FindFirstChild("NPCs")
+    local npc = npcs and npcs:FindFirstChild(Config.QuestNpcName)
+    if npc and npc:FindFirstChild("HumanoidRootPart") then
+        return npc.HumanoidRootPart.CFrame * CFrame.new(0, 0, 3)
+    end
+    return Config.DefaultQuestCFrame
 end
 
 -- Equipa estilo de luta (Combat/Melee) ou espada
@@ -99,7 +135,7 @@ local function GetClosestBandit()
     return closestMob
 end
 
--- Agrupa os Bandits sem colisão entre membros (impede que subam para o céu)
+-- Agrupa os Bandits sem colisão entre membros
 local function BringMobs(anchorMob)
     local enemies = workspace:FindFirstChild("Enemies")
     local anchorHrp = anchorMob and anchorMob:FindFirstChild("HumanoidRootPart")
@@ -119,7 +155,6 @@ local function BringMobs(anchorMob)
             if mobHum and mobHrp and mobHum.Health > 0 then
                 local dist = (mobHrp.Position - anchorCFrame.Position).Magnitude
                 if dist <= Config.BringMobRadius then
-                    -- Remove colisão de todas as partes do NPC para não empurrar para cima
                     for _, part in ipairs(mob:GetDescendants()) do
                         if part:IsA("BasePart") then
                             part.CanCollide = false
@@ -140,7 +175,7 @@ local function BringMobs(anchorMob)
     end
 end
 
--- Coleta os Bandits no alcance do golpe para registrar o dano
+-- Coleta os Bandits no alcance do golpe
 local function GetTargetsInRange(maxRange)
     local character = LocalPlayer.Character
     local hrp = character and character:FindFirstChild("HumanoidRootPart")
@@ -198,24 +233,22 @@ local function MoveToTarget(targetCFrame)
     CurrentTween:Play()
 end
 
--- Thread do Fast Attack (animação + registro de hit no servidor)
+-- Thread do Fast Attack (ativa apenas quando a missão está em andamento)
 task.spawn(function()
     while _G.AutoFarmBandit do
         local character = LocalPlayer.Character
         local hum = character and character:FindFirstChildOfClass("Humanoid")
 
-        if character and hum and hum.Health > 0 then
+        if character and hum and hum.Health > 0 and GetQuestStatus() == "ActiveBandit" then
             local tool = EquipWeapon()
             local targets = GetTargetsInRange(25)
 
             if tool and #targets > 0 then
                 pcall(function()
-                    -- Simula o toque/clique real (funciona no Mobile e PC)
                     VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 1)
                     VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 1)
                     tool:Activate()
 
-                    -- Registra o hit diretamente nos Bandits agrupados
                     if RegisterAttack and RegisterHit then
                         RegisterAttack:FireServer(0)
                         RegisterHit:FireServer(targets[1][2], targets)
@@ -228,26 +261,60 @@ task.spawn(function()
     end
 end)
 
--- Loop principal
+-- Loop principal (Alterna entre pegar a missão e farmar os Bandits)
 task.spawn(function()
     while _G.AutoFarmBandit do
         local character = LocalPlayer.Character
         local hrp = character and character:FindFirstChild("HumanoidRootPart")
         local hum = character and character:FindFirstChildOfClass("Humanoid")
 
-        if character and hum and hum.Health > 0 then
+        if character and hrp and hum and hum.Health > 0 then
             SetPhysicsState(character, true)
-            local targetMob = GetClosestBandit()
+            local questStatus = GetQuestStatus()
 
-            if targetMob and targetMob:FindFirstChild("HumanoidRootPart") then
-                local mobHrp = targetMob.HumanoidRootPart
-                local farmPos = mobHrp.Position + Vector3.new(0, Config.DistanceFarm, 0)
-                local farmCFrame = CFrame.new(farmPos) * CFrame.Angles(math.rad(-90), 0, 0)
+            if questStatus == "ActiveBandit" then
+                local targetMob = GetClosestBandit()
 
-                MoveToTarget(farmCFrame)
+                if targetMob and targetMob:FindFirstChild("HumanoidRootPart") then
+                    local mobHrp = targetMob.HumanoidRootPart
+                    local farmPos = mobHrp.Position + Vector3.new(0, Config.DistanceFarm, 0)
+                    local farmCFrame = CFrame.new(farmPos) * CFrame.Angles(math.rad(-90), 0, 0)
 
-                if (hrp.Position - mobHrp.Position).Magnitude <= 65 then
-                    BringMobs(targetMob)
+                    MoveToTarget(farmCFrame)
+
+                    if (hrp.Position - mobHrp.Position).Magnitude <= 65 then
+                        BringMobs(targetMob)
+                    end
+                end
+            else
+                -- Vai até o Bandit Quest Giver com Tween 200 e pega a missão sem spammar o servidor
+                local questCFrame = GetQuestGiverCFrame()
+                local distToNpc = (hrp.Position - questCFrame.Position).Magnitude
+
+                if distToNpc > 8 then
+                    MoveToTarget(questCFrame)
+                else
+                    if CurrentTween then
+                        CurrentTween:Cancel()
+                        CurrentTween = nil
+                    end
+                    LastTweenTargetPos = nil
+                    hrp.CFrame = questCFrame
+
+                    if CommF and (tick() - LastQuestAttempt) >= 1.5 then
+                        LastQuestAttempt = tick()
+                        task.spawn(function()
+                            if questStatus == "OtherQuest" then
+                                pcall(function()
+                                    CommF:InvokeServer("AbandonQuest")
+                                end)
+                                task.wait(0.2)
+                            end
+                            pcall(function()
+                                CommF:InvokeServer("StartQuest", Config.QuestName, Config.QuestLevel)
+                            end)
+                        end)
+                    end
                 end
             end
         else
