@@ -1,4 +1,4 @@
-_G.AutoFarmBandit = true
+_G.AutoFarmJungle = true
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
@@ -14,13 +14,10 @@ local RegisterAttack = NetFolder and NetFolder:FindFirstChild("RE/RegisterAttack
 local RegisterHit = NetFolder and NetFolder:FindFirstChild("RE/RegisterHit")
 
 local Config = {
-    TargetMob = "Bandit",
-    QuestName = "BanditQuest1",
-    QuestLevel = 1,
-    QuestNpcName = "Bandit Quest Giver",
-    DefaultQuestPos = Vector3.new(1059.37, 16.5, 1550.42),
-    BanditWaitPos = Vector3.new(1145, 28, 1635),
-    MaxLevel = 10,
+    QuestName = "JungleQuest",
+    QuestNpcName = "Adventurer",
+    DefaultQuestPos = Vector3.new(-1598.09, 36.85, 153.38),
+    MaxLevel = 30,
     TweenSpeed = 200,
     DistanceFarm = 8,
     BringMobRadius = 250,
@@ -30,15 +27,15 @@ local Config = {
 local CurrentTween = nil
 local LastTweenTargetPos = nil
 
--- Controle de estado da missão (independente de falha na GUI)
 local QuestInProgress = false
+local ActiveTask = nil
 local MobsKilledInQuest = 0
 local CountedDeadMobs = setmetatable({}, { __mode = "k" })
 
 local function GetLevel()
     local data = LocalPlayer:FindFirstChild("Data")
     local level = data and data:FindFirstChild("Level")
-    return level and level.Value or 1
+    return level and level.Value or 10
 end
 
 local function CancelTween()
@@ -47,6 +44,50 @@ local function CancelTween()
         CurrentTween = nil
     end
     LastTweenTargetPos = nil
+end
+
+local function IsMobAlive(mobName)
+    local enemies = workspace:FindFirstChild("Enemies")
+    if not enemies then return false end
+
+    for _, mob in ipairs(enemies:GetChildren()) do
+        if mob.Name == mobName then
+            local hum = mob:FindFirstChildOfClass("Humanoid")
+            local hrp = mob:FindFirstChild("HumanoidRootPart")
+            if hum and hrp and hum.Health > 0 then
+                return true
+            end
+        end
+    end
+
+    return false
+end
+
+local function GetJungleTaskForLevel()
+    local level = GetLevel()
+
+    if level < 15 then
+        return {
+            TargetMob = "Monkey",
+            QuestLevel = 1,
+            RequiredKills = 6,
+            WaitPos = Vector3.new(-1448, 35, 115)
+        }
+    elseif level >= 20 and IsMobAlive("The Gorilla King") then
+        return {
+            TargetMob = "The Gorilla King",
+            QuestLevel = 3,
+            RequiredKills = 1,
+            WaitPos = Vector3.new(-1135, 45, -485)
+        }
+    else
+        return {
+            TargetMob = "Gorilla",
+            QuestLevel = 2,
+            RequiredKills = 8,
+            WaitPos = Vector3.new(-1135, 45, -485)
+        }
+    end
 end
 
 local function SetPhysicsState(character, enabled)
@@ -80,11 +121,10 @@ local function SetPhysicsState(character, enabled)
     end
 end
 
--- Lê qualquer indicador ativo de missão na tela (0/5 a 4/5) ignorando caixas de diálogo
-local function CheckGuiQuestProgress()
+local function CheckGuiQuestProgress(taskInfo)
     local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
     local main = playerGui and playerGui:FindFirstChild("Main")
-    if not main then return "Unknown" end
+    if not main or not taskInfo then return "Unknown" end
 
     for _, obj in ipairs(main:GetDescendants()) do
         if obj:IsA("TextLabel") and obj.Visible then
@@ -101,10 +141,24 @@ local function CheckGuiQuestProgress()
 
             if not isDialogue then
                 local txt = string.lower((obj.Text or "") .. " " .. (obj.ContentText or ""))
-                if string.find(txt, "bandit") or string.find(txt, "bandido") then
-                    if string.find(txt, "5/5") then
+                local matchesMob = false
+
+                if taskInfo.TargetMob == "Monkey" then
+                    matchesMob = string.find(txt, "monkey") or string.find(txt, "macaco") or string.find(txt, "mono")
+                elseif taskInfo.TargetMob == "The Gorilla King" then
+                    matchesMob = string.find(txt, "gorilla king") or string.find(txt, "rei gorila") or string.find(txt, "rey gorila")
+                elseif taskInfo.TargetMob == "Gorilla" then
+                    matchesMob = (string.find(txt, "gorilla") or string.find(txt, "gorila"))
+                        and not string.find(txt, "king")
+                        and not string.find(txt, "rei")
+                        and not string.find(txt, "rey")
+                end
+
+                if matchesMob then
+                    local donePattern = taskInfo.RequiredKills .. "/" .. taskInfo.RequiredKills
+                    if string.find(txt, donePattern) then
                         return "Completed"
-                    elseif string.find(txt, "[0-4]/5") then
+                    elseif string.find(txt, "[0-" .. (taskInfo.RequiredKills - 1) .. "]/" .. taskInfo.RequiredKills) then
                         return "Active"
                     end
                 end
@@ -145,12 +199,12 @@ local function EquipWeapon()
     return nil
 end
 
-local function UpdateKillCounter()
+local function UpdateKillCounter(targetMobName)
     local enemies = workspace:FindFirstChild("Enemies")
     if not enemies then return end
 
     for _, mob in ipairs(enemies:GetChildren()) do
-        if mob.Name == Config.TargetMob and not CountedDeadMobs[mob] then
+        if mob.Name == targetMobName and not CountedDeadMobs[mob] then
             local mobHum = mob:FindFirstChildOfClass("Humanoid")
             if mobHum and mobHum.Health <= 0 then
                 CountedDeadMobs[mob] = true
@@ -162,7 +216,7 @@ local function UpdateKillCounter()
     end
 end
 
-local function GetClosestBandit()
+local function GetClosestTargetMob(targetMobName)
     local character = LocalPlayer.Character
     local hrp = character and character:FindFirstChild("HumanoidRootPart")
     local enemies = workspace:FindFirstChild("Enemies")
@@ -172,7 +226,7 @@ local function GetClosestBandit()
     local shortestDist = math.huge
 
     for _, mob in ipairs(enemies:GetChildren()) do
-        if mob.Name == Config.TargetMob then
+        if mob.Name == targetMobName then
             local mobHum = mob:FindFirstChildOfClass("Humanoid")
             local mobHrp = mob:FindFirstChild("HumanoidRootPart")
             if mobHum and mobHrp and mobHum.Health > 0 then
@@ -188,7 +242,7 @@ local function GetClosestBandit()
     return closestMob
 end
 
-local function BringMobs(anchorMob)
+local function BringMobs(anchorMob, targetMobName)
     local enemies = workspace:FindFirstChild("Enemies")
     local anchorHrp = anchorMob and anchorMob:FindFirstChild("HumanoidRootPart")
     if not enemies or not anchorHrp then return end
@@ -201,7 +255,7 @@ local function BringMobs(anchorMob)
     anchorHrp.AssemblyLinearVelocity = Vector3.zero
 
     for _, mob in ipairs(enemies:GetChildren()) do
-        if mob.Name == Config.TargetMob then
+        if mob.Name == targetMobName then
             local mobHum = mob:FindFirstChildOfClass("Humanoid")
             local mobHrp = mob:FindFirstChild("HumanoidRootPart")
             if mobHum and mobHrp and mobHum.Health > 0 then
@@ -227,15 +281,15 @@ local function BringMobs(anchorMob)
     end
 end
 
-local function GetTargetsInRange(maxRange)
+local function GetTargetsInRange(targetMobName, maxRange)
     local character = LocalPlayer.Character
     local hrp = character and character:FindFirstChild("HumanoidRootPart")
     local enemies = workspace:FindFirstChild("Enemies")
     local targets = {}
-    if not hrp or not enemies then return targets end
+    if not hrp or not enemies or not targetMobName then return targets end
 
     for _, mob in ipairs(enemies:GetChildren()) do
-        if mob.Name == Config.TargetMob then
+        if mob.Name == targetMobName then
             local mobHum = mob:FindFirstChildOfClass("Humanoid")
             local mobHrp = mob:FindFirstChild("HumanoidRootPart")
             if mobHum and mobHrp and mobHum.Health > 0 then
@@ -281,20 +335,22 @@ local function MoveToCFrame(targetCFrame, snapAtEnd)
     CurrentTween:Play()
 end
 
--- Se já houver missão ativa ao executar o script, inicia direto no modo farm
-if CheckGuiQuestProgress() == "Active" then
+-- Se já houver missão da Jungle ativa ao executar o script, inicia direto no modo farm
+local initialTask = GetJungleTaskForLevel()
+if CheckGuiQuestProgress(initialTask) == "Active" then
+    ActiveTask = initialTask
     QuestInProgress = true
 end
 
 -- Thread do Fast Attack
 task.spawn(function()
-    while _G.AutoFarmBandit and GetLevel() < Config.MaxLevel do
+    while _G.AutoFarmJungle and GetLevel() < Config.MaxLevel do
         local character = LocalPlayer.Character
         local hum = character and character:FindFirstChildOfClass("Humanoid")
 
-        if character and hum and hum.Health > 0 and QuestInProgress then
+        if character and hum and hum.Health > 0 and QuestInProgress and ActiveTask then
             local tool = EquipWeapon()
-            local targets = GetTargetsInRange(25)
+            local targets = GetTargetsInRange(ActiveTask.TargetMob, 25)
 
             if tool and #targets > 0 then
                 pcall(function()
@@ -318,9 +374,9 @@ task.spawn(function()
     end
 end)
 
--- Loop principal sequencial (Ir ao NPC -> Aceitar Missão -> Farmar 5 Bandits -> Repetir até Lv. 10)
+-- Loop principal sequencial (Lv. 10 ao Lv. 30 na Jungle)
 task.spawn(function()
-    while _G.AutoFarmBandit and GetLevel() < Config.MaxLevel do
+    while _G.AutoFarmJungle and GetLevel() < Config.MaxLevel do
         local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
         local hrp = character:WaitForChild("HumanoidRootPart")
         local hum = character:WaitForChild("Humanoid")
@@ -329,7 +385,7 @@ task.spawn(function()
             CancelTween()
             task.wait(0.5)
         elseif not QuestInProgress then
-            -- ETAPA 1: Deslocar até o NPC
+            local nextTask = GetJungleTaskForLevel()
             local npcPos = GetQuestNpcPos()
             local distToNpc = (hrp.Position - npcPos).Magnitude
 
@@ -338,7 +394,6 @@ task.spawn(function()
                 MoveToCFrame(CFrame.new(npcPos), false)
                 RunService.Heartbeat:Wait()
             else
-                -- Chegou no NPC: pousa no chão normalmente para o servidor aceitar o StartQuest
                 CancelTween()
                 SetPhysicsState(character, false)
                 hrp.AssemblyLinearVelocity = Vector3.zero
@@ -350,26 +405,28 @@ task.spawn(function()
                     end)
                     task.wait(0.15)
                     pcall(function()
-                        CommF:InvokeServer("StartQuest", Config.QuestName, Config.QuestLevel)
+                        CommF:InvokeServer("StartQuest", Config.QuestName, nextTask.QuestLevel)
                     end)
                     task.wait(0.3)
                 end
 
+                ActiveTask = nextTask
                 MobsKilledInQuest = 0
                 QuestInProgress = true
             end
         else
-            -- ETAPA 2: Farmar os 5 Bandits até concluir a missão
-            UpdateKillCounter()
-            local guiState = CheckGuiQuestProgress()
+            UpdateKillCounter(ActiveTask.TargetMob)
+            local guiState = CheckGuiQuestProgress(ActiveTask)
+            local bossDisappeared = (ActiveTask.TargetMob == "The Gorilla King") and not IsMobAlive("The Gorilla King")
 
-            if guiState == "Completed" or MobsKilledInQuest >= 5 then
+            if guiState == "Completed" or MobsKilledInQuest >= ActiveTask.RequiredKills or bossDisappeared then
                 QuestInProgress = false
+                ActiveTask = nil
                 MobsKilledInQuest = 0
                 CancelTween()
             else
                 SetPhysicsState(character, true)
-                local targetMob = GetClosestBandit()
+                local targetMob = GetClosestTargetMob(ActiveTask.TargetMob)
 
                 if targetMob and targetMob:FindFirstChild("HumanoidRootPart") then
                     local mobHrp = targetMob.HumanoidRootPart
@@ -379,10 +436,10 @@ task.spawn(function()
                     MoveToCFrame(farmCFrame, true)
 
                     if (hrp.Position - mobHrp.Position).Magnitude <= 65 then
-                        BringMobs(targetMob)
+                        BringMobs(targetMob, ActiveTask.TargetMob)
                     end
                 else
-                    MoveToCFrame(CFrame.new(Config.BanditWaitPos), false)
+                    MoveToCFrame(CFrame.new(ActiveTask.WaitPos), false)
                 end
 
                 RunService.Heartbeat:Wait()
@@ -390,7 +447,7 @@ task.spawn(function()
         end
     end
 
-    _G.AutoFarmBandit = false
+    _G.AutoFarmJungle = false
     CancelTween()
     SetPhysicsState(LocalPlayer.Character, false)
 end)
