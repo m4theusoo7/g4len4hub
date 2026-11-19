@@ -1,5 +1,14 @@
--- Configuração Principal
+-- Controle de Sessão (encerra loops e conexões de execuções anteriores no Delta)
+local SessionId = tick()
+_G.OmegaSessionId = SessionId
 _G.AutoFarmPirateStarter = true
+
+if _G.OmegaConnections then
+    for _, conn in ipairs(_G.OmegaConnections) do
+        pcall(function() conn:Disconnect() end)
+    end
+end
+_G.OmegaConnections = {}
 
 local Settings = {
     MaxLevel = 10,
@@ -13,103 +22,135 @@ local Settings = {
     QuestLevel = 1,
     QuestNPCName = "Bandit Quest Giver",
     MobName = "Bandit",
-    QuestNPC_Fallback = CFrame.new(1059.37, 16.5, 1550.42),
-    MobSpawn_CFrame = CFrame.new(1145.0, 17.0, 1634.0)
+    QuestNPC_Fallback = Vector3.new(1059.37, 16.5, 1550.42),
+    MobSpawn_Pos = Vector3.new(1145.0, 17.0, 1634.0)
 }
 
 -- Serviços
 local Players = game:GetService("Players")
-local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local VirtualUser = game:GetService("VirtualUser")
 
 local LocalPlayer = Players.LocalPlayer
-local CurrentTween = nil
+
+-- Estados de controle do avatar
+local FlyActive = false
+local GoalPos = nil
+local LookDown = false
 
 -- Anti-AFK
-LocalPlayer.Idled:Connect(function()
+table.insert(_G.OmegaConnections, LocalPlayer.Idled:Connect(function()
     VirtualUser:CaptureController()
     VirtualUser:ClickButton2(Vector2.new())
-end)
+end))
 
--- Cancela o Tween ativo
-local function StopTween()
-    if CurrentTween then
-        CurrentTween:Cancel()
-        CurrentTween = nil
-    end
-end
+-- Deixa o avatar 100% livre (remove forças de voo, Noclip e PlatformStand)
+local function ReleaseAvatar()
+    FlyActive = false
+    GoalPos = nil
+    LookDown = false
 
--- Noclip + Anti-Gravidade (impede o avatar de afundar pelo chão)
-RunService.Stepped:Connect(function()
     local char = LocalPlayer.Character
     if not char then return end
 
     local hum = char:FindFirstChildOfClass("Humanoid")
     local hrp = char:FindFirstChild("HumanoidRootPart")
 
-    if _G.AutoFarmPirateStarter then
-        for _, part in ipairs(char:GetDescendants()) do
-            if part:IsA("BasePart") and part.CanCollide then
-                part.CanCollide = false
-            end
-        end
+    if hum then
+        hum.PlatformStand = false
+    end
 
-        if hum then
-            hum.PlatformStand = true
-        end
+    if hrp then
+        local bv = hrp:FindFirstChild("OmegaFlyBV")
+        if bv then bv:Destroy() end
+        local bg = hrp:FindFirstChild("OmegaFlyBG")
+        if bg then bg:Destroy() end
+        hrp.AssemblyLinearVelocity = Vector3.zero
+        hrp.AssemblyAngularVelocity = Vector3.zero
+    end
 
-        if hrp then
-            hrp.AssemblyLinearVelocity = Vector3.zero
-            hrp.AssemblyAngularVelocity = Vector3.zero
-
-            local bv = hrp:FindFirstChild("OmegaAntiGravity")
-            if not bv then
-                bv = Instance.new("BodyVelocity")
-                bv.Name = "OmegaAntiGravity"
-                bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-                bv.Velocity = Vector3.zero
-                bv.Parent = hrp
-            else
-                bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-                bv.Velocity = Vector3.zero
-            end
-        end
-    else
-        if hum and hum.PlatformStand then
-            hum.PlatformStand = false
-        end
-        if hrp then
-            local bv = hrp:FindFirstChild("OmegaAntiGravity")
-            if bv then
-                bv:Destroy()
-            end
+    for _, name in ipairs({"HumanoidRootPart", "Torso", "UpperTorso", "LowerTorso"}) do
+        local part = char:FindFirstChild(name)
+        if part and part:IsA("BasePart") then
+            part.CanCollide = true
         end
     end
-end)
+end
 
--- Movimentação suave com Tween 200
-local function MoveTo(targetCFrame)
+-- Noclip ativo APENAS enquanto FlyActive estiver ligado
+table.insert(_G.OmegaConnections, RunService.Stepped:Connect(function()
+    if _G.OmegaSessionId ~= SessionId or not _G.AutoFarmPirateStarter then return end
+    if not FlyActive then return end
+
+    local char = LocalPlayer.Character
+    if not char then return end
+
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if hum and not hum.PlatformStand then
+        hum.PlatformStand = true
+    end
+
+    for _, part in ipairs(char:GetDescendants()) do
+        if part:IsA("BasePart") and part.CanCollide then
+            part.CanCollide = false
+        end
+    end
+end))
+
+-- Deslocamento suave a 200 studs/s apenas quando FlyActive = true
+table.insert(_G.OmegaConnections, RunService.Heartbeat:Connect(function(dt)
+    if _G.OmegaSessionId ~= SessionId or not _G.AutoFarmPirateStarter then
+        ReleaseAvatar()
+        return
+    end
+
+    if not FlyActive or not GoalPos then
+        return
+    end
+
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
 
-    local distance = (hrp.Position - targetCFrame.Position).Magnitude
-
-    -- Curta distância: posiciona direto sem reiniciar Tween
-    if distance <= 25 then
-        StopTween()
-        hrp.CFrame = targetCFrame
-        return
+    local bv = hrp:FindFirstChild("OmegaFlyBV")
+    if not bv then
+        bv = Instance.new("BodyVelocity")
+        bv.Name = "OmegaFlyBV"
+        bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+        bv.P = 9e9
+        bv.Velocity = Vector3.zero
+        bv.Parent = hrp
+    else
+        bv.Velocity = Vector3.zero
     end
 
-    StopTween()
-    local duration = distance / Settings.TweenSpeed
-    local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear)
-    CurrentTween = TweenService:Create(hrp, tweenInfo, { CFrame = targetCFrame })
-    CurrentTween:Play()
-end
+    local bg = hrp:FindFirstChild("OmegaFlyBG")
+    if not bg then
+        bg = Instance.new("BodyGyro")
+        bg.Name = "OmegaFlyBG"
+        bg.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+        bg.P = 9e9
+        bg.Parent = hrp
+    end
+
+    hrp.AssemblyLinearVelocity = Vector3.zero
+    hrp.AssemblyAngularVelocity = Vector3.zero
+
+    local currentPos = hrp.Position
+    local diff = GoalPos - currentPos
+    local dist = diff.Magnitude
+    local step = Settings.TweenSpeed * dt
+
+    local nextPos = (dist <= step or dist <= 2) and GoalPos or (currentPos + (diff.Unit * step))
+    local targetCF = CFrame.new(nextPos)
+    if LookDown then
+        targetCF = targetCF * CFrame.Angles(math.rad(-90), 0, 0)
+    end
+
+    hrp.CFrame = targetCF
+    bg.CFrame = targetCF
+end))
 
 -- Equipa Combat / Melee automaticamente
 local function EquipMelee()
@@ -134,7 +175,7 @@ local function EquipMelee()
     return equipped
 end
 
--- Bring Mob ancorado acima do solo (evita que os mobs caiam no limbo)
+-- Bring Mob ancorado acima do solo
 local function BringEnemies(mainTarget)
     if not Settings.BringMob or not mainTarget then return end
     local mainHRP = mainTarget:FindFirstChild("HumanoidRootPart")
@@ -144,7 +185,6 @@ local function BringEnemies(mainTarget)
         sethiddenproperty(LocalPlayer, "SimulationRadius", math.huge)
     end)
 
-    -- Garante que a âncora nunca fique abaixo do nível do chão da ilha
     local safeY = math.max(mainHRP.Position.Y, 16.5)
     local anchorCFrame = CFrame.new(mainHRP.Position.X, safeY, mainHRP.Position.Z)
     mainHRP.CFrame = anchorCFrame
@@ -170,7 +210,7 @@ local function BringEnemies(mainTarget)
     end
 end
 
--- Busca apenas Bandits vivos que estejam acima do chão (Y > 5)
+-- Busca o Bandit vivo mais próximo acima do chão
 local function GetClosestBandit()
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
@@ -197,8 +237,8 @@ local function GetClosestBandit()
     return closestMob
 end
 
--- Localiza a frente do NPC da missão
-local function GetQuestNPCCFrame()
+-- Retorna posição na frente do Bandit Quest Giver
+local function GetQuestNPCPos()
     local wsNPCs = workspace:FindFirstChild("NPCs")
     local rsNPCs = ReplicatedStorage:FindFirstChild("NPCs")
     local questNPC = (wsNPCs and wsNPCs:FindFirstChild(Settings.QuestNPCName))
@@ -206,56 +246,23 @@ local function GetQuestNPCCFrame()
 
     local npcHRP = questNPC and questNPC:FindFirstChild("HumanoidRootPart")
     if npcHRP then
-        return npcHRP.CFrame * CFrame.new(0, 0, -4)
+        return (npcHRP.CFrame * CFrame.new(0, 0, -4)).Position
     end
     return Settings.QuestNPC_Fallback
 end
 
--- Pega a missão e aguarda confirmação visual
-local function EnsureQuest()
+-- Verifica se a missão já está ativa na tela
+local function HasActiveQuest()
     local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
     local mainGui = playerGui and playerGui:FindFirstChild("Main")
     local questFrame = mainGui and mainGui:FindFirstChild("Quest")
-
-    if questFrame and questFrame.Visible then
-        return true
-    end
-
-    local char = LocalPlayer.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return false end
-
-    local npcCFrame = GetQuestNPCCFrame()
-    local distToNPC = (hrp.Position - npcCFrame.Position).Magnitude
-
-    if distToNPC > 6 then
-        MoveTo(npcCFrame)
-        return false
-    end
-
-    StopTween()
-    hrp.CFrame = npcCFrame
-    task.wait(0.15)
-
-    pcall(function()
-        ReplicatedStorage.Remotes.CommF_:InvokeServer("StartQuest", Settings.QuestName, Settings.QuestLevel)
-    end)
-
-    for _ = 1, 20 do
-        if questFrame and questFrame.Visible then
-            task.wait(0.15)
-            return true
-        end
-        task.wait(0.1)
-    end
-
-    return false
+    return questFrame and questFrame.Visible == true
 end
 
--- Loop separado para Fast Attack
+-- Loop separado para Fast Attack (só ataca quando estiver na etapa de farm)
 task.spawn(function()
-    while _G.AutoFarmPirateStarter do
-        if Settings.FastAttack then
+    while _G.AutoFarmPirateStarter and _G.OmegaSessionId == SessionId do
+        if Settings.FastAttack and HasActiveQuest() then
             pcall(function()
                 local data = LocalPlayer:FindFirstChild("Data")
                 if data and data.Level.Value >= Settings.MaxLevel then return end
@@ -281,28 +288,51 @@ task.spawn(function()
     end
 end)
 
--- Loop Principal de Farm (Level 1 ao 10)
+-- Loop Principal em Etapas (Ir ao NPC -> Soltar Avatar e Pegar Missão -> Farmar)
 task.spawn(function()
-    while _G.AutoFarmPirateStarter do
+    while _G.AutoFarmPirateStarter and _G.OmegaSessionId == SessionId do
         pcall(function()
             local data = LocalPlayer:FindFirstChild("Data")
             if not data then return end
 
+            -- Finaliza ao atingir Level 10 e deixa o avatar livre
             if data.Level.Value >= Settings.MaxLevel then
                 _G.AutoFarmPirateStarter = false
-                StopTween()
-                local char = LocalPlayer.Character
-                local hum = char and char:FindFirstChildOfClass("Humanoid")
-                local hrp = char and char:FindFirstChild("HumanoidRootPart")
-                if hum then hum.PlatformStand = false end
-                if hrp and hrp:FindFirstChild("OmegaAntiGravity") then
-                    hrp.OmegaAntiGravity:Destroy()
-                end
-                print("[OmegaCore] Level 10 atingido! Auto-farm finalizado.")
+                ReleaseAvatar()
+                print("[OmegaCore] Level 10 atingido! Avatar liberado.")
                 return
             end
 
-            if EnsureQuest() then
+            local char = LocalPlayer.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            if not hrp then return end
+
+            if not HasActiveQuest() then
+                -- ETAPA 1: Leva o avatar até a frente do NPC
+                local npcPos = GetQuestNPCPos()
+                local distToNPC = (hrp.Position - npcPos).Magnitude
+
+                if distToNPC > 6 then
+                    LookDown = false
+                    GoalPos = npcPos
+                    FlyActive = true
+                else
+                    -- ETAPA 2: Chegou no NPC -> Solta o avatar completamente e pega a missão
+                    ReleaseAvatar()
+                    task.wait(0.15)
+
+                    pcall(function()
+                        ReplicatedStorage.Remotes.CommF_:InvokeServer("StartQuest", Settings.QuestName, Settings.QuestLevel)
+                    end)
+
+                    -- Aguarda até 2s a missão aparecer com o avatar livre
+                    for _ = 1, 20 do
+                        if HasActiveQuest() then break end
+                        task.wait(0.1)
+                    end
+                end
+            else
+                -- ETAPA 3: Missão ativa -> Parte para o farm dos Bandits
                 local target = GetClosestBandit()
                 if target then
                     local targetHRP = target:FindFirstChild("HumanoidRootPart")
@@ -310,12 +340,15 @@ task.spawn(function()
                         EquipMelee()
                         BringEnemies(target)
                         local safeY = math.max(targetHRP.Position.Y, 16.5)
-                        local farmPos = Vector3.new(targetHRP.Position.X, safeY + Settings.DistanceFarm, targetHRP.Position.Z)
-                        local farmCFrame = CFrame.new(farmPos) * CFrame.Angles(math.rad(-90), 0, 0)
-                        MoveTo(farmCFrame)
+                        GoalPos = Vector3.new(targetHRP.Position.X, safeY + Settings.DistanceFarm, targetHRP.Position.Z)
+                        LookDown = true
+                        FlyActive = true
                     end
                 else
-                    MoveTo(Settings.MobSpawn_CFrame * CFrame.new(0, Settings.DistanceFarm, 0))
+                    -- Aguarda respawn 20 studs acima do centro dos Bandits
+                    GoalPos = Settings.MobSpawn_Pos + Vector3.new(0, Settings.DistanceFarm, 0)
+                    LookDown = false
+                    FlyActive = true
                 end
             end
         end)
