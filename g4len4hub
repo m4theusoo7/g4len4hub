@@ -55,14 +55,14 @@ local function GetSkylandsTaskForLevel()
             TargetMob = "Sky Bandit",
             QuestLevel = 1,
             RequiredKills = 7,
-            WaitPos = Vector3.new(-4970.0, 722.0, -2622.0)
+            WaitPos = Vector3.new(-4981.14, 295.0, -2830.67)
         }
     else
         return {
             TargetMob = "Dark Master",
             QuestLevel = 2,
             RequiredKills = 8,
-            WaitPos = Vector3.new(-5259.84, 575.0, -2229.04)
+            WaitPos = Vector3.new(-5259.84, 395.0, -2229.04)
         }
     end
 end
