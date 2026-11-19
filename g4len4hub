@@ -1,100 +1,497 @@
--- OmegaCore | Módulo: Comprar Dark Step ($150,000 Beli)
+_G.AutoFarmFrozenVillage = true
+
 local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local LocalPlayer = Players.LocalPlayer
-local DarkStepCost = 150000
+local Remotes = ReplicatedStorage:FindFirstChild("Remotes")
+local CommF = Remotes and Remotes:FindFirstChild("CommF_")
+local NetFolder = ReplicatedStorage:FindFirstChild("Modules") and ReplicatedStorage.Modules:FindFirstChild("Net")
+local RegisterAttack = NetFolder and NetFolder:FindFirstChild("RE/RegisterAttack")
+local RegisterHit = NetFolder and NetFolder:FindFirstChild("RE/RegisterHit")
 
--- Coordenada do NPC Dark Step Teacher na Pirate Village (sala secreta atrás da parede)
-local TeacherCFrame = CFrame.new(-982.5, 14.5, 3982.8)
-local TweenSpeed = 185
+local Config = {
+    QuestName = "SnowQuest",
+    QuestNpcName = "Ice Quest Giver",
+    DefaultQuestPos = Vector3.new(1389.8, 90.5, -1298.6),
+    MaxLevel = 120,
+    TweenSpeed = 200,
+    DistanceFarm = 8,
+    BringMobRadius = 250,
+    AttackDelay = 0.08
+}
 
--- Deslocamento seguro até o NPC (caso prefira ir fisicamente ou para validar proximidade)
-local function moveToTeacher()
-    local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-    local hrp = char:WaitForChild("HumanoidRootPart")
-    local humanoid = char:WaitForChild("Humanoid")
-    if not hrp or not humanoid then return end
+local CurrentTween = nil
+local LastTweenTargetPos = nil
+local NoClipConnection = nil
 
-    local isMoving = true
-    humanoid.PlatformStand = true
+local QuestInProgress = false
+local ActiveTask = nil
+local MobsKilledInQuest = 0
+local CountedDeadMobs = setmetatable({}, { __mode = "k" })
 
-    local bodyVel = Instance.new("BodyVelocity")
-    bodyVel.Name = "OmegaCoreStabilizer"
-    bodyVel.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-    bodyVel.Velocity = Vector3.zero
-    bodyVel.Parent = hrp
+local function GetLevel()
+    local data = LocalPlayer:FindFirstChild("Data")
+    local level = data and data:FindFirstChild("Level")
+    return level and level.Value or 90
+end
 
-    local noclipConn
-    noclipConn = RunService.Stepped:Connect(function()
-        if not isMoving or not char or not char.Parent then
-            if noclipConn then noclipConn:Disconnect() end
-            return
+local function CancelTween()
+    if CurrentTween then
+        CurrentTween:Cancel()
+        CurrentTween = nil
+    end
+    LastTweenTargetPos = nil
+end
+
+local function IsBossAvailable(bossName)
+    local enemies = workspace:FindFirstChild("Enemies")
+    if enemies then
+        for _, mob in ipairs(enemies:GetChildren()) do
+            if mob.Name == bossName then
+                local hum = mob:FindFirstChildOfClass("Humanoid")
+                if hum and hum.Health > 0 then
+                    return true
+                end
+            end
         end
-        for _, part in ipairs(char:GetDescendants()) do
+    end
+
+    local storedBoss = ReplicatedStorage:FindFirstChild(bossName)
+    if storedBoss then
+        local hum = storedBoss:FindFirstChildOfClass("Humanoid")
+        if not hum or hum.Health > 0 then
+            return true
+        end
+    end
+
+    return false
+end
+
+local function GetFrozenVillageTaskForLevel()
+    local level = GetLevel()
+
+    if level < 100 then
+        return {
+            TargetMob = "Snow Bandit",
+            QuestLevel = 1,
+            RequiredKills = 7,
+            WaitPos = Vector3.new(1354, 115, -1392)
+        }
+    elseif level >= 105 and IsBossAvailable("Yeti") then
+        return {
+            TargetMob = "Yeti",
+            QuestLevel = 3,
+            RequiredKills = 1,
+            WaitPos = Vector3.new(1218, 145, -1488)
+        }
+    else
+        return {
+            TargetMob = "Snowman",
+            QuestLevel = 2,
+            RequiredKills = 8,
+            WaitPos = Vector3.new(1201, 150, -1550)
+        }
+    end
+end
+
+local function SetPhysicsState(character, enabled)
+    if not character then return end
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    local hum = character:FindFirstChildOfClass("Humanoid")
+
+    if hum and enabled then
+        hum.Sit = false
+    end
+
+    if hrp then
+        local bv = hrp:FindFirstChild("FarmBodyVelocity")
+        if enabled then
+            if not bv then
+                bv = Instance.new("BodyVelocity")
+                bv.Name = "FarmBodyVelocity"
+                bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+                bv.Velocity = Vector3.zero
+                bv.Parent = hrp
+            end
+        elseif bv then
+            bv:Destroy()
+        end
+    end
+
+    for _, part in ipairs(character:GetDescendants()) do
+        if part:IsA("BasePart") then
+            part.CanCollide = not enabled
+        end
+    end
+end
+
+NoClipConnection = RunService.Stepped:Connect(function()
+    if not _G.AutoFarmFrozenVillage then
+        if NoClipConnection then
+            NoClipConnection:Disconnect()
+            NoClipConnection = nil
+        end
+        return
+    end
+
+    local character = LocalPlayer.Character
+    if character then
+        for _, part in ipairs(character:GetDescendants()) do
             if part:IsA("BasePart") and part.CanCollide then
                 part.CanCollide = false
             end
         end
-    end)
+    end
+end)
 
-    hrp.CFrame = hrp.CFrame + Vector3.new(0, 15, 0)
-    local distance = (hrp.Position - TeacherCFrame.Position).Magnitude
-    local tween = TweenService:Create(hrp, TweenInfo.new(distance / TweenSpeed, Enum.EasingStyle.Linear), {CFrame = TeacherCFrame})
-    tween:Play()
-    tween.Completed:Wait()
-
-    isMoving = false
-    if noclipConn then noclipConn:Disconnect() end
-    if bodyVel then bodyVel:Destroy() end
-    humanoid.PlatformStand = false
-    hrp.CFrame = TeacherCFrame
-    hrp.AssemblyLinearVelocity = Vector3.zero
+local function HasAnyActiveQuest()
+    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+    local main = playerGui and playerGui:FindFirstChild("Main")
+    local questGui = main and main:FindFirstChild("Quest")
+    return questGui and questGui.Visible or false
 end
 
-local function buyDarkStep()
-    local data = LocalPlayer:FindFirstChild("Data")
-    local beli = data and data:FindFirstChild("Beli")
+local function CheckGuiQuestProgress(taskInfo)
+    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+    local main = playerGui and playerGui:FindFirstChild("Main")
+    if not main or not taskInfo then return "Unknown" end
 
-    if not beli or beli.Value < DarkStepCost then
-        local currentBeli = beli and beli.Value or 0
-        warn(string.format("[OmegaCore] Beli insuficiente para Dark Step! Atual: $%d | Necessário: $%d", currentBeli, DarkStepCost))
-        return false
+    for _, obj in ipairs(main:GetDescendants()) do
+        if obj:IsA("TextLabel") and obj.Visible then
+            local isDialogue = false
+            local parent = obj.Parent
+            while parent and parent ~= main do
+                local pName = string.lower(parent.Name)
+                if string.find(pName, "dialogue") or string.find(pName, "questc") then
+                    isDialogue = true
+                    break
+                end
+                parent = parent.Parent
+            end
+
+            if not isDialogue then
+                local txt = string.lower((obj.Text or "") .. " " .. (obj.ContentText or ""))
+                local matchesMob = false
+
+                if taskInfo.TargetMob == "Snow Bandit" then
+                    matchesMob = string.find(txt, "bandit") or string.find(txt, "bandido")
+                elseif taskInfo.TargetMob == "Snowman" then
+                    matchesMob = string.find(txt, "snowman") or string.find(txt, "boneco")
+                elseif taskInfo.TargetMob == "Yeti" then
+                    matchesMob = string.find(txt, "yeti")
+                end
+
+                if matchesMob then
+                    local donePattern = taskInfo.RequiredKills .. "/" .. taskInfo.RequiredKills
+                    if string.find(txt, donePattern) then
+                        return "Completed"
+                    elseif string.find(txt, "[0-" .. (taskInfo.RequiredKills - 1) .. "]/" .. taskInfo.RequiredKills) then
+                        return "Active"
+                    end
+                end
+            end
+        end
     end
 
-    -- Verifica se já possui o Dark Step equipado ou na mochila
-    local char = LocalPlayer.Character
+    return "Unknown"
+end
+
+local function GetQuestNpcPos()
+    local npcs = workspace:FindFirstChild("NPCs")
+    local npc = npcs and npcs:FindFirstChild(Config.QuestNpcName)
+    if npc and npc:FindFirstChild("HumanoidRootPart") then
+        return npc.HumanoidRootPart.Position + Vector3.new(0, 3, 3.5)
+    end
+    return Config.DefaultQuestPos
+end
+
+local function EquipWeapon()
+    local character = LocalPlayer.Character
     local backpack = LocalPlayer:FindFirstChild("Backpack")
-    if (char and char:FindFirstChild("Dark Step")) or (backpack and backpack:FindFirstChild("Dark Step")) then
-        print("[OmegaCore] Dark Step já está adquirido!")
-        return true
+    local hum = character and character:FindFirstChildOfClass("Humanoid")
+    if not character or not backpack or not hum then return nil end
+
+    local equipped = character:FindFirstChildOfClass("Tool")
+    if equipped and (equipped.ToolTip == "Melee" or equipped.ToolTip == "Sword" or equipped.Name == "Combat") then
+        return equipped
     end
 
-    -- Invoca o RemoteFunction oficial do Blox Fruits para comprar o estilo de luta
-    local remotes = ReplicatedStorage:FindFirstChild("Remotes")
-    local commF = remotes and remotes:FindFirstChild("CommF_")
+    for _, tool in ipairs(backpack:GetChildren()) do
+        if tool:IsA("Tool") and (tool.ToolTip == "Melee" or tool.ToolTip == "Sword" or tool.Name == "Combat") then
+            hum:EquipTool(tool)
+            return tool
+        end
+    end
 
-    if commF then
-        local success, result = pcall(function()
-            return commF:InvokeServer("BuyBlackLeg")
-        end)
+    return nil
+end
 
-        task.wait(0.3)
+local function UpdateKillCounter(targetMobName)
+    local enemies = workspace:FindFirstChild("Enemies")
+    if not enemies then return end
 
-        -- Confirma se o item entrou no inventário; se não, desloca até o NPC e tenta novamente
-        if (char and char:FindFirstChild("Dark Step")) or (backpack and backpack:FindFirstChild("Dark Step")) then
-            print("[OmegaCore] Dark Step comprado e equipado com sucesso!")
-            return true
-        else
-            print("[OmegaCore] Deslocando até o Dark Step Teacher para concluir a compra...")
-            moveToTeacher()
-            pcall(function()
-                commF:InvokeServer("BuyBlackLeg")
-            end)
+    for _, mob in ipairs(enemies:GetChildren()) do
+        if mob.Name == targetMobName and not CountedDeadMobs[mob] then
+            local mobHum = mob:FindFirstChildOfClass("Humanoid")
+            if mobHum and mobHum.Health <= 0 then
+                CountedDeadMobs[mob] = true
+                if QuestInProgress then
+                    MobsKilledInQuest += 1
+                end
+            end
         end
     end
 end
 
-buyDarkStep()
+local function GetClosestTargetMob(targetMobName)
+    local character = LocalPlayer.Character
+    local hrp = character and character:FindFirstChild("HumanoidRootPart")
+    local enemies = workspace:FindFirstChild("Enemies")
+    if not hrp or not enemies then return nil end
+
+    local closestMob = nil
+    local shortestDist = math.huge
+
+    for _, mob in ipairs(enemies:GetChildren()) do
+        if mob.Name == targetMobName then
+            local mobHum = mob:FindFirstChildOfClass("Humanoid")
+            local mobHrp = mob:FindFirstChild("HumanoidRootPart")
+            if mobHum and mobHrp and mobHum.Health > 0 then
+                local dist = (hrp.Position - mobHrp.Position).Magnitude
+                if dist < shortestDist then
+                    shortestDist = dist
+                    closestMob = mob
+                end
+            end
+        end
+    end
+
+    return closestMob
+end
+
+local function BringMobs(anchorMob, targetMobName)
+    local enemies = workspace:FindFirstChild("Enemies")
+    local anchorHrp = anchorMob and anchorMob:FindFirstChild("HumanoidRootPart")
+    if not enemies or not anchorHrp then return end
+
+    pcall(function()
+        sethiddenproperty(LocalPlayer, "SimulationRadius", math.huge)
+    end)
+
+    local anchorCFrame = anchorHrp.CFrame
+    anchorHrp.AssemblyLinearVelocity = Vector3.zero
+
+    for _, mob in ipairs(enemies:GetChildren()) do
+        if mob.Name == targetMobName then
+            local mobHum = mob:FindFirstChildOfClass("Humanoid")
+            local mobHrp = mob:FindFirstChild("HumanoidRootPart")
+            if mobHum and mobHrp and mobHum.Health > 0 then
+                local dist = (mobHrp.Position - anchorCFrame.Position).Magnitude
+                if dist <= Config.BringMobRadius then
+                    for _, part in ipairs(mob:GetDescendants()) do
+                        if part:IsA("BasePart") then
+                            part.CanCollide = false
+                        end
+                    end
+
+                    if mob ~= anchorMob then
+                        mobHrp.CFrame = anchorCFrame
+                    end
+
+                    mobHrp.AssemblyLinearVelocity = Vector3.zero
+                    mobHrp.AssemblyAngularVelocity = Vector3.zero
+                    mobHum.WalkSpeed = 0
+                    mobHum.JumpPower = 0
+                end
+            end
+        end
+    end
+end
+
+local function GetTargetsInRange(targetMobName, maxRange)
+    local character = LocalPlayer.Character
+    local hrp = character and character:FindFirstChild("HumanoidRootPart")
+    local enemies = workspace:FindFirstChild("Enemies")
+    local targets = {}
+    if not hrp or not enemies or not targetMobName then return targets end
+
+    for _, mob in ipairs(enemies:GetChildren()) do
+        if mob.Name == targetMobName then
+            local mobHum = mob:FindFirstChildOfClass("Humanoid")
+            local mobHrp = mob:FindFirstChild("HumanoidRootPart")
+            if mobHum and mobHrp and mobHum.Health > 0 then
+                if (hrp.Position - mobHrp.Position).Magnitude <= maxRange then
+                    table.insert(targets, { mob, mobHrp })
+                end
+            end
+        end
+    end
+
+    return targets
+end
+
+local function MoveToCFrame(targetCFrame, snapAtEnd)
+    local character = LocalPlayer.Character
+    local hrp = character and character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    local distance = (hrp.Position - targetCFrame.Position).Magnitude
+
+    if distance <= 3.5 then
+        CancelTween()
+        if snapAtEnd then
+            hrp.CFrame = targetCFrame
+        end
+        return
+    end
+
+    local targetMoved = not LastTweenTargetPos or (LastTweenTargetPos - targetCFrame.Position).Magnitude > 4
+
+    if CurrentTween and CurrentTween.PlaybackState == Enum.PlaybackState.Playing and not targetMoved then
+        return
+    end
+
+    if CurrentTween then
+        CurrentTween:Cancel()
+    end
+
+    LastTweenTargetPos = targetCFrame.Position
+    local duration = math.max(distance / Config.TweenSpeed, 0.05)
+    local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear)
+    CurrentTween = TweenService:Create(hrp, tweenInfo, { CFrame = targetCFrame })
+    CurrentTween:Play()
+end
+
+-- Se já houver missão da Frozen Village ativa ao executar o script, inicia direto no modo farm
+local initialTask = GetFrozenVillageTaskForLevel()
+if CheckGuiQuestProgress(initialTask) == "Active" then
+    ActiveTask = initialTask
+    QuestInProgress = true
+end
+
+-- Thread do Fast Attack
+task.spawn(function()
+    while _G.AutoFarmFrozenVillage and GetLevel() < Config.MaxLevel do
+        local character = LocalPlayer.Character
+        local hum = character and character:FindFirstChildOfClass("Humanoid")
+
+        if character and hum and hum.Health > 0 and QuestInProgress and ActiveTask then
+            local tool = EquipWeapon()
+            local targets = GetTargetsInRange(ActiveTask.TargetMob, 25)
+
+            if tool and #targets > 0 then
+                pcall(function()
+                    local cam = workspace.CurrentCamera
+                    local cx = cam and (cam.ViewportSize.X / 2) or 500
+                    local cy = cam and (cam.ViewportSize.Y / 2) or 300
+
+                    VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, true, game, 1)
+                    VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, false, game, 1)
+                    tool:Activate()
+
+                    if RegisterAttack and RegisterHit then
+                        RegisterAttack:FireServer(0)
+                        RegisterHit:FireServer(targets[1][2], targets)
+                    end
+                end)
+            end
+        end
+
+        task.wait(Config.AttackDelay)
+    end
+end)
+
+-- Loop principal sequencial (Lv. 90 ao Lv. 120 na Frozen Village)
+task.spawn(function()
+    while _G.AutoFarmFrozenVillage and GetLevel() < Config.MaxLevel do
+        local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+        local hrp = character:WaitForChild("HumanoidRootPart")
+        local hum = character:WaitForChild("Humanoid")
+
+        if hum.Health <= 0 then
+            CancelTween()
+            task.wait(0.5)
+        elseif not QuestInProgress then
+            local nextTask = GetFrozenVillageTaskForLevel()
+            local npcPos = GetQuestNpcPos()
+            local distToNpc = (hrp.Position - npcPos).Magnitude
+
+            SetPhysicsState(character, true)
+
+            if distToNpc > 7 then
+                MoveToCFrame(CFrame.new(npcPos), false)
+                RunService.Heartbeat:Wait()
+            else
+                CancelTween()
+                hrp.AssemblyLinearVelocity = Vector3.zero
+                task.wait(0.2)
+
+                if CommF then
+                    if HasAnyActiveQuest() and CheckGuiQuestProgress(nextTask) ~= "Active" then
+                        pcall(function()
+                            CommF:InvokeServer("AbandonQuest")
+                        end)
+                        task.wait(0.2)
+                    end
+
+                    for _ = 1, 3 do
+                        if CheckGuiQuestProgress(nextTask) == "Active" then
+                            break
+                        end
+                        pcall(function()
+                            CommF:InvokeServer("StartQuest", Config.QuestName, nextTask.QuestLevel)
+                        end)
+                        task.wait(0.25)
+                    end
+                end
+
+                ActiveTask = nextTask
+                MobsKilledInQuest = 0
+                QuestInProgress = true
+            end
+        else
+            UpdateKillCounter(ActiveTask.TargetMob)
+            local guiState = CheckGuiQuestProgress(ActiveTask)
+            local nearBossArena = (hrp.Position - ActiveTask.WaitPos).Magnitude <= 150
+            local bossDisappeared = (ActiveTask.TargetMob == "Yeti") and nearBossArena and not IsBossAvailable("Yeti")
+
+            if guiState == "Completed" or MobsKilledInQuest >= ActiveTask.RequiredKills or bossDisappeared then
+                QuestInProgress = false
+                ActiveTask = nil
+                MobsKilledInQuest = 0
+                CancelTween()
+            else
+                SetPhysicsState(character, true)
+                local targetMob = GetClosestTargetMob(ActiveTask.TargetMob)
+
+                if targetMob and targetMob:FindFirstChild("HumanoidRootPart") then
+                    local mobHrp = targetMob.HumanoidRootPart
+                    local farmPos = mobHrp.Position + Vector3.new(0, Config.DistanceFarm, 0)
+                    local farmCFrame = CFrame.new(farmPos) * CFrame.Angles(math.rad(-90), 0, 0)
+
+                    MoveToCFrame(farmCFrame, true)
+
+                    if (hrp.Position - mobHrp.Position).Magnitude <= 65 then
+                        BringMobs(targetMob, ActiveTask.TargetMob)
+                    end
+                else
+                    MoveToCFrame(CFrame.new(ActiveTask.WaitPos), false)
+                end
+
+                RunService.Heartbeat:Wait()
+            end
+        end
+    end
+
+    _G.AutoFarmFrozenVillage = false
+    if NoClipConnection then
+        NoClipConnection:Disconnect()
+        NoClipConnection = nil
+    end
+    CancelTween()
+    SetPhysicsState(LocalPlayer.Character, false)
+end)
