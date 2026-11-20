@@ -1,5 +1,5 @@
 -- ==========================================
--- AUTO BUY: WATER KUNG FU (SEA 1 - CORRIGIDO V2)
+-- AUTO BUY: WATER KUNG FU (SEA 1 - CORRIGIDO V3)
 -- ==========================================
 
 local Players = game:GetService("Players")
@@ -10,10 +10,10 @@ local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 local CommF = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("CommF_")
 
--- Coordenadas da Underwater City (Sea 1)
-local WHIRLPOOL_SURFACE = CFrame.new(3876.28, 6.0, -1939.32)    -- Nível da água no redemoinho (Y = 6)
-local UNDERWATER_SPAWN = Vector3.new(61163.85, 11.67, 1819.78) -- Coordenada interna da cidade
-local TEACHER_CFRAME = CFrame.new(61163.85, 11.67, 1819.78)    -- Sala secreta do Water Kung Fu Teacher
+-- Coordenadas exatas da Underwater City (Sea 1)
+local WHIRLPOOL_POS = Vector3.new(3864.68, 5.37, -1926.21)       -- Centro do redemoinho na superfície
+local UNDERWATER_ENTRANCE = Vector3.new(61163.8515625, 11.6796875, 1819.7841796875) -- Vetor exato do requestEntrance
+local TEACHER_FALLBACK_CF = CFrame.new(61350.60, 31.40, 1113.50) -- Sala secreta ao lado do Fishman Lord
 local TWEEN_SPEED = 200
 
 local noclipConn
@@ -60,16 +60,34 @@ local function tweenTo(targetCFrame)
     return true
 end
 
--- Procura a hitbox física do portal do redemoinho próxima à coordenada
-local function findWhirlpoolPortal()
+-- Varre o Workspace num raio de 400 studs para achar qualquer TouchTransmitter do redemoinho
+local function triggerWhirlpoolTouch(hrp)
+    local found = false
     for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("BasePart") and (obj.Position - WHIRLPOOL_SURFACE.Position).Magnitude < 120 then
-            if obj:FindFirstChildOfClass("TouchTransmitter") or obj.Name:lower():find("teleport") or obj.Name:lower():find("whirl") then
-                return obj
+        if obj:IsA("BasePart") and (obj.Position - WHIRLPOOL_POS).Magnitude < 400 then
+            if obj:FindFirstChildOfClass("TouchTransmitter") then
+                found = true
+                if firetouchinterest then
+                    firetouchinterest(hrp, obj, 0)
+                    task.wait(0.05)
+                    firetouchinterest(hrp, obj, 1)
+                end
             end
         end
     end
-    return nil
+    return found
+end
+
+-- Busca o CFrame real do NPC dentro da Underwater City
+local function getTeacherCFrame()
+    local npcs = workspace:FindFirstChild("NPCs")
+    if npcs then
+        local teacher = npcs:FindFirstChild("Water Kung Fu Teacher")
+        if teacher and teacher:FindFirstChild("HumanoidRootPart") then
+            return teacher.HumanoidRootPart.CFrame * CFrame.new(0, 0, 3)
+        end
+    end
+    return TEACHER_FALLBACK_CF
 end
 
 local function buyWaterKungFu()
@@ -93,39 +111,39 @@ local function buyWaterKungFu()
 
     -- 3. Entra na Underwater City caso esteja na superfície (X < 50000)
     if hrp.Position.X < 50000 then
-        print("[OmegaCore] Indo até o redemoinho no nível da água...")
-        tweenTo(WHIRLPOOL_SURFACE)
-        task.wait(0.3)
+        print("[OmegaCore] Indo até o centro do redemoinho...")
+        tweenTo(CFrame.new(WHIRLPOOL_POS))
+        
+        -- Aguarda o mapa carregar (StreamingEnabled) e mantém o boneco na posição do portal
+        for attempt = 1, 5 do
+            hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if not hrp or hrp.Position.X > 50000 then break end
 
-        -- Tenta ativar o toque físico no portal do redemoinho (suportado pelo Delta)
-        local portalPart = findWhirlpoolPortal()
-        if portalPart and firetouchinterest then
-            print("[OmegaCore] Portal físico encontrado (" .. portalPart.Name .. "). Simulando toque...")
-            firetouchinterest(hrp, portalPart, 0)
-            task.wait(0.1)
-            firetouchinterest(hrp, portalPart, 1)
-            task.wait(1.2)
-        end
+            hrp.CFrame = CFrame.new(WHIRLPOOL_POS)
+            local touched = triggerWhirlpoolTouch(hrp)
+            if touched then
+                print("[OmegaCore] Hitbox do redemoinho acionada (tentativa " .. attempt .. ")...")
+            end
 
-        -- Se ainda não teleportou pelo toque físico, força via requestEntrance
-        hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-        if hrp and hrp.Position.X < 50000 then
-            print("[OmegaCore] Tentando teleporte via requestEntrance...")
-            CommF:InvokeServer("requestEntrance", UNDERWATER_SPAWN)
-            task.wait(1.2)
+            -- Chama o requestEntrance com o Vector3 preciso
+            CommF:InvokeServer("requestEntrance", UNDERWATER_ENTRANCE)
+            task.wait(0.8)
         end
     end
 
-    -- 4. Validação final antes de ir até o NPC
+    -- 4. Confirma que entrou na Underwater City
     hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
     if not hrp or hrp.Position.X < 50000 then
-        warn("[OmegaCore] Falha ao entrar na Underwater City. Verifique se o redemoinho está ativo nessa posição.")
+        warn("[OmegaCore] Falha ao entrar na Underwater City. O servidor não aceitou o teleporte.")
         return
     end
 
-    -- 5. Vai até a sala secreta do Water Kung Fu Teacher e compra
+    -- 5. Localiza o Water Kung Fu Teacher na cidade, vai até ele e compra
     print("[OmegaCore] Dentro da Underwater City! Indo até o Water Kung Fu Teacher...")
-    if tweenTo(TEACHER_CFRAME) then
+    task.wait(0.5) -- Aguarda os NPCs carregarem
+    local targetTeacherCF = getTeacherCFrame()
+
+    if tweenTo(targetTeacherCF) then
         task.wait(0.3)
         local result = CommF:InvokeServer("BuyWaterKungFu")
         print("[OmegaCore] Resposta do servidor:", tostring(result))
