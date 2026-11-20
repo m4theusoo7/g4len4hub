@@ -13,9 +13,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 
--- Coordenadas exatas da Underwater City (Sea 1)
+-- Coordenadas da Underwater City (Sea 1)
+local WhirlpoolCFrame = CFrame.new(3864.688, 5.0, -1926.214)
 local UnderwaterEntrance = Vector3.new(61163.8515625, 11.6796875, 1819.7841796875)
-local SurfaceExit = Vector3.new(3864.688, 6.737, -1926.214)
 local TeacherCFrame = CFrame.new(61122.5625, 18.4974422454834, 1569.3997802734375)
 
 -- ==========================================
@@ -36,7 +36,6 @@ local function TweenTo(targetCFrame)
     local root = character and character:FindFirstChild("HumanoidRootPart")
     if not root then return end
 
-    -- Trava gravidade e ativa NoClip durante o deslocamento
     local bv = Instance.new("BodyVelocity")
     bv.MaxForce = Vector3.new(1e5, 1e5, 1e5)
     bv.Velocity = Vector3.zero
@@ -84,34 +83,45 @@ local function BuyWaterKungFu()
     local commF = ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("CommF_")
     if not commF then return end
 
-    -- 1. Tenta compra direta remota
+    -- 1. Tenta compra direta remota primeiro
     commF:InvokeServer("BuyWaterKungFu")
     task.wait(0.8)
+    if HasWaterKungFu() then
+        print("[OmegaCore] Water Kung Fu comprado remotamente!")
+        return
+    end
 
-    -- 2. Se ainda não comprou, usa o teleporte oficial da entrada da Underwater City
-    if not HasWaterKungFu() then
-        local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-        if root then
-            if root.Position.X < 50000 then
-                commF:InvokeServer("requestEntrance", UnderwaterEntrance)
-                task.wait(1.2)
-            end
+    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not root then return end
 
-            -- Vai até o NPC dentro da passagem secreta da redoma
-            TweenTo(TeacherCFrame)
-            task.wait(0.4)
-            commF:InvokeServer("BuyWaterKungFu")
-            task.wait(0.8)
-
-            -- Retorna à superfície após comprar
-            commF:InvokeServer("requestEntrance", SurfaceExit)
+    -- 2. Se ainda não estiver dentro da Underwater City (X > 50000)
+    if root.Position.X < 50000 then
+        -- Primeiro vai até o redemoinho na superfície para passar na checagem de distância do servidor
+        if (root.Position - WhirlpoolCFrame.Position).Magnitude > 150 then
+            TweenTo(WhirlpoolCFrame)
+            task.wait(0.5)
         end
+
+        -- Aciona o portal oficial da entrada da Underwater City
+        commF:InvokeServer("requestEntrance", UnderwaterEntrance)
+        task.wait(1.5)
+    end
+
+    -- 3. TRAVA DE SEGURANÇA: Só anda até o NPC se realmente estiver dentro da Underwater City
+    if root.Position.X > 50000 then
+        TweenTo(TeacherCFrame)
+        task.wait(0.4)
+        commF:InvokeServer("BuyWaterKungFu")
+        task.wait(0.8)
+    else
+        warn("[OmegaCore] O servidor não teleportou para a Underwater City. Cancelando Tween para não sair do mapa.")
+        return
     end
 
     if HasWaterKungFu() then
         print("[OmegaCore] Water Kung Fu comprado com sucesso!")
     else
-        warn("[OmegaCore] Falha na compra. Confirme se está no Sea 1.")
+        warn("[OmegaCore] Chegou no NPC, mas a compra não foi concluída. Verifique o Beli.")
     end
 end
 
