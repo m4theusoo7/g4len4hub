@@ -1,128 +1,108 @@
 -- ==========================================
--- CONFIGURAÇÕES
+-- AUTO BUY: WATER KUNG FU (SEA 1)
 -- ==========================================
-_G.AutoBuyWaterKungFu = true
-local TweenSpeed = 200
 
--- ==========================================
--- SERVIÇOS E VARIÁVEIS
--- ==========================================
 local Players = game:GetService("Players")
-local TweenService = game:GetService("TweenService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
+
 local LocalPlayer = Players.LocalPlayer
+local CommF = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("CommF_")
 
 -- Coordenadas da Underwater City (Sea 1)
-local WhirlpoolCFrame = CFrame.new(3864.688, 5.0, -1926.214)
-local UnderwaterEntrance = Vector3.new(61163.8515625, 11.6796875, 1819.7841796875)
-local TeacherCFrame = CFrame.new(61122.5625, 18.4974422454834, 1569.3997802734375)
+local UNDERWATER_ENTRANCE = Vector3.new(3876.28, 35.10, -1939.32)
+local TEACHER_CFRAME = CFrame.new(61163.85, 11.67, 1819.78) -- Sala secreta do Water Kung Fu Teacher
+local TWEEN_SPEED = 200
 
--- ==========================================
--- FUNÇÕES AUXILIARES
--- ==========================================
-local function HasWaterKungFu()
-    local backpack = LocalPlayer:FindFirstChild("Backpack")
-    local character = LocalPlayer.Character
-    if (backpack and backpack:FindFirstChild("Water Kung Fu")) or 
-       (character and character:FindFirstChild("Water Kung Fu")) then
-        return true
-    end
-    return false
-end
-
-local function TweenTo(targetCFrame)
-    local character = LocalPlayer.Character
-    local root = character and character:FindFirstChild("HumanoidRootPart")
-    if not root then return end
-
-    local bv = Instance.new("BodyVelocity")
-    bv.MaxForce = Vector3.new(1e5, 1e5, 1e5)
-    bv.Velocity = Vector3.zero
-    bv.Parent = root
-
-    local noclipConn = RunService.Stepped:Connect(function()
-        if character then
-            for _, part in ipairs(character:GetDescendants()) do
-                if part:IsA("BasePart") then
-                    part.CanCollide = false
+-- Função auxiliar para NoClip durante o voo
+local noclipConn
+local function setNoClip(state)
+    if state then
+        if noclipConn then noclipConn:Disconnect() end
+        noclipConn = RunService.Stepped:Connect(function()
+            local char = LocalPlayer.Character
+            if char then
+                for _, part in ipairs(char:GetDescendants()) do
+                    if part:IsA("BasePart") and part.CanCollide then
+                        part.CanCollide = false
+                    end
                 end
             end
+        end)
+    else
+        if noclipConn then
+            noclipConn:Disconnect()
+            noclipConn = nil
         end
-    end)
-
-    local distance = (root.Position - targetCFrame.Position).Magnitude
-    local duration = math.max(distance / TweenSpeed, 0.1)
-
-    local tween = TweenService:Create(root, TweenInfo.new(duration, Enum.EasingStyle.Linear), {CFrame = targetCFrame})
-    tween:Play()
-    tween.Completed:Wait()
-
-    noclipConn:Disconnect()
-    bv:Destroy()
+    end
 end
 
--- ==========================================
--- ROTINA PRINCIPAL DE COMPRA
--- ==========================================
-local function BuyWaterKungFu()
-    if not _G.AutoBuyWaterKungFu then return end
+-- Função de movimentação segura via Tween
+local function tweenTo(targetCFrame)
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false end
 
-    if HasWaterKungFu() then
-        warn("[OmegaCore] Você já possui o Water Kung Fu!")
+    local distance = (hrp.Position - targetCFrame.Position).Magnitude
+    if distance < 5 then
+        hrp.CFrame = targetCFrame
+        return true
+    end
+
+    setNoClip(true)
+    local duration = distance / TWEEN_SPEED
+    local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear)
+    local tween = TweenService:Create(hrp, tweenInfo, { CFrame = targetCFrame })
+    
+    tween:Play()
+    tween.Completed:Wait()
+    setNoClip(false)
+    return true
+end
+
+-- Execução Principal
+local function buyWaterKungFu()
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    -- 1. Verifica se já possui o estilo no inventário ou equipado
+    local hasStyle = LocalPlayer.Backpack:FindFirstChild("Water Kung Fu") or char:FindFirstChild("Water Kung Fu")
+    if hasStyle then
+        warn("[OmegaCore] Você já está com o Water Kung Fu equipado!")
         return
     end
 
-    local data = LocalPlayer:FindFirstChild("Data")
-    local beli = data and data:FindFirstChild("Beli")
+    -- 2. Verifica saldo em Beli
+    local beli = LocalPlayer:FindFirstChild("Data") and LocalPlayer.Data:FindFirstChild("Beli")
     if beli and beli.Value < 750000 then
         warn("[OmegaCore] Beli insuficiente! Necessário: $750.000 | Atual: $" .. tostring(beli.Value))
         return
     end
 
-    local commF = ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("CommF_")
-    if not commF then return end
+    -- 3. Verifica se já está dentro da área da Underwater City (X > 50000)
+    -- Caso contrário, aciona o teleporte de entrada do redemoinho
+    if hrp.Position.X < 50000 then
+        print("[OmegaCore] Entrando na Underwater City via portal...")
+        CommF:InvokeServer("requestEntrance", UNDERWATER_ENTRANCE)
+        task.wait(1.2)
+    end
 
-    -- 1. Tenta compra direta remota primeiro
-    commF:InvokeServer("BuyWaterKungFu")
-    task.wait(0.8)
-    if HasWaterKungFu() then
-        print("[OmegaCore] Water Kung Fu comprado remotamente!")
+    -- 4. Checa novamente se o teleporte funcionou antes de iniciar o Tween
+    hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not hrp or hrp.Position.X < 50000 then
+        warn("[OmegaCore] Falha ao entrar na Underwater City. Abortando Tween para evitar queda no void.")
         return
     end
 
-    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    if not root then return end
-
-    -- 2. Se ainda não estiver dentro da Underwater City (X > 50000)
-    if root.Position.X < 50000 then
-        -- Primeiro vai até o redemoinho na superfície para passar na checagem de distância do servidor
-        if (root.Position - WhirlpoolCFrame.Position).Magnitude > 150 then
-            TweenTo(WhirlpoolCFrame)
-            task.wait(0.5)
-        end
-
-        -- Aciona o portal oficial da entrada da Underwater City
-        commF:InvokeServer("requestEntrance", UnderwaterEntrance)
-        task.wait(1.5)
-    end
-
-    -- 3. TRAVA DE SEGURANÇA: Só anda até o NPC se realmente estiver dentro da Underwater City
-    if root.Position.X > 50000 then
-        TweenTo(TeacherCFrame)
-        task.wait(0.4)
-        commF:InvokeServer("BuyWaterKungFu")
-        task.wait(0.8)
-    else
-        warn("[OmegaCore] O servidor não teleportou para a Underwater City. Cancelando Tween para não sair do mapa.")
-        return
-    end
-
-    if HasWaterKungFu() then
-        print("[OmegaCore] Water Kung Fu comprado com sucesso!")
-    else
-        warn("[OmegaCore] Chegou no NPC, mas a compra não foi concluída. Verifique o Beli.")
+    -- 5. Vai até a sala secreta do Water Kung Fu Teacher e compra
+    print("[OmegaCore] Indo até o Water Kung Fu Teacher...")
+    if tweenTo(TEACHER_CFRAME) then
+        task.wait(0.3)
+        local result = CommF:InvokeServer("BuyWaterKungFu")
+        print("[OmegaCore] Resposta do servidor:", tostring(result))
     end
 end
 
-BuyWaterKungFu()
+buyWaterKungFu()
