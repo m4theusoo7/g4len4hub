@@ -1,5 +1,5 @@
 -- ==========================================
--- AUTO BUY: WATER KUNG FU (SEA 1)
+-- AUTO BUY: WATER KUNG FU (SEA 1 - CORRIGIDO)
 -- ==========================================
 
 local Players = game:GetService("Players")
@@ -11,11 +11,11 @@ local LocalPlayer = Players.LocalPlayer
 local CommF = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("CommF_")
 
 -- Coordenadas da Underwater City (Sea 1)
-local UNDERWATER_ENTRANCE = Vector3.new(3876.28, 35.10, -1939.32)
-local TEACHER_CFRAME = CFrame.new(61163.85, 11.67, 1819.78) -- Sala secreta do Water Kung Fu Teacher
+local WHIRLPOOL_CFRAME = CFrame.new(3876.28, 35.10, -1939.32) -- Entrada (Redemoinho no mar)
+local UNDERWATER_DEST = Vector3.new(61163.85, 11.67, 1819.78)  -- Destino interno exigido pelo requestEntrance
+local TEACHER_CFRAME = CFrame.new(61163.85, 11.67, 1819.78)    -- Sala secreta do Water Kung Fu Teacher
 local TWEEN_SPEED = 200
 
--- Função auxiliar para NoClip durante o voo
 local noclipConn
 local function setNoClip(state)
     if state then
@@ -38,7 +38,6 @@ local function setNoClip(state)
     end
 end
 
--- Função de movimentação segura via Tween
 local function tweenTo(targetCFrame)
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
@@ -61,13 +60,12 @@ local function tweenTo(targetCFrame)
     return true
 end
 
--- Execução Principal
 local function buyWaterKungFu()
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
 
-    -- 1. Verifica se já possui o estilo no inventário ou equipado
+    -- 1. Verifica se já possui o estilo
     local hasStyle = LocalPlayer.Backpack:FindFirstChild("Water Kung Fu") or char:FindFirstChild("Water Kung Fu")
     if hasStyle then
         warn("[OmegaCore] Você já está com o Water Kung Fu equipado!")
@@ -81,22 +79,28 @@ local function buyWaterKungFu()
         return
     end
 
-    -- 3. Verifica se já está dentro da área da Underwater City (X > 50000)
-    -- Caso contrário, aciona o teleporte de entrada do redemoinho
+    -- 3. Se estiver fora da Underwater City (X < 50000), vai até o redemoinho e usa requestEntrance
     if hrp.Position.X < 50000 then
-        print("[OmegaCore] Entrando na Underwater City via portal...")
-        CommF:InvokeServer("requestEntrance", UNDERWATER_ENTRANCE)
+        local distToPortal = (hrp.Position - WHIRLPOOL_CFRAME.Position).Magnitude
+        if distToPortal > 150 then
+            print("[OmegaCore] Voando até o redemoinho na superfície...")
+            tweenTo(WHIRLPOOL_CFRAME)
+            task.wait(0.3)
+        end
+
+        print("[OmegaCore] Ativando teleporte para a Underwater City...")
+        CommF:InvokeServer("requestEntrance", UNDERWATER_DEST)
         task.wait(1.2)
     end
 
-    -- 4. Checa novamente se o teleporte funcionou antes de iniciar o Tween
+    -- 4. Confirma que entrou na dimensão subaquática
     hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
     if not hrp or hrp.Position.X < 50000 then
-        warn("[OmegaCore] Falha ao entrar na Underwater City. Abortando Tween para evitar queda no void.")
+        warn("[OmegaCore] Falha ao entrar na Underwater City. Verifique se o personagem encostou no redemoinho.")
         return
     end
 
-    -- 5. Vai até a sala secreta do Water Kung Fu Teacher e compra
+    -- 5. Vai até o Water Kung Fu Teacher e executa a compra
     print("[OmegaCore] Indo até o Water Kung Fu Teacher...")
     if tweenTo(TEACHER_CFRAME) then
         task.wait(0.3)
