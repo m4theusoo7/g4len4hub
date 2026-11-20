@@ -1,4 +1,4 @@
--- Auto Buy Water Kung Fu (Sea 1 - Delta Executor)
+-- Auto Buy Water Kung Fu (Fix Entrada Redemoinho - Delta Executor)
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -7,15 +7,11 @@ local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 local CommF = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("CommF_")
 
--- Coordenadas
-local ENTRADA_REDEMOINHO = Vector3.new(3864.688, 6.737, -1926.214)
-local SPAWN_SUBAQUATICO  = Vector3.new(61163.852, 11.680, 1819.784)
-local POS_TEACHER        = Vector3.new(61577.125, 18.497, 989.399)
+local FALLBACK_ENTRADA = Vector3.new(3864.688, 6.737, -1926.214)
+local POS_TEACHER      = Vector3.new(61577.125, 18.497, 989.399)
+local TWEEN_SPEED      = 280
+local noclipConn       = nil
 
-local TWEEN_SPEED = 280
-local noclipConn = nil
-
--- Ativa/Desativa NoClip para não travar nas paredes da caverna
 local function setNoClip(state)
     if state then
         if noclipConn then return end
@@ -37,7 +33,15 @@ local function setNoClip(state)
     end
 end
 
--- Movimento suave via Tween
+local function clearBV(hrp)
+    if not hrp then return end
+    for _, obj in ipairs(hrp:GetChildren()) do
+        if obj:IsA("BodyVelocity") then
+            obj:Destroy()
+        end
+    end
+end
+
 local function tweenTo(targetPos)
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
@@ -46,7 +50,6 @@ local function tweenTo(targetPos)
     local distance = (hrp.Position - targetPos).Magnitude
     if distance < 5 then return end
 
-    -- Mantém velocidade zero para não cair durante o trajeto
     local bv = hrp:FindFirstChild("AntiGravity") or Instance.new("BodyVelocity")
     bv.Name = "AntiGravity"
     bv.MaxForce = Vector3.new(1e5, 1e5, 1e5)
@@ -62,12 +65,27 @@ local function tweenTo(targetPos)
     tween:Play()
     tween.Completed:Wait()
 
-    if bv and bv.Parent then
-        bv:Destroy()
-    end
+    clearBV(hrp)
 end
 
--- Verifica se já possui o estilo ou Beli suficiente
+-- Procura a Part física real da entrada (Whirlpool / Underwater) no Workspace
+local function findWhirlpoolPart()
+    local bestPart = nil
+    local bestDist = 400 -- raio de busca perto da coordenada conhecida
+
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("BasePart") then
+            local name = obj.Name:lower()
+            local dist = (obj.Position - FALLBACK_ENTRADA).Magnitude
+            if dist < bestDist and (obj:FindFirstChildOfClass("TouchTransmitter") or name:find("whirl") or name:find("underwater") or name:find("portal") or name:find("entrance")) then
+                bestDist = dist
+                bestPart = obj
+            end
+        end
+    end
+    return bestPart
+end
+
 local function hasWaterKungFu()
     local backpack = LocalPlayer:FindFirstChild("Backpack")
     local char = LocalPlayer.Character
@@ -75,10 +93,9 @@ local function hasWaterKungFu()
         or (char and char:FindFirstChild("Water Kung Fu"))
 end
 
--- Execução principal
 task.spawn(function()
     if hasWaterKungFu() then
-        warn("[OmegaCore] Você já possui o Water Kung Fu equipado/na mochila!")
+        warn("[OmegaCore] Você já possui o Water Kung Fu!")
         return
     end
 
@@ -91,45 +108,69 @@ task.spawn(function()
     local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
     local hrp = char:WaitForChild("HumanoidRootPart")
 
-    setNoClip(true)
-
-    -- Passo 1: Se ainda estiver na superfície (X < 50000), vai até o redemoinho e entra
+    -- Passo 1: Entrar na Underwater City se estiver na superfície
     if hrp.Position.X < 50000 then
-        -- Sobe um pouco antes de viajar para não bater em ilhas no caminho
-        tweenTo(Vector3.new(hrp.Position.X, 150, hrp.Position.Z))
-        tweenTo(Vector3.new(ENTRADA_REDEMOINHO.X, 150, ENTRADA_REDEMOINHO.Z))
-        tweenTo(ENTRADA_REDEMOINHO)
+        setNoClip(true)
+        -- Sobe para viajar sem bater em ilhas
+        if hrp.Position.Y < 120 then
+            tweenTo(Vector3.new(hrp.Position.X, 150, hrp.Position.Z))
+        end
+        tweenTo(Vector3.new(FALLBACK_ENTRADA.X, 150, FALLBACK_ENTRADA.Z))
+        tweenTo(Vector3.new(FALLBACK_ENTRADA.X, 15, FALLBACK_ENTRADA.Z))
 
-        -- Solicita entrada no portal da Underwater City
-        pcall(function()
-            CommF:InvokeServer("requestEntrance", ENTRADA_REDEMOINHO)
-        end)
+        -- Solta a física e NoClip para o jogo registrar o contato no redemoinho
+        setNoClip(false)
+        clearBV(hrp)
+        task.wait(0.2)
 
-        -- Aguarda o teleporte para a instância subaquática (X > 50000)
-        local timeout = 0
-        while hrp.Position.X < 50000 and timeout < 5 do
-            task.wait(0.2)
-            timeout += 0.2
+        local portalPart = findWhirlpoolPart()
+        local targetEntrancePos = portalPart and portalPart.Position or FALLBACK_ENTRADA
+
+        local attempts = 0
+        while hrp.Position.X < 50000 and attempts < 15 do
+            attempts += 1
+
+            -- Método A: Remote com a posição real da peça do portal
             pcall(function()
-                CommF:InvokeServer("requestEntrance", ENTRADA_REDEMOINHO)
+                CommF:InvokeServer("requestEntrance", targetEntrancePos)
             end)
+
+            -- Método B: Se encontrou a hitbox física do redemoinho, força o TouchInterest
+            if portalPart and firetouchinterest then
+                pcall(function()
+                    firetouchinterest(hrp, portalPart, 0)
+                    task.wait(0.05)
+                    firetouchinterest(hrp, portalPart, 1)
+                end)
+            end
+
+            -- Método C: Encosta fisicamente no centro do redemoinho
+            if hrp.Position.X < 50000 then
+                hrp.CFrame = CFrame.new(targetEntrancePos + Vector3.new(0, 2, 0))
+            end
+
+            task.wait(0.35)
         end
     end
 
-    -- Passo 2: Já dentro da Underwater City, vai até o Water Kung Fu Teacher
+    -- Passo 2: Já dentro da Underwater City (X > 50000), vai até o Water Kung Fu Teacher
     if hrp.Position.X > 50000 then
-        -- Eleva levemente para passar por cima das construções sem travar
+        setNoClip(true)
+        task.wait(0.3)
+
         tweenTo(Vector3.new(hrp.Position.X, 55, hrp.Position.Z))
         tweenTo(Vector3.new(POS_TEACHER.X, 55, POS_TEACHER.Z))
         tweenTo(POS_TEACHER)
 
+        setNoClip(false)
+        clearBV(hrp)
         task.wait(0.3)
-        -- Dispara o remote oficial de compra
-        local result = CommF:InvokeServer("BuyFishmanKarate")
-        print("[OmegaCore] Resposta da compra:", tostring(result))
-    else
-        warn("[OmegaCore] Falha ao entrar na Underwater City. Tente executar novamente perto do mar.")
-    end
 
-    setNoClip(false)
+        local result = CommF:InvokeServer("BuyFishmanKarate")
+        print("[OmegaCore] Compra executada! Resposta:", tostring(result))
+    else
+        setNoClip(false)
+        clearBV(hrp)
+        warn("[OmegaCore] Não entrou no redemoinho após 15 tentativas.")
+    end
 end)
