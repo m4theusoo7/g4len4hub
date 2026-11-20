@@ -8,12 +8,13 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer = Players.LocalPlayer
 local TweenSpeed = 200
 
--- Coordenadas (Sea 1)
-local WhirlpoolPos = Vector3.new(3876, 5, -1926)
+-- Coordenadas de fallback e destino
+local FallbackWhirlpool = Vector3.new(3876, 5, -1926)
 local UnderwaterEntrance = Vector3.new(61163.8515625, 11.6796875, 1819.7841796875)
 local TeacherPos = Vector3.new(61577, 18, 1564)
 
--- NoClip ativo enquanto o script estiver rodando
+-- Controle de NoClip (só ativa quando estiver andando dentro da cidade para atravessar a parede secreta)
+local UseNoClip = false
 local NoClipConnection
 NoClipConnection = RunService.Stepped:Connect(function()
     if not _G.AutoBuyWaterKungFu then
@@ -21,14 +22,36 @@ NoClipConnection = RunService.Stepped:Connect(function()
         return
     end
     local char = LocalPlayer.Character
-    if char then
+    if char and UseNoClip then
         for _, part in ipairs(char:GetDescendants()) do
-            if part:IsA("BasePart") and part.CanCollide then
+            if part:IsA("BasePart") then
                 part.CanCollide = false
             end
         end
     end
 end)
+
+-- Procura a parte real do Redemoinho no Workspace
+local function FindWhirlpoolPart()
+    local map = workspace:FindFirstChild("Map")
+    if map then
+        -- Procura pelo nome Whirlpool ou dentro de Fishman/Teleports
+        for _, obj in ipairs(map:GetDescendants()) do
+            if obj:IsA("BasePart") and (obj.Name:lower():find("whirlpool") or (obj.Parent and obj.Parent.Name:lower():find("whirlpool"))) then
+                return obj
+            end
+        end
+    end
+    -- Busca secundária por qualquer TouchTransmitter perto da coordenada aproximada
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("BasePart") and obj:FindFirstChildOfClass("TouchTransmitter") then
+            if (obj.Position - FallbackWhirlpool).Magnitude < 300 then
+                return obj
+            end
+        end
+    end
+    return nil
+end
 
 -- Função de movimento via Tween
 local function TweenTo(targetCFrame)
@@ -37,15 +60,14 @@ local function TweenTo(targetCFrame)
     local hrp = char.HumanoidRootPart
 
     local distance = (hrp.Position - targetCFrame.Position).Magnitude
-    local duration = distance / TweenSpeed
+    local duration = math.max(distance / TweenSpeed, 0.1)
 
     local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear)
     local tween = TweenService:Create(hrp, tweenInfo, {CFrame = targetCFrame})
     tween:Play()
 
-    while tween.PlaybackState == Enum.PlaybackState.Playing and _G.AutoBuyWaterKungFu do
+    while tween.PlaybackState == Enum.EasingState.Playing and _G.AutoBuyWaterKungFu do
         task.wait(0.1)
-        -- Cancela o tween se o personagem for teleportado para dentro da cidade no meio do caminho
         if targetCFrame.Position.X < 50000 and hrp.Position.X > 50000 then
             tween:Cancel()
             break
@@ -58,44 +80,50 @@ task.spawn(function()
     local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
     local hrp = char:WaitForChild("HumanoidRootPart")
 
-    -- Passo 1: Entrar na Underwater City se ainda estiver na superfície
+    -- Passo 1: Entrar na Underwater City se estiver na superfície
     if hrp.Position.X < 50000 then
-        -- Vai até o redemoinho na superfície
-        if (hrp.Position - WhirlpoolPos).Magnitude > 30 then
-            TweenTo(CFrame.new(WhirlpoolPos))
-        end
+        UseNoClip = false -- Mantém colisão ligada para ativar o toque físico no redemoinho
+        local whirlpool = FindWhirlpoolPart()
+        local targetPos = whirlpool and whirlpool.Position or FallbackWhirlpool
 
-        -- Tenta ativar o redemoinho via touch ou requestEntrance
-        while _G.AutoBuyWaterKungFu and hrp.Position.X < 50000 do
+        -- Vai até o redemoinho real
+        TweenTo(CFrame.new(targetPos + Vector3.new(0, 3, 0)))
+
+        -- Tenta ativar a entrada até o personagem ser teleportado (X > 50000)
+        local attempts = 0
+        while _G.AutoBuyWaterKungFu and hrp.Position.X < 50000 and attempts < 30 do
+            attempts += 1
+            whirlpool = whirlpool or FindWhirlpoolPart()
+
             pcall(function()
-                -- Procura a parte física do redemoinho no mapa, se existir
-                for _, obj in ipairs(workspace:GetDescendants()) do
-                    if obj:IsA("BasePart") and (obj.Position - WhirlpoolPos).Magnitude < 50 and obj:FindFirstChildOfClass("TouchTransmitter") then
-                        firetouchinterest(hrp, obj, 0)
-                        task.wait()
-                        firetouchinterest(hrp, obj, 1)
-                    end
+                if whirlpool then
+                    -- Garante que o personagem encoste exatamente no centro do redemoinho
+                    hrp.CFrame = whirlpool.CFrame
+                    firetouchinterest(hrp, whirlpool, 0)
+                    task.wait(0.05)
+                    firetouchinterest(hrp, whirlpool, 1)
                 end
-                -- Fallback pelo remote oficial de entrada
+                -- Chama o remote oficial da entrada
                 ReplicatedStorage.Remotes.CommF_:InvokeServer("requestEntrance", UnderwaterEntrance)
             end)
-            task.wait(0.5)
+            task.wait(0.3)
         end
     end
 
     task.wait(0.5)
 
-    -- Passo 2: Já dentro da Underwater City, ir até o Water Kung Fu Teacher
+    -- Passo 2: Já dentro da Underwater City (X > 50000), ativa NoClip e vai até o NPC
     if _G.AutoBuyWaterKungFu and hrp.Position.X > 50000 then
+        UseNoClip = true
         TweenTo(CFrame.new(TeacherPos))
         task.wait(0.3)
 
-        -- Passo 3: Comprar o estilo de luta ($750,000 Beli)
+        -- Passo 3: Compra o estilo de luta ($750.000)
         pcall(function()
             ReplicatedStorage.Remotes.CommF_:InvokeServer("BuyFishmanKarate")
         end)
     end
 
-    -- Finaliza o loop e desativa o NoClip
+    UseNoClip = false
     _G.AutoBuyWaterKungFu = false
 end)
