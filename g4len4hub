@@ -1,48 +1,80 @@
 local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local LocalPlayer = Players.LocalPlayer
 local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
 local hrp = char:WaitForChild("HumanoidRootPart")
 
--- Coordenadas da Underwater City e do NPC (Sea 1)
 local UnderwaterEntrance = Vector3.new(61163.8515625, 11.6796875, 1819.7841796875)
-local FallbackTeacherCFrame = CFrame.new(61577, 18, 1564)
+local FallbackTeacherPos = Vector3.new(61577, 18, 1564)
 
--- Procura o CFrame exato do NPC no Workspace ou ReplicatedStorage
-local function GetTeacherCFrame()
+-- Procura a posição exata do NPC caso já esteja renderizado
+local function GetTeacherPos()
     for _, folder in ipairs({workspace:FindFirstChild("NPCs"), ReplicatedStorage:FindFirstChild("NPCs"), workspace}) do
         if folder then
             local npc = folder:FindFirstChild("Water Kung Fu Teacher", true)
             if npc and npc:IsA("Model") then
                 local root = npc:FindFirstChild("HumanoidRootPart") or npc:FindFirstChild("Head")
                 if root then
-                    return root.CFrame * CFrame.new(0, 0, 3)
+                    return (root.CFrame * CFrame.new(0, 0, 3)).Position
                 end
             end
         end
     end
-    return FallbackTeacherCFrame
+    return FallbackTeacherPos
 end
 
--- 1. Se ainda estiver fora da Underwater City, entra pelo portal oficial
-if hrp.Position.X < 50000 then
+-- 1. Entra na Underwater City usando o remote oficial
+if (hrp.Position - UnderwaterEntrance).Magnitude > 2000 then
     pcall(function()
         ReplicatedStorage.Remotes.CommF_:InvokeServer("requestEntrance", UnderwaterEntrance)
     end)
-    task.wait(0.8)
+    -- Aguarda o servidor confirmar o teleporte para dentro da cidade
+    local timeout = 0
+    while (hrp.Position - UnderwaterEntrance).Magnitude > 2000 and timeout < 30 do
+        timeout += 1
+        task.wait(0.1)
+    end
+    task.wait(0.4)
 end
 
--- 2. Teleporta direto para a frente do Water Kung Fu Teacher
-char = LocalPlayer.Character
-hrp = char and char:FindFirstChild("HumanoidRootPart")
-if hrp then
-    hrp.Anchored = false
-    hrp.CFrame = GetTeacherCFrame()
-    task.wait(0.3)
+-- 2. Ativa NoClip e estabilizador para atravessar a parede da sala secreta sem cair
+local noclipActive = true
+local noclipConn = RunService.Stepped:Connect(function()
+    if not noclipActive then return end
+    if char then
+        for _, part in ipairs(char:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = false
+            end
+        end
+    end
+end)
 
-    -- 3. Compra o estilo de luta Water Kung Fu ($750.000 Beli)
-    pcall(function()
-        ReplicatedStorage.Remotes.CommF_:InvokeServer("BuyFishmanKarate")
-    end)
-end
+local bv = Instance.new("BodyVelocity")
+bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+bv.Velocity = Vector3.zero
+bv.Parent = hrp
+
+-- 3. Move via Tween suave até o NPC (evita que o servidor puxe de volta)
+local targetPos = GetTeacherPos()
+local distance = (hrp.Position - targetPos).Magnitude
+local tweenInfo = TweenInfo.new(distance / 250, Enum.EasingStyle.Linear)
+local tween = TweenService:Create(hrp, tweenInfo, {CFrame = CFrame.new(targetPos)})
+
+tween:Play()
+tween.Completed:Wait()
+
+-- Limpa o NoClip e o BodyVelocity
+noclipActive = false
+if noclipConn then noclipConn:Disconnect() end
+if bv and bv.Parent then bv:Destroy() end
+
+task.wait(0.3)
+
+-- 4. Compra o estilo de luta Water Kung Fu ($750.000 Beli)
+pcall(function()
+    ReplicatedStorage.Remotes.CommF_:InvokeServer("BuyFishmanKarate")
+end)
