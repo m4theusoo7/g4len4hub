@@ -1,171 +1,48 @@
-_G.AutoBuyWaterKungFu = true
-
 local Players = game:GetService("Players")
-local TweenService = game:GetService("TweenService")
-local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local LocalPlayer = Players.LocalPlayer
-local TweenSpeed = 200
+local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+local hrp = char:WaitForChild("HumanoidRootPart")
 
-local FallbackWhirlpool = Vector3.new(3876, 5, -1926)
+-- Coordenadas da Underwater City e do NPC (Sea 1)
 local UnderwaterEntrance = Vector3.new(61163.8515625, 11.6796875, 1819.7841796875)
-local FallbackTeacherPos = Vector3.new(61577, 18, 1564)
+local FallbackTeacherCFrame = CFrame.new(61577, 18, 1564)
 
-local UseNoClip = false
-local NoClipConnection
-NoClipConnection = RunService.Stepped:Connect(function()
-    if not _G.AutoBuyWaterKungFu then
-        if NoClipConnection then NoClipConnection:Disconnect() end
-        return
-    end
-    local char = LocalPlayer.Character
-    if char and UseNoClip then
-        for _, part in ipairs(char:GetDescendants()) do
-            if part:IsA("BasePart") then
-                part.CanCollide = false
-            end
-        end
-    end
-end)
-
--- Procura a parte real do Redemoinho na superfície
-local function FindWhirlpoolPart()
-    local map = workspace:FindFirstChild("Map")
-    if map then
-        for _, obj in ipairs(map:GetDescendants()) do
-            if obj:IsA("BasePart") and (obj.Name:lower():find("whirlpool") or (obj.Parent and obj.Parent.Name:lower():find("whirlpool"))) then
-                return obj
-            end
-        end
-    end
-    for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("BasePart") and obj:FindFirstChildOfClass("TouchTransmitter") then
-            if (obj.Position - FallbackWhirlpool).Magnitude < 300 then
-                return obj
-            end
-        end
-    end
-    return nil
-end
-
--- Procura o NPC Water Kung Fu Teacher dinamicamente no Workspace ou ReplicatedStorage
-local function FindTeacherCFrame()
-    local npcFolders = {workspace:FindFirstChild("NPCs"), ReplicatedStorage:FindFirstChild("NPCs"), workspace}
-    for _, folder in ipairs(npcFolders) do
+-- Procura o CFrame exato do NPC no Workspace ou ReplicatedStorage
+local function GetTeacherCFrame()
+    for _, folder in ipairs({workspace:FindFirstChild("NPCs"), ReplicatedStorage:FindFirstChild("NPCs"), workspace}) do
         if folder then
-            for _, npc in ipairs(folder:GetDescendants()) do
-                if npc:IsA("Model") and npc.Name == "Water Kung Fu Teacher" then
-                    local root = npc:FindFirstChild("HumanoidRootPart") or npc:FindFirstChild("Head")
-                    if root then
-                        return root.CFrame * CFrame.new(0, 0, 3)
-                    end
+            local npc = folder:FindFirstChild("Water Kung Fu Teacher", true)
+            if npc and npc:IsA("Model") then
+                local root = npc:FindFirstChild("HumanoidRootPart") or npc:FindFirstChild("Head")
+                if root then
+                    return root.CFrame * CFrame.new(0, 0, 3)
                 end
             end
         end
     end
-    return CFrame.new(FallbackTeacherPos)
+    return FallbackTeacherCFrame
 end
 
--- Função de Tween com estabilização de gravidade
-local function TweenTo(targetCFrame, stopOnTeleport, surfaceRefPos)
-    local char = LocalPlayer.Character
-    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
-    local hrp = char.HumanoidRootPart
+-- 1. Se ainda estiver fora da Underwater City, entra pelo portal oficial
+if hrp.Position.X < 50000 then
+    pcall(function()
+        ReplicatedStorage.Remotes.CommF_:InvokeServer("requestEntrance", UnderwaterEntrance)
+    end)
+    task.wait(0.8)
+end
 
-    -- Garante que o personagem não esteja preso
+-- 2. Teleporta direto para a frente do Water Kung Fu Teacher
+char = LocalPlayer.Character
+hrp = char and char:FindFirstChild("HumanoidRootPart")
+if hrp then
     hrp.Anchored = false
-    for _, v in ipairs(hrp:GetChildren()) do
-        if v:IsA("BodyVelocity") then v:Destroy() end
-    end
+    hrp.CFrame = GetTeacherCFrame()
+    task.wait(0.3)
 
-    local bv = Instance.new("BodyVelocity")
-    bv.Name = "TweenStabilizer"
-    bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-    bv.Velocity = Vector3.new(0, 0, 0)
-    bv.Parent = hrp
-
-    local distance = (hrp.Position - targetCFrame.Position).Magnitude
-    local duration = math.max(distance / TweenSpeed, 0.1)
-
-    local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear)
-    local tween = TweenService:Create(hrp, tweenInfo, {CFrame = targetCFrame})
-    tween:Play()
-
-    while tween.PlaybackState == Enum.EasingState.Playing and _G.AutoBuyWaterKungFu do
-        task.wait(0.1)
-        -- Se já foi teleportado para longe da superfície, cancela o tween atual
-        if stopOnTeleport and surfaceRefPos and (hrp.Position - surfaceRefPos).Magnitude > 1500 then
-            tween:Cancel()
-            break
-        end
-    end
-
-    if bv and bv.Parent then
-        bv:Destroy()
-    end
+    -- 3. Compra o estilo de luta Water Kung Fu ($750.000 Beli)
+    pcall(function()
+        ReplicatedStorage.Remotes.CommF_:InvokeServer("BuyFishmanKarate")
+    end)
 end
-
--- Execução principal
-task.spawn(function()
-    local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-    local hrp = char:WaitForChild("HumanoidRootPart")
-
-    local whirlpool = FindWhirlpoolPart()
-    local surfacePos = whirlpool and whirlpool.Position or FallbackWhirlpool
-
-    -- Passo 1: Se ainda estiver perto do mar/superfície (menos de 1500 studs do redemoinho), entra na cidade
-    if (hrp.Position - surfacePos).Magnitude < 15000 and hrp.Position.Z < 1000 then
-        UseNoClip = false
-        TweenTo(CFrame.new(surfacePos + Vector3.new(0, 3, 0)), true, surfacePos)
-
-        local attempts = 0
-        while _G.AutoBuyWaterKungFu and (hrp.Position - surfacePos).Magnitude < 1500 and attempts < 30 do
-            attempts += 1
-            whirlpool = whirlpool or FindWhirlpoolPart()
-
-            pcall(function()
-                if whirlpool then
-                    hrp.CFrame = whirlpool.CFrame
-                    firetouchinterest(hrp, whirlpool, 0)
-                    task.wait(0.05)
-                    firetouchinterest(hrp, whirlpool, 1)
-                end
-                ReplicatedStorage.Remotes.CommF_:InvokeServer("requestEntrance", UnderwaterEntrance)
-            end)
-            task.wait(0.3)
-        end
-    end
-
-    -- Aguarda o teleporte da Underwater City concluir totalmente
-    task.wait(1.0)
-
-    -- Atualiza referência do personagem caso o teleporte tenha recriado/reposicionado partes
-    char = LocalPlayer.Character
-    hrp = char and char:FindFirstChild("HumanoidRootPart")
-
-    -- Passo 2: Já dentro da Underwater City (longe do redemoinho da superfície)
-    if _G.AutoBuyWaterKungFu and hrp and (hrp.Position - surfacePos).Magnitude > 1500 then
-        hrp.Anchored = false
-        UseNoClip = true
-
-        local teacherCFrame = FindTeacherCFrame()
-        TweenTo(teacherCFrame, false)
-        task.wait(0.4)
-
-        -- Passo 3: Compra o estilo de luta ($750.000)
-        pcall(function()
-            ReplicatedStorage.Remotes.CommF_:InvokeServer("BuyFishmanKarate")
-        end)
-    end
-
-    -- Limpeza final para não deixar o personagem flutuando ou preso
-    UseNoClip = false
-    if hrp then
-        hrp.Anchored = false
-        for _, v in ipairs(hrp:GetChildren()) do
-            if v:IsA("BodyVelocity") then v:Destroy() end
-        end
-    end
-    _G.AutoBuyWaterKungFu = false
-end)
