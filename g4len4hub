@@ -1,4 +1,4 @@
--- Auto Buy Water Kung Fu (Sea 1) - Delta Executor
+-- Auto Buy Water Kung Fu (Corrigido - Sea 1)
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -8,21 +8,32 @@ local LocalPlayer = Players.LocalPlayer
 local CommF = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("CommF_")
 
 -- Coordenadas Sea 1
-local WhirlpoolPos = Vector3.new(3864.688, 6.736, -1926.214)       -- Entrada na superfície
-local UnderwaterSpawn = Vector3.new(61163.851, 11.679, 1819.784)   -- Ponto interno após entrar
-local TeacherPos = Vector3.new(61273.5, 18.4, 1565.2)              -- NPC Water Kung Fu Teacher
+local WhirlpoolPos = Vector3.new(3864.688, 6.736, -1926.214)
+local UnderwaterEntrance = Vector3.new(61163.851, 11.679, 1819.784)
+local FallbackTeacherPos = Vector3.new(61273.5, 18.4, 1565.2)
 
-local TweenSpeed = 300
+local TweenSpeed = 280
+local activeConnection = nil
 
--- NoClip para evitar ficar preso em paredes/água durante o deslocamento
-local noclipConnection
-local function setNoClip(state)
+-- Controle de NoClip + Anti-Gravidade (evita cair na água e evita rubberband)
+local function setMovementLock(state)
+    local char = LocalPlayer.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+
     if state then
-        if not noclipConnection then
-            noclipConnection = RunService.Stepped:Connect(function()
-                local char = LocalPlayer.Character
-                if char then
-                    for _, part in ipairs(char:GetDescendants()) do
+        if hum then
+            hum.PlatformStand = true
+        end
+        if not activeConnection then
+            activeConnection = RunService.Stepped:Connect(function()
+                local c = LocalPlayer.Character
+                local hrp = c and c:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    hrp.AssemblyLinearVelocity = Vector3.zero
+                    hrp.AssemblyAngularVelocity = Vector3.zero
+                end
+                if c then
+                    for _, part in ipairs(c:GetDescendants()) do
                         if part:IsA("BasePart") and part.CanCollide then
                             part.CanCollide = false
                         end
@@ -31,74 +42,113 @@ local function setNoClip(state)
             end)
         end
     else
-        if noclipConnection then
-            noclipConnection:Disconnect()
-            noclipConnection = nil
+        if activeConnection then
+            activeConnection:Disconnect()
+            activeConnection = nil
+        end
+        if hum then
+            hum.PlatformStand = false
+        end
+        if char then
+            for _, part in ipairs(char:GetDescendants()) do
+                if part:IsA("BasePart") and (part.Name == "HumanoidRootPart" or part.Name == "Torso" or part.Name == "UpperTorso") then
+                    part.CanCollide = true
+                end
+            end
         end
     end
 end
 
--- Movimentação suave via Tween
-local function tweenTo(targetVector)
+-- Tween estável
+local function tweenTo(targetCFrame)
     local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
     local hrp = char:WaitForChild("HumanoidRootPart")
-    
-    local distance = (hrp.Position - targetVector).Magnitude
+
+    local distance = (hrp.Position - targetCFrame.Position).Magnitude
     if distance < 5 then
-        hrp.CFrame = CFrame.new(targetVector)
+        hrp.CFrame = targetCFrame
         return
     end
 
     local duration = distance / TweenSpeed
-    local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear)
-    local tween = TweenService:Create(hrp, tweenInfo, {CFrame = CFrame.new(targetVector)})
-    
+    local tween = TweenService:Create(hrp, TweenInfo.new(duration, Enum.EasingStyle.Linear), {CFrame = targetCFrame})
     tween:Play()
     tween.Completed:Wait()
 end
 
--- Verifica se já está dentro da Underwater City (X > 50000 no Sea 1)
-local function isInsideUnderwaterCity()
+-- Checa se está na Underwater City
+local function isInsideUnderwater()
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     return hrp and hrp.Position.X > 50000
 end
 
--- Execução Principal
+-- Procura o NPC dinamicamente
+local function getTeacherCFrame()
+    local npcs = workspace:FindFirstChild("NPCs")
+    if npcs then
+        local teacher = npcs:FindFirstChild("Water Kung Fu Teacher")
+        if teacher and teacher:FindFirstChild("HumanoidRootPart") then
+            return teacher.HumanoidRootPart.CFrame * CFrame.new(0, 0, 3)
+        end
+    end
+    return CFrame.new(FallbackTeacherPos)
+end
+
+-- Execução
 task.spawn(function()
     local beli = LocalPlayer:WaitForChild("Data"):WaitForChild("Beli").Value
     if beli < 750000 then
-        warn("[OmegaCore] Beli insuficiente! Você precisa de $750,000 (Atual: $" .. tostring(beli) .. ")")
+        warn("[OmegaCore] Beli insuficiente: $" .. tostring(beli) .. " / $750,000")
         return
     end
 
-    setNoClip(true)
+    setMovementLock(true)
 
-    -- Passo 1: Entrar na Underwater City se ainda estiver na superfície
-    if not isInsideUnderwaterCity() then
-        -- Tenta o teleporte direto pelo Remote oficial do redemoinho
-        CommF:InvokeServer("requestEntrance", UnderwaterSpawn)
-        task.wait(1.2)
+    -- 1. Entrar na Underwater City
+    if not isInsideUnderwater() then
+        CommF:InvokeServer("requestEntrance", UnderwaterEntrance)
+        task.wait(1.5)
 
-        -- Fallback: se o Remote não teleportar à distância, vai até o redemoinho e ativa
-        if not isInsideUnderwaterCity() then
-            tweenTo(WhirlpoolPos)
-            task.wait(0.5)
-            CommF:InvokeServer("requestEntrance", UnderwaterSpawn)
-            task.wait(1.2)
+        -- Fallback: vai até o redemoinho físico e força o toque/entrada
+        if not isInsideUnderwater() then
+            tweenTo(CFrame.new(WhirlpoolPos))
+            task.wait(0.3)
+
+            -- Tenta disparar TouchInterest se existir no mapa
+            for _, obj in ipairs(workspace:GetDescendants()) do
+                if obj:IsA("BasePart") and (obj.Position - WhirlpoolPos).Magnitude < 40 and obj:FindFirstChildOfClass("TouchTransmitter") then
+                    if firetouchinterest then
+                        local hrp = LocalPlayer.Character.HumanoidRootPart
+                        firetouchinterest(hrp, obj, 0)
+                        task.wait(0.1)
+                        firetouchinterest(hrp, obj, 1)
+                    end
+                end
+            end
+
+            CommF:InvokeServer("requestEntrance", UnderwaterEntrance)
+            task.wait(1.5)
         end
     end
 
-    -- Passo 2: Ir até o NPC Water Kung Fu Teacher e comprar
-    if isInsideUnderwaterCity() then
-        tweenTo(TeacherPos)
-        task.wait(0.5)
-        
-        local result = CommF:InvokeServer("BuyFishmanKarate")
-        print("[OmegaCore] Resposta da compra:", result)
+    -- 2. Aguarda streaming da área interna e vai até o NPC
+    if isInsideUnderwater() then
+        pcall(function()
+            workspace:RequestStreamAroundAsync(FallbackTeacherPos)
+        end)
+        task.wait(0.8)
+
+        local targetCF = getTeacherCFrame()
+        tweenTo(targetCF)
+        task.wait(0.4)
+
+        local response = CommF:InvokeServer("BuyFishmanKarate")
+        print("[OmegaCore] Status da compra:", response)
     else
-        warn("[OmegaCore] Falha ao entrar na Underwater City.")
+        warn("[OmegaCore] Não foi possível entrar na Underwater City.")
     end
 
-    setNoClip(false)
+    task.wait(0.3)
+    setMovementLock(false)
 end)
