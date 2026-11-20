@@ -29,7 +29,7 @@ NoClipConnection = RunService.Stepped:Connect(function()
     end
 end)
 
--- Procura a parte real do Redemoinho no Workspace
+-- Procura a parte real do Redemoinho na superfície
 local function FindWhirlpoolPart()
     local map = workspace:FindFirstChild("Map")
     if map then
@@ -67,11 +67,17 @@ local function FindTeacherCFrame()
     return CFrame.new(FallbackTeacherPos)
 end
 
--- Tween com estabilização de gravidade (BodyVelocity)
-local function TweenTo(targetCFrame)
+-- Função de Tween com estabilização de gravidade
+local function TweenTo(targetCFrame, stopOnTeleport, surfaceRefPos)
     local char = LocalPlayer.Character
     if not char or not char:FindFirstChild("HumanoidRootPart") then return end
     local hrp = char.HumanoidRootPart
+
+    -- Garante que o personagem não esteja preso
+    hrp.Anchored = false
+    for _, v in ipairs(hrp:GetChildren()) do
+        if v:IsA("BodyVelocity") then v:Destroy() end
+    end
 
     local bv = Instance.new("BodyVelocity")
     bv.Name = "TweenStabilizer"
@@ -88,7 +94,8 @@ local function TweenTo(targetCFrame)
 
     while tween.PlaybackState == Enum.EasingState.Playing and _G.AutoBuyWaterKungFu do
         task.wait(0.1)
-        if targetCFrame.Position.X < 50000 and hrp.Position.X > 50000 then
+        -- Se já foi teleportado para longe da superfície, cancela o tween atual
+        if stopOnTeleport and surfaceRefPos and (hrp.Position - surfaceRefPos).Magnitude > 1500 then
             tween:Cancel()
             break
         end
@@ -104,16 +111,16 @@ task.spawn(function()
     local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
     local hrp = char:WaitForChild("HumanoidRootPart")
 
-    -- Passo 1: Entrar na Underwater City se ainda estiver na superfície
-    if hrp.Position.X < 50000 then
-        UseNoClip = false
-        local whirlpool = FindWhirlpoolPart()
-        local targetPos = whirlpool and whirlpool.Position or FallbackWhirlpool
+    local whirlpool = FindWhirlpoolPart()
+    local surfacePos = whirlpool and whirlpool.Position or FallbackWhirlpool
 
-        TweenTo(CFrame.new(targetPos + Vector3.new(0, 3, 0)))
+    -- Passo 1: Se ainda estiver perto do mar/superfície (menos de 1500 studs do redemoinho), entra na cidade
+    if (hrp.Position - surfacePos).Magnitude < 15000 and hrp.Position.Z < 1000 then
+        UseNoClip = false
+        TweenTo(CFrame.new(surfacePos + Vector3.new(0, 3, 0)), true, surfacePos)
 
         local attempts = 0
-        while _G.AutoBuyWaterKungFu and hrp.Position.X < 50000 and attempts < 30 do
+        while _G.AutoBuyWaterKungFu and (hrp.Position - surfacePos).Magnitude < 1500 and attempts < 30 do
             attempts += 1
             whirlpool = whirlpool or FindWhirlpoolPart()
 
@@ -130,19 +137,20 @@ task.spawn(function()
         end
     end
 
-    -- Aguarda o personagem estabilizar dentro da Underwater City e o mapa carregar
-    local waitLoad = 0
-    while _G.AutoBuyWaterKungFu and hrp.Position.X < 50000 and waitLoad < 20 do
-        waitLoad += 1
-        task.wait(0.2)
-    end
-    task.wait(1.2)
+    -- Aguarda o teleporte da Underwater City concluir totalmente
+    task.wait(1.0)
 
-    -- Passo 2: Já dentro da Underwater City, busca o NPC exato e vai até ele
-    if _G.AutoBuyWaterKungFu and hrp.Position.X > 50000 then
+    -- Atualiza referência do personagem caso o teleporte tenha recriado/reposicionado partes
+    char = LocalPlayer.Character
+    hrp = char and char:FindFirstChild("HumanoidRootPart")
+
+    -- Passo 2: Já dentro da Underwater City (longe do redemoinho da superfície)
+    if _G.AutoBuyWaterKungFu and hrp and (hrp.Position - surfacePos).Magnitude > 1500 then
+        hrp.Anchored = false
         UseNoClip = true
+
         local teacherCFrame = FindTeacherCFrame()
-        TweenTo(teacherCFrame)
+        TweenTo(teacherCFrame, false)
         task.wait(0.4)
 
         -- Passo 3: Compra o estilo de luta ($750.000)
@@ -151,6 +159,13 @@ task.spawn(function()
         end)
     end
 
+    -- Limpeza final para não deixar o personagem flutuando ou preso
     UseNoClip = false
+    if hrp then
+        hrp.Anchored = false
+        for _, v in ipairs(hrp:GetChildren()) do
+            if v:IsA("BodyVelocity") then v:Destroy() end
+        end
+    end
     _G.AutoBuyWaterKungFu = false
 end)
