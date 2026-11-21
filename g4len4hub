@@ -25,12 +25,9 @@ local Config = {
 
 local CurrentTween = nil
 local LastTweenTargetPos = nil
-local LastKnownHrpPos = nil
 local NoClipConnection = nil
 local LastAuraCheck = 0
-local LastEntranceRemote = 0
-local LastTouchFire = 0
-local PortalCache = {}
+local LastEntranceCheck = 0
 
 local QuestInProgress = false
 local ActiveTask = nil
@@ -65,37 +62,13 @@ local function CancelTween()
     LastTweenTargetPos = nil
 end
 
-local function ScanSkyPortal(key, basePos)
-    local cached = PortalCache[key]
-    if cached and (os.clock() - cached.LastScan) < 1.0 and #cached.Parts > 0 then
-        return cached.Pos, cached.Parts
+local function IsValidMobAltitude(mobName, pos)
+    if not pos then return false end
+    if mobName == "God's Guard" then
+        return pos.Y >= 650 and pos.Y <= 1200
+    else
+        return pos.Y >= 5200 and pos.Y <= 6200
     end
-
-    local touchParts = {}
-    local bestPos = nil
-    local bestDist = math.huge
-
-    for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("TouchTransmitter") and obj.Parent and obj.Parent:IsA("BasePart") then
-            local part = obj.Parent
-            local dist = (part.Position - basePos).Magnitude
-            if dist <= 250 then
-                table.insert(touchParts, part)
-                if dist < bestDist then
-                    bestDist = dist
-                    bestPos = part.Position
-                end
-            end
-        end
-    end
-
-    local finalPos = bestPos or basePos
-    PortalCache[key] = {
-        LastScan = os.clock(),
-        Pos = finalPos,
-        Parts = touchParts
-    }
-    return finalPos, touchParts
 end
 
 local function IsBossAvailable(bossName)
@@ -104,7 +77,8 @@ local function IsBossAvailable(bossName)
         for _, mob in ipairs(enemies:GetChildren()) do
             if mob.Name == bossName then
                 local hum = mob:FindFirstChildOfClass("Humanoid")
-                if hum and hum.Health > 0 then
+                local hrp = mob:FindFirstChild("HumanoidRootPart")
+                if hum and hum.Health > 0 and hrp and IsValidMobAltitude(bossName, hrp.Position) then
                     return true
                 end
             end
@@ -233,9 +207,6 @@ local function SetPhysicsState(character, enabled)
     for _, part in ipairs(character:GetDescendants()) do
         if part:IsA("BasePart") then
             part.CanCollide = not enabled
-            if enabled then
-                part.CanTouch = true
-            end
         end
     end
 end
@@ -341,6 +312,29 @@ local function GetQuestNpcPos(taskInfo)
     return taskInfo.DefaultQuestPos
 end
 
+-- Busca a posição real de spawn dos mobs em _WorldOrigin.EnemySpawns (com fallback para WaitPos)
+local function GetMobWaitPos(taskInfo)
+    local worldOrigin = workspace:FindFirstChild("_WorldOrigin")
+    local enemySpawns = worldOrigin and worldOrigin:FindFirstChild("EnemySpawns")
+    if enemySpawns then
+        local sum = Vector3.zero
+        local count = 0
+        for _, spawnPart in ipairs(enemySpawns:GetChildren()) do
+            if spawnPart:IsA("BasePart") and string.find(spawnPart.Name, taskInfo.TargetMob, 1, true) then
+                if IsValidMobAltitude(taskInfo.TargetMob, spawnPart.Position) then
+                    sum += spawnPart.Position
+                    count += 1
+                end
+            end
+        end
+        if count > 0 then
+            return (sum / count) + Vector3.new(0, 25, 0)
+        end
+    end
+
+    return taskInfo.WaitPos
+end
+
 local function EquipWeapon()
     local character = LocalPlayer.Character
     local backpack = LocalPlayer:FindFirstChild("Backpack")
@@ -386,13 +380,13 @@ local function GetClosestTargetMob(targetMobName)
     if not hrp or not enemies then return nil end
 
     local closestMob = nil
-    local shortestDist = math.huge
+    local shortestDist = 1500
 
     for _, mob in ipairs(enemies:GetChildren()) do
         if mob.Name == targetMobName then
             local mobHum = mob:FindFirstChildOfClass("Humanoid")
             local mobHrp = mob:FindFirstChild("HumanoidRootPart")
-            if mobHum and mobHrp and mobHum.Health > 0 then
+            if mobHum and mobHrp and mobHum.Health > 0 and IsValidMobAltitude(targetMobName, mobHrp.Position) then
                 local dist = (hrp.Position - mobHrp.Position).Magnitude
                 if dist < shortestDist then
                     shortestDist = dist
@@ -421,9 +415,10 @@ local function BringMobs(anchorMob, targetMobName)
         if mob.Name == targetMobName then
             local mobHum = mob:FindFirstChildOfClass("Humanoid")
             local mobHrp = mob:FindFirstChild("HumanoidRootPart")
-            if mobHum and mobHrp and mobHum.Health > 0 then
+            if mobHum and mobHrp and mobHum.Health > 0 and IsValidMobAltitude(targetMobName, mobHrp.Position) then
                 local dist = (mobHrp.Position - anchorCFrame.Position).Magnitude
-                if dist <= Config.BringMobRadius then
+                local heightDiff = math.abs(mobHrp.Position.Y - anchorCFrame.Position.Y)
+                if dist <= Config.BringMobRadius and heightDiff <= 80 then
                     for _, part in ipairs(mob:GetDescendants()) do
                         if part:IsA("BasePart") then
                             part.CanCollide = false
@@ -466,10 +461,42 @@ local function GetTargetsInRange(targetMobName, maxRange)
     return targets
 end
 
-local function TweenStep(targetCFrame, snapAtEnd)
+local function TryIslandEntrance(hrp, targetPos)
+    if not CommF then return false end
+
+    local destination = nil
+    if hrp.Position.Y < 4500 and targetPos.Y > 4500 then
+        destination = Config.UpperEntrancePos
+    elseif hrp.Position.Y > 4500 and targetPos.Y < 2000 then
+        destination = Config.LowerEntrancePos
+    end
+
+    if not destination then
+        return false
+    end
+
+    CancelTween()
+    hrp.AssemblyLinearVelocity = Vector3.zero
+
+    if (os.clock() - LastEntranceCheck) >= 1.2 then
+        LastEntranceCheck = os.clock()
+        pcall(function()
+            CommF:InvokeServer("requestEntrance", destination)
+        end)
+        hrp.AssemblyLinearVelocity = Vector3.zero
+    end
+
+    return true
+end
+
+local function MoveToCFrame(targetCFrame, snapAtEnd)
     local character = LocalPlayer.Character
     local hrp = character and character:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
+
+    if TryIslandEntrance(hrp, targetCFrame.Position) then
+        return
+    end
 
     local distance = (hrp.Position - targetCFrame.Position).Magnitude
 
@@ -496,69 +523,6 @@ local function TweenStep(targetCFrame, snapAtEnd)
     local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear)
     CurrentTween = TweenService:Create(hrp, tweenInfo, { CFrame = targetCFrame })
     CurrentTween:Play()
-end
-
-local function UseSkyPortal(hrp, cacheKey, entranceBasePos, destinationPos)
-    local portalPos, touchParts = ScanSkyPortal(cacheKey, entranceBasePos)
-    local distToPortal = (hrp.Position - portalPos).Magnitude
-
-    if distToPortal > 28 then
-        TweenStep(CFrame.new(portalPos + Vector3.new(0, 4, 0)), false)
-        return
-    end
-
-    -- Chegou no portal: cancela o Tween para não atravessar e força a entrada
-    CancelTween()
-    local t = os.clock()
-    local offset = Vector3.new(math.cos(t * 4) * 3, math.sin(t * 6) * 3, math.sin(t * 4) * 3)
-    hrp.CFrame = CFrame.new(portalPos + offset)
-    hrp.AssemblyLinearVelocity = Vector3.zero
-
-    if (t - LastTouchFire) >= 0.35 then
-        LastTouchFire = t
-        if firetouchinterest then
-            for _, part in ipairs(touchParts) do
-                if part and part.Parent then
-                    pcall(function()
-                        firetouchinterest(hrp, part, 0)
-                        task.wait(0.03)
-                        firetouchinterest(hrp, part, 1)
-                    end)
-                end
-            end
-        end
-    end
-
-    if (t - LastEntranceRemote) >= 1.0 then
-        LastEntranceRemote = t
-        if CommF then
-            pcall(function()
-                CommF:InvokeServer("requestEntrance", destinationPos)
-            end)
-        end
-    end
-end
-
-local function MoveToCFrame(targetCFrame, snapAtEnd)
-    local character = LocalPlayer.Character
-    local hrp = character and character:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-
-    if LastKnownHrpPos and (hrp.Position - LastKnownHrpPos).Magnitude > 500 then
-        CancelTween()
-    end
-    LastKnownHrpPos = hrp.Position
-
-    -- Rota via portal de nuvem para subir a Upper Yard ou descer ao platô dos God's Guard
-    if hrp.Position.Y < 4500 and targetCFrame.Position.Y > 4500 then
-        UseSkyPortal(hrp, "LowerToUpper", Config.LowerEntrancePos, Config.UpperEntrancePos)
-        return
-    elseif hrp.Position.Y > 4500 and targetCFrame.Position.Y < 2000 then
-        UseSkyPortal(hrp, "UpperToLower", Config.UpperEntrancePos, Config.LowerEntrancePos)
-        return
-    end
-
-    TweenStep(targetCFrame, snapAtEnd)
 end
 
 -- Se já houver missão de Upper Skylands ativa ao executar o script, inicia direto no modo farm
@@ -656,7 +620,8 @@ task.spawn(function()
             EnableAura()
             UpdateKillCounter(ActiveTask.TargetMob)
             local guiState = CheckGuiQuestProgress(ActiveTask)
-            local nearBossArena = (hrp.Position - ActiveTask.WaitPos).Magnitude <= 150
+            local waitPos = GetMobWaitPos(ActiveTask)
+            local nearBossArena = (hrp.Position - waitPos).Magnitude <= 150
             local bossDisappeared = ActiveTask.IsBoss and nearBossArena and not IsBossAvailable(ActiveTask.TargetMob)
 
             if guiState == "Completed" or MobsKilledInQuest >= ActiveTask.RequiredKills or bossDisappeared then
@@ -684,7 +649,7 @@ task.spawn(function()
                         BringMobs(targetMob, ActiveTask.TargetMob)
                     end
                 else
-                    MoveToCFrame(CFrame.new(ActiveTask.WaitPos), false)
+                    MoveToCFrame(CFrame.new(waitPos), false)
                 end
 
                 RunService.Heartbeat:Wait()
