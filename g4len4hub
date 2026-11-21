@@ -1,366 +1,620 @@
-_G.AutoSaber = true
+_G.AutoFarmUpperSkylands = true
 
 local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local VirtualInputManager = game:GetService("VirtualInputManager")
-local VirtualUser = game:GetService("VirtualUser")
 
 local LocalPlayer = Players.LocalPlayer
-local CommF = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("CommF_")
+local Remotes = ReplicatedStorage:FindFirstChild("Remotes")
+local CommF = Remotes and Remotes:FindFirstChild("CommF_")
+local NetFolder = ReplicatedStorage:FindFirstChild("Modules") and ReplicatedStorage.Modules:FindFirstChild("Net")
+local RegisterAttack = NetFolder and NetFolder:FindFirstChild("RE/RegisterAttack")
+local RegisterHit = NetFolder and NetFolder:FindFirstChild("RE/RegisterHit")
 
-local function Log(msg)
-    print("[OmegaCore - AutoSaber] " .. tostring(msg))
+local Config = {
+    UpperEntrancePos = Vector3.new(-7894.62, 5547.14, -380.29),
+    LowerEntrancePos = Vector3.new(-4607.87, 872.54, -1667.55),
+    MaxLevel = 625,
+    TweenSpeed = 200,
+    DistanceFarm = 8,
+    BringMobRadius = 250,
+    AttackDelay = 0.08
+}
+
+local CurrentTween = nil
+local LastTweenTargetPos = nil
+local LastKnownHrpPos = nil
+local NoClipConnection = nil
+local LastAuraCheck = 0
+local LastEntranceCheck = 0
+
+local QuestInProgress = false
+local ActiveTask = nil
+local MobsKilledInQuest = 0
+local CountedDeadMobs = setmetatable({}, { __mode = "k" })
+
+local function GetLevel()
+    local data = LocalPlayer:FindFirstChild("Data")
+    local level = data and data:FindFirstChild("Level")
+    return level and level.Value or 450
 end
 
--- ==========================================
--- NOCLIP E ANTI-GRAVIDADE
--- ==========================================
-RunService.Stepped:Connect(function()
-    local char = LocalPlayer.Character
-    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
-    local hrp = char.HumanoidRootPart
+local function EnableAura()
+    if not CommF then return end
+    local character = LocalPlayer.Character
+    local hum = character and character:FindFirstChildOfClass("Humanoid")
+    if not character or not hum or hum.Health <= 0 then return end
 
-    if _G.AutoSaber then
-        for _, v in ipairs(char:GetDescendants()) do
-            if v:IsA("BasePart") and v.CanCollide then
-                v.CanCollide = false
-            end
-        end
-        if not hrp:FindFirstChild("OmegaHold") then
-            local bv = Instance.new("BodyVelocity")
-            bv.Name = "OmegaHold"
-            bv.MaxForce = Vector3.new(1e5, 1e5, 1e5)
-            bv.Velocity = Vector3.zero
-            bv.Parent = hrp
-        end
-    else
-        if hrp:FindFirstChild("OmegaHold") then
-            hrp.OmegaHold:Destroy()
-        end
-    end
-end)
-
--- ==========================================
--- MOVIMENTO SUAVE POR FRAME
--- ==========================================
-local function MoveTo(targetCFrame, speed)
-    speed = speed or 300
-    local char = LocalPlayer.Character
-    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
-    local hrp = char.HumanoidRootPart
-
-    while _G.AutoSaber and hrp and hrp.Parent do
-        local currentPos = hrp.Position
-        local targetPos = targetCFrame.Position
-        local flatDist = (Vector3.new(currentPos.X, 0, currentPos.Z) - Vector3.new(targetPos.X, 0, targetPos.Z)).Magnitude
-
-        local nextGoal = (flatDist > 250) and Vector3.new(targetPos.X, 220, targetPos.Z) or targetPos
-        local delta = nextGoal - currentPos
-        local dist = delta.Magnitude
-
-        if dist <= 6 then
-            hrp.CFrame = targetCFrame
-            break
-        end
-
-        local step = math.min(dist, speed * RunService.Heartbeat:Wait())
-        hrp.CFrame = CFrame.new(currentPos + delta.Unit * step) * (targetCFrame - targetCFrame.Position)
-    end
-end
-
-local function TouchPart(part, toolHandle)
-    if not part or not part:IsA("BasePart") then return end
-    local char = LocalPlayer.Character
-    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
-    local hrp = char.HumanoidRootPart
-
-    hrp.CFrame = part.CFrame
-    task.wait(0.2)
-    if firetouchinterest then
+    if not character:FindFirstChild("HasBuso") and (os.clock() - LastAuraCheck) >= 3 then
+        LastAuraCheck = os.clock()
         pcall(function()
-            if toolHandle and toolHandle:IsA("BasePart") then
-                firetouchinterest(toolHandle, part, 0)
-                task.wait(0.05)
-                firetouchinterest(toolHandle, part, 1)
-            end
-            firetouchinterest(hrp, part, 0)
-            task.wait(0.05)
-            firetouchinterest(hrp, part, 1)
+            CommF:InvokeServer("Buso")
         end)
     end
 end
 
-local function EquipItem(name)
-    local char = LocalPlayer.Character
-    local bp = LocalPlayer.Backpack
-    if not char or not bp then return nil end
-
-    if char:FindFirstChild(name) then return char[name] end
-    local item = bp:FindFirstChild(name)
-    if item then
-        char.Humanoid:EquipTool(item)
-        task.wait(0.25)
-        return item
+local function CancelTween()
+    if CurrentTween then
+        CurrentTween:Cancel()
+        CurrentTween = nil
     end
-    return nil
+    LastTweenTargetPos = nil
 end
 
-local function HasItem(name)
-    local char = LocalPlayer.Character
-    local bp = LocalPlayer.Backpack
-    return (char and char:FindFirstChild(name)) or (bp and bp:FindFirstChild(name))
-end
-
--- ==========================================
--- COMBATE
--- ==========================================
-local function EquipWeapon()
-    local char = LocalPlayer.Character
-    local bp = LocalPlayer.Backpack
-    if not char or not bp then return end
-
-    for _, t in ipairs(char:GetChildren()) do
-        if t:IsA("Tool") and (t.ToolTip == "Melee" or t.ToolTip == "Sword") then return end
-    end
-    for _, t in ipairs(bp:GetChildren()) do
-        if t:IsA("Tool") and (t.ToolTip == "Melee" or t.ToolTip == "Sword") then
-            char.Humanoid:EquipTool(t)
-            break
-        end
-    end
-end
-
-local function KillBoss(bossName, waitCFrame)
-    Log("Indo até " .. bossName .. "...")
-    MoveTo(waitCFrame)
-    task.wait(1)
-
-    while _G.AutoSaber do
-        local target = nil
-        for _, v in ipairs(workspace.Enemies:GetChildren()) do
-            if string.find(v.Name, bossName) and v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 and v:FindFirstChild("HumanoidRootPart") then
-                target = v
-                break
-            end
-        end
-
-        if target then
-            if LocalPlayer.Character and not LocalPlayer.Character:FindFirstChild("HasBuso") then
-                pcall(function() CommF:InvokeServer("Buso") end)
-            end
-            EquipWeapon()
-
-            LocalPlayer.Character.HumanoidRootPart.CFrame = target.HumanoidRootPart.CFrame * CFrame.new(0, 20, 0) * CFrame.Angles(math.rad(-90), 0, 0)
-            target.HumanoidRootPart.CanCollide = false
-
-            VirtualUser:CaptureController()
-            VirtualUser:Button1Down(Vector2.new(1280, 672))
-            for _, key in ipairs({Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C}) do
-                VirtualInputManager:SendKeyEvent(true, key, false, game)
-                task.wait(0.03)
-                VirtualInputManager:SendKeyEvent(false, key, false, game)
-            end
-        else
-            MoveTo(waitCFrame)
-            task.wait(1.5)
-            local stillAlive = false
-            for _, v in ipairs(workspace.Enemies:GetChildren()) do
-                if string.find(v.Name, bossName) and v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 then
-                    stillAlive = true
+local function IsBossAvailable(bossName)
+    local enemies = workspace:FindFirstChild("Enemies")
+    if enemies then
+        for _, mob in ipairs(enemies:GetChildren()) do
+            if mob.Name == bossName then
+                local hum = mob:FindFirstChildOfClass("Humanoid")
+                if hum and hum.Health > 0 then
+                    return true
                 end
             end
-            if not stillAlive then
-                Log(bossName .. " derrotado ou não spawnado!")
-                break
-            end
         end
-        task.wait()
+    end
+
+    local storedBoss = ReplicatedStorage:FindFirstChild(bossName)
+    if storedBoss then
+        local hum = storedBoss:FindFirstChildOfClass("Humanoid")
+        if not hum or hum.Health > 0 then
+            return true
+        end
+    end
+
+    return false
+end
+
+local function GetAllSkylandsTasks()
+    return {
+        ThunderGod = {
+            QuestName = "SkyExp2Quest",
+            QuestNpcName = "Sky Adventurer",
+            DefaultQuestPos = Vector3.new(-7839.17, 5635.99, -1411.73),
+            TargetMob = "Thunder God",
+            QuestLevel = 3,
+            RequiredKills = 1,
+            IsBoss = true,
+            WaitPos = Vector3.new(-7917.53, 5616.61, -2277.79)
+        },
+        RoyalSoldier = {
+            QuestName = "SkyExp2Quest",
+            QuestNpcName = "Sky Adventurer",
+            DefaultQuestPos = Vector3.new(-7839.17, 5635.99, -1411.73),
+            TargetMob = "Royal Soldier",
+            QuestLevel = 2,
+            RequiredKills = 8,
+            IsBoss = false,
+            WaitPos = Vector3.new(-7824.44, 5645.97, -1738.28)
+        },
+        RoyalSquad = {
+            QuestName = "SkyExp2Quest",
+            QuestNpcName = "Sky Adventurer",
+            DefaultQuestPos = Vector3.new(-7839.17, 5635.99, -1411.73),
+            TargetMob = "Royal Squad",
+            QuestLevel = 1,
+            RequiredKills = 8,
+            IsBoss = false,
+            WaitPos = Vector3.new(-7654.25, 5637.11, -1407.76)
+        },
+        Wysper = {
+            QuestName = "SkyExp1Quest",
+            QuestNpcName = "Mole",
+            DefaultQuestPos = Vector3.new(-7859.10, 5544.19, -381.48),
+            TargetMob = "Wysper",
+            QuestLevel = 3,
+            RequiredKills = 1,
+            IsBoss = true,
+            WaitPos = Vector3.new(-7925.48, 5550.76, -636.18)
+        },
+        Shanda = {
+            QuestName = "SkyExp1Quest",
+            QuestNpcName = "Mole",
+            DefaultQuestPos = Vector3.new(-7859.10, 5544.19, -381.48),
+            TargetMob = "Shanda",
+            QuestLevel = 2,
+            RequiredKills = 7,
+            IsBoss = false,
+            WaitPos = Vector3.new(-7685.15, 5566.99, -502.50)
+        },
+        GodsGuard = {
+            QuestName = "SkyExp1Quest",
+            QuestNpcName = "Mole",
+            DefaultQuestPos = Vector3.new(-7859.10, 5544.19, -381.48),
+            TargetMob = "God's Guard",
+            QuestLevel = 1,
+            RequiredKills = 7,
+            IsBoss = false,
+            WaitPos = Vector3.new(-4698.04, 845.18, -1912.72)
+        }
+    }
+end
+
+local function GetUpperSkylandsTaskForLevel()
+    local level = GetLevel()
+    local tasks = GetAllSkylandsTasks()
+
+    if level >= 575 and IsBossAvailable("Thunder God") then
+        return tasks.ThunderGod
+    elseif level >= 550 then
+        return tasks.RoyalSoldier
+    elseif level >= 525 then
+        return tasks.RoyalSquad
+    elseif level >= 500 and IsBossAvailable("Wysper") then
+        return tasks.Wysper
+    elseif level >= 475 then
+        return tasks.Shanda
+    else
+        return tasks.GodsGuard
     end
 end
 
--- ==========================================
--- EXECUÇÃO PRINCIPAL
--- ==========================================
-task.spawn(function()
-    Log("Script iniciado! Verificando nível e progresso...")
+local function SetPhysicsState(character, enabled)
+    if not character then return end
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    local hum = character:FindFirstChildOfClass("Humanoid")
 
-    local lvl = LocalPlayer.Data.Level.Value
-    if lvl < 200 then
-        Log("ERRO: Você precisa ser Nível 200+ (Atual: " .. lvl .. ")")
-        _G.AutoSaber = false
+    if hum and enabled then
+        hum.Sit = false
+    end
+
+    if hrp then
+        local bv = hrp:FindFirstChild("FarmBodyVelocity")
+        if enabled then
+            if not bv then
+                bv = Instance.new("BodyVelocity")
+                bv.Name = "FarmBodyVelocity"
+                bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+                bv.Velocity = Vector3.zero
+                bv.Parent = hrp
+            end
+        elseif bv then
+            bv:Destroy()
+        end
+    end
+
+    for _, part in ipairs(character:GetDescendants()) do
+        if part:IsA("BasePart") then
+            part.CanCollide = not enabled
+        end
+    end
+end
+
+NoClipConnection = RunService.Stepped:Connect(function()
+    if not _G.AutoFarmUpperSkylands then
+        if NoClipConnection then
+            NoClipConnection:Disconnect()
+            NoClipConnection = nil
+        end
         return
     end
 
-    local ok, progress = pcall(function() return CommF:InvokeServer("ProQuestProgress") end)
-    if not ok or type(progress) ~= "table" then progress = {} end
-
-    Log(string.format("Progresso salvo -> Tocha usada: %s | Cálice usado: %s | Mob morto: %s | Relíquia usada: %s",
-        tostring(progress.UsedTorch), tostring(progress.UsedCup), tostring(progress.KilledMob), tostring(progress.UsedRelic)))
-
-    -- ETAPA 1 E 2: BOTÕES + TOCHA (só roda se ainda não usou a tocha)
-    if not progress.UsedTorch then
-        if not HasItem("Torch") then
-            Log("Indo para a Jungle carregar o mapa...")
-            MoveTo(CFrame.new(-1450, 30, 100))
-            task.wait(0.8)
-
-            local jungle = workspace:FindFirstChild("Map") and workspace.Map:FindFirstChild("Jungle")
-            local plates = jungle and jungle:FindFirstChild("QuestPlates")
-            if plates then
-                Log("Ativando os 5 botões da Jungle...")
-                for _, plate in ipairs(plates:GetChildren()) do
-                    if not _G.AutoSaber then return end
-                    local btn = plate:FindFirstChild("Button")
-                    if btn and btn:IsA("BasePart") then
-                        MoveTo(btn.CFrame * CFrame.new(0, 2, 0))
-                        TouchPart(btn)
-                        task.wait(0.3)
-                    end
-                end
+    local character = LocalPlayer.Character
+    if character then
+        for _, part in ipairs(character:GetDescendants()) do
+            if part:IsA("BasePart") and part.CanCollide then
+                part.CanCollide = false
             end
-
-            Log("Pegando a Tocha no subsolo da Jungle...")
-            MoveTo(CFrame.new(-1612.5, 11.5, 163.5))
-            task.wait(0.6)
-            local torchObj = jungle and jungle:FindFirstChild("Torch", true)
-            if torchObj and torchObj:IsA("BasePart") then
-                TouchPart(torchObj)
-            end
-            task.wait(0.5)
         end
+    end
+end)
 
-        -- ETAPA 3: VIAJA ATÉ O DESERTO PRIMEIRO PARA CARREGAR O MAPA, DEPOIS QUEIMA
-        Log("Viajando até o Deserto...")
-        MoveTo(CFrame.new(1114.5, 6.5, 4365.0))
-        task.wait(1) -- Aguarda o mapa do Deserto renderizar
+local function HasAnyActiveQuest()
+    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+    local main = playerGui and playerGui:FindFirstChild("Main")
+    local questGui = main and main:FindFirstChild("Quest")
+    return questGui and questGui.Visible or false
+end
 
-        local desert = workspace:FindFirstChild("Map") and workspace.Map:FindFirstChild("Desert")
-        local burnPart = nil
-        if desert then
-            for _, obj in ipairs(desert:GetDescendants()) do
-                if obj.Name == "Burn" and obj:IsA("BasePart") then
-                    burnPart = obj
+local function CheckGuiQuestProgress(taskInfo)
+    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+    local main = playerGui and playerGui:FindFirstChild("Main")
+    if not main or not taskInfo then return "Unknown" end
+
+    for _, obj in ipairs(main:GetDescendants()) do
+        if obj:IsA("TextLabel") and obj.Visible then
+            local isDialogue = false
+            local parent = obj.Parent
+            while parent and parent ~= main do
+                local pName = string.lower(parent.Name)
+                if string.find(pName, "dialogue") or string.find(pName, "questc") then
+                    isDialogue = true
                     break
                 end
+                parent = parent.Parent
             end
-        end
 
-        if burnPart then
-            Log("Cortina encontrada! Queimando com a Torch...")
-            local torch = EquipItem("Torch")
-            local handle = torch and torch:FindFirstChild("Handle")
-            for i = 1, 6 do
-                if not _G.AutoSaber then return end
-                EquipItem("Torch")
-                TouchPart(burnPart, handle)
-                task.wait(0.3)
-            end
-        else
-            Log("Cortina já estava queimada ou não apareceu.")
-        end
-    end
+            if not isDialogue then
+                local txt = string.lower((obj.Text or "") .. " " .. (obj.ContentText or ""))
+                local matchesMob = false
 
-    -- ETAPA 4, 5, 6: CÁLICE -> ILHA DE GELO -> SICK MAN
-    ok, progress = pcall(function() return CommF:InvokeServer("ProQuestProgress") end)
-    if type(progress) ~= "table" then progress = {} end
+                if taskInfo.TargetMob == "God's Guard" then
+                    local hasGod = string.find(txt, "god") or string.find(txt, "deus")
+                    local hasGuard = string.find(txt, "guard") or string.find(txt, "guarda")
+                    matchesMob = hasGod and hasGuard
+                elseif taskInfo.TargetMob == "Shanda" then
+                    matchesMob = string.find(txt, "shanda") ~= nil
+                elseif taskInfo.TargetMob == "Wysper" then
+                    matchesMob = string.find(txt, "wysper") ~= nil
+                elseif taskInfo.TargetMob == "Royal Squad" then
+                    local hasRoyal = string.find(txt, "royal") or string.find(txt, "real")
+                    local hasSquad = string.find(txt, "squad") or string.find(txt, "esquadr")
+                    matchesMob = hasRoyal and hasSquad
+                elseif taskInfo.TargetMob == "Royal Soldier" then
+                    local hasRoyal = string.find(txt, "royal") or string.find(txt, "real")
+                    local hasSoldier = string.find(txt, "soldier") or string.find(txt, "soldado")
+                    matchesMob = hasRoyal and hasSoldier
+                elseif taskInfo.TargetMob == "Thunder God" then
+                    local hasThunder = string.find(txt, "thunder") or string.find(txt, "trov")
+                    local hasGod = string.find(txt, "god") or string.find(txt, "deus")
+                    matchesMob = hasThunder and hasGod
+                end
 
-    if not progress.UsedCup then
-        if not HasItem("Cup") then
-            Log("Pegando o Cálice no Deserto...")
-            MoveTo(CFrame.new(1113.5, 4.8, 4349.0))
-            task.wait(0.8)
-            local desert = workspace:FindFirstChild("Map") and workspace.Map:FindFirstChild("Desert")
-            local cupPart = desert and desert:FindFirstChild("Cup", true)
-            if cupPart and cupPart:IsA("BasePart") then
-                TouchPart(cupPart)
-                task.wait(0.5)
-            end
-        end
-
-        if not HasItem("Cup") then
-            Log("ERRO: Não pegou o Cálice. Encerrando.")
-            _G.AutoSaber = false
-            return
-        end
-
-        Log("Viajando para a Frozen Village encher o Cálice...")
-        MoveTo(CFrame.new(1395.5, 37.3, -1321.5))
-        task.wait(1)
-
-        local timer = 0
-        while _G.AutoSaber and timer < 15 do
-            local cup = EquipItem("Cup")
-            local ice = workspace:FindFirstChild("Map") and workspace.Map:FindFirstChild("Ice")
-            if ice then
-                for _, obj in ipairs(ice:GetDescendants()) do
-                    if obj.Name == "WaterDrop" and obj:IsA("BasePart") then
-                        LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(obj.Position.X, 37.3, obj.Position.Z)
-                        break
+                if matchesMob then
+                    local donePattern = taskInfo.RequiredKills .. "/" .. taskInfo.RequiredKills
+                    if string.find(txt, donePattern) then
+                        return "Completed"
+                    elseif string.find(txt, "[0-" .. (taskInfo.RequiredKills - 1) .. "]/" .. taskInfo.RequiredKills) then
+                        return "Active"
                     end
                 end
             end
-            if cup and cup:FindFirstChild("Handle") and cup.Handle:FindFirstChild("Water") then
-                Log("Cálice cheio!")
-                break
-            end
-            task.wait(0.5)
-            timer = timer + 0.5
         end
-
-        Log("Entregando o Cálice ao Sick Man...")
-        MoveTo(CFrame.new(1454.0, 88.2, -1391.5))
-        EquipItem("Cup")
-        task.wait(0.5)
-        CommF:InvokeServer("ProQuestProgress", "SickMan")
-        task.wait(0.8)
     end
 
-    -- ETAPA 7, 8, 9, 10: RICH MAN -> MOB LEADER -> RELÍQUIA -> PORTA
-    ok, progress = pcall(function() return CommF:InvokeServer("ProQuestProgress") end)
-    if type(progress) ~= "table" then progress = {} end
+    return "Unknown"
+end
 
-    if not progress.UsedRelic then
-        if not HasItem("Relic") then
-            Log("Indo falar com o Rich Man...")
-            MoveTo(CFrame.new(-906.0, 13.7, 4077.5))
-            task.wait(0.6)
-            CommF:InvokeServer("ProQuestProgress", "RichSon")
-            task.wait(0.8)
+-- Localiza o NPC da missão dinamicamente (Mole ou Sky Adventurer, com fallback para DefaultQuestPos)
+local function GetQuestNpcPos(taskInfo)
+    local npcs = workspace:FindFirstChild("NPCs")
+    local npc = npcs and npcs:FindFirstChild(taskInfo.QuestNpcName)
+    if npc and npc:FindFirstChild("HumanoidRootPart") then
+        return npc.HumanoidRootPart.Position + Vector3.new(0, 3, 3.5)
+    end
 
-            ok, progress = pcall(function() return CommF:InvokeServer("ProQuestProgress") end)
-            if type(progress) == "table" and not progress.KilledMob then
-                KillBoss("Mob Leader", CFrame.new(-2852.0, 7.3, 5318.0))
-                task.wait(0.5)
-            end
+    local storedNpc = ReplicatedStorage:FindFirstChild(taskInfo.QuestNpcName)
+    if storedNpc and storedNpc:FindFirstChild("HumanoidRootPart") then
+        return storedNpc.HumanoidRootPart.Position + Vector3.new(0, 3, 3.5)
+    end
 
-            Log("Voltando no Rich Man para pegar a Relíquia...")
-            MoveTo(CFrame.new(-906.0, 13.7, 4077.5))
-            task.wait(0.6)
-            CommF:InvokeServer("ProQuestProgress", "RichSon")
-            task.wait(0.8)
+    return taskInfo.DefaultQuestPos
+end
+
+local function EquipWeapon()
+    local character = LocalPlayer.Character
+    local backpack = LocalPlayer:FindFirstChild("Backpack")
+    local hum = character and character:FindFirstChildOfClass("Humanoid")
+    if not character or not backpack or not hum then return nil end
+
+    local equipped = character:FindFirstChildOfClass("Tool")
+    if equipped and (equipped.ToolTip == "Melee" or equipped.ToolTip == "Sword" or equipped.Name == "Combat") then
+        return equipped
+    end
+
+    for _, tool in ipairs(backpack:GetChildren()) do
+        if tool:IsA("Tool") and (tool.ToolTip == "Melee" or tool.ToolTip == "Sword" or tool.Name == "Combat") then
+            hum:EquipTool(tool)
+            return tool
         end
+    end
 
-        Log("Indo abrir a porta da Relíquia na Jungle...")
-        MoveTo(CFrame.new(-1406.0, 29.8, 4.5))
-        task.wait(1)
-        local relic = EquipItem("Relic")
-        local relicHandle = relic and relic:FindFirstChild("Handle")
-        local jungle = workspace:FindFirstChild("Map") and workspace.Map:FindFirstChild("Jungle")
-        if jungle then
-            for _, obj in ipairs(jungle:GetDescendants()) do
-                if (obj.Name == "Door" or (obj.Parent and obj.Parent.Name == "Door")) and obj:IsA("BasePart") then
-                    EquipItem("Relic")
-                    TouchPart(obj, relicHandle)
-                    task.wait(0.5)
+    return nil
+end
+
+local function UpdateKillCounter(targetMobName)
+    local enemies = workspace:FindFirstChild("Enemies")
+    if not enemies then return end
+
+    for _, mob in ipairs(enemies:GetChildren()) do
+        if mob.Name == targetMobName and not CountedDeadMobs[mob] then
+            local mobHum = mob:FindFirstChildOfClass("Humanoid")
+            if mobHum and mobHum.Health <= 0 then
+                CountedDeadMobs[mob] = true
+                if QuestInProgress then
+                    MobsKilledInQuest += 1
+                end
+            end
+        end
+    end
+end
+
+local function GetClosestTargetMob(targetMobName)
+    local character = LocalPlayer.Character
+    local hrp = character and character:FindFirstChild("HumanoidRootPart")
+    local enemies = workspace:FindFirstChild("Enemies")
+    if not hrp or not enemies then return nil end
+
+    local closestMob = nil
+    local shortestDist = math.huge
+
+    for _, mob in ipairs(enemies:GetChildren()) do
+        if mob.Name == targetMobName then
+            local mobHum = mob:FindFirstChildOfClass("Humanoid")
+            local mobHrp = mob:FindFirstChild("HumanoidRootPart")
+            if mobHum and mobHrp and mobHum.Health > 0 then
+                local dist = (hrp.Position - mobHrp.Position).Magnitude
+                if dist < shortestDist then
+                    shortestDist = dist
+                    closestMob = mob
                 end
             end
         end
     end
 
-    -- ETAPA FINAL: SABER EXPERT
-    KillBoss("Saber Expert", CFrame.new(-1402.0, 29.8, -32.0))
+    return closestMob
+end
 
-    _G.AutoSaber = false
-    Log("Processo concluído!")
+local function BringMobs(anchorMob, targetMobName)
+    local enemies = workspace:FindFirstChild("Enemies")
+    local anchorHrp = anchorMob and anchorMob:FindFirstChild("HumanoidRootPart")
+    if not enemies or not anchorHrp then return end
+
+    pcall(function()
+        sethiddenproperty(LocalPlayer, "SimulationRadius", math.huge)
+    end)
+
+    local anchorCFrame = anchorHrp.CFrame
+    anchorHrp.AssemblyLinearVelocity = Vector3.zero
+
+    for _, mob in ipairs(enemies:GetChildren()) do
+        if mob.Name == targetMobName then
+            local mobHum = mob:FindFirstChildOfClass("Humanoid")
+            local mobHrp = mob:FindFirstChild("HumanoidRootPart")
+            if mobHum and mobHrp and mobHum.Health > 0 then
+                local dist = (mobHrp.Position - anchorCFrame.Position).Magnitude
+                if dist <= Config.BringMobRadius then
+                    for _, part in ipairs(mob:GetDescendants()) do
+                        if part:IsA("BasePart") then
+                            part.CanCollide = false
+                        end
+                    end
+
+                    if mob ~= anchorMob then
+                        mobHrp.CFrame = anchorCFrame
+                    end
+
+                    mobHrp.AssemblyLinearVelocity = Vector3.zero
+                    mobHrp.AssemblyAngularVelocity = Vector3.zero
+                    mobHum.WalkSpeed = 0
+                    mobHum.JumpPower = 0
+                end
+            end
+        end
+    end
+end
+
+local function GetTargetsInRange(targetMobName, maxRange)
+    local character = LocalPlayer.Character
+    local hrp = character and character:FindFirstChild("HumanoidRootPart")
+    local enemies = workspace:FindFirstChild("Enemies")
+    local targets = {}
+    if not hrp or not enemies or not targetMobName then return targets end
+
+    for _, mob in ipairs(enemies:GetChildren()) do
+        if mob.Name == targetMobName then
+            local mobHum = mob:FindFirstChildOfClass("Humanoid")
+            local mobHrp = mob:FindFirstChild("HumanoidRootPart")
+            if mobHum and mobHrp and mobHum.Health > 0 then
+                if (hrp.Position - mobHrp.Position).Magnitude <= maxRange then
+                    table.insert(targets, { mob, mobHrp })
+                end
+            end
+        end
+    end
+
+    return targets
+end
+
+local function MoveToCFrame(targetCFrame, snapAtEnd)
+    local character = LocalPlayer.Character
+    local hrp = character and character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    if LastKnownHrpPos and (hrp.Position - LastKnownHrpPos).Magnitude > 500 then
+        CancelTween()
+    end
+    LastKnownHrpPos = hrp.Position
+
+    if CommF and (os.clock() - LastEntranceCheck) >= 1.5 then
+        if hrp.Position.Y < 3000 and targetCFrame.Position.Y > 4500 then
+            LastEntranceCheck = os.clock()
+            pcall(function()
+                CommF:InvokeServer("requestEntrance", Config.UpperEntrancePos)
+            end)
+        elseif hrp.Position.Y > 4500 and targetCFrame.Position.Y < 2000 then
+            LastEntranceCheck = os.clock()
+            pcall(function()
+                CommF:InvokeServer("requestEntrance", Config.LowerEntrancePos)
+            end)
+        end
+    end
+
+    local distance = (hrp.Position - targetCFrame.Position).Magnitude
+
+    if distance <= 3.5 then
+        CancelTween()
+        if snapAtEnd then
+            hrp.CFrame = targetCFrame
+        end
+        return
+    end
+
+    local targetMoved = not LastTweenTargetPos or (LastTweenTargetPos - targetCFrame.Position).Magnitude > 4
+
+    if CurrentTween and CurrentTween.PlaybackState == Enum.PlaybackState.Playing and not targetMoved then
+        return
+    end
+
+    if CurrentTween then
+        CurrentTween:Cancel()
+    end
+
+    LastTweenTargetPos = targetCFrame.Position
+    local duration = math.max(distance / Config.TweenSpeed, 0.05)
+    local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear)
+    CurrentTween = TweenService:Create(hrp, tweenInfo, { CFrame = targetCFrame })
+    CurrentTween:Play()
+end
+
+-- Se já houver missão de Upper Skylands ativa ao executar o script, inicia direto no modo farm
+local allTasks = GetAllSkylandsTasks()
+for _, taskCandidate in pairs(allTasks) do
+    if CheckGuiQuestProgress(taskCandidate) == "Active" then
+        ActiveTask = taskCandidate
+        QuestInProgress = true
+        break
+    end
+end
+
+-- Thread do Fast Attack
+task.spawn(function()
+    while _G.AutoFarmUpperSkylands and GetLevel() < Config.MaxLevel do
+        local character = LocalPlayer.Character
+        local hum = character and character:FindFirstChildOfClass("Humanoid")
+
+        if character and hum and hum.Health > 0 and QuestInProgress and ActiveTask then
+            local tool = EquipWeapon()
+            local targets = GetTargetsInRange(ActiveTask.TargetMob, 25)
+
+            if tool and #targets > 0 then
+                pcall(function()
+                    local cam = workspace.CurrentCamera
+                    local cx = cam and (cam.ViewportSize.X / 2) or 500
+                    local cy = cam and (cam.ViewportSize.Y / 2) or 300
+
+                    VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, true, game, 1)
+                    VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, false, game, 1)
+                    tool:Activate()
+
+                    if RegisterAttack and RegisterHit then
+                        RegisterAttack:FireServer(0)
+                        RegisterHit:FireServer(targets[1][2], targets)
+                    end
+                end)
+            end
+        end
+
+        task.wait(Config.AttackDelay)
+    end
+end)
+
+-- Loop principal sequencial (Lv. 450 ao Lv. 625 em Upper Skylands)
+task.spawn(function()
+    while _G.AutoFarmUpperSkylands and GetLevel() < Config.MaxLevel do
+        local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+        local hrp = character:WaitForChild("HumanoidRootPart")
+        local hum = character:WaitForChild("Humanoid")
+
+        if hum.Health <= 0 then
+            CancelTween()
+            task.wait(0.5)
+        elseif not QuestInProgress then
+            EnableAura()
+            local nextTask = GetUpperSkylandsTaskForLevel()
+            local npcPos = GetQuestNpcPos(nextTask)
+            local distToNpc = (hrp.Position - npcPos).Magnitude
+
+            SetPhysicsState(character, true)
+
+            if distToNpc > 7 then
+                MoveToCFrame(CFrame.new(npcPos), false)
+                RunService.Heartbeat:Wait()
+            else
+                CancelTween()
+                hrp.AssemblyLinearVelocity = Vector3.zero
+                task.wait(0.2)
+
+                if CommF then
+                    if HasAnyActiveQuest() and CheckGuiQuestProgress(nextTask) ~= "Active" then
+                        pcall(function()
+                            CommF:InvokeServer("AbandonQuest")
+                        end)
+                        task.wait(0.2)
+                    end
+
+                    for _ = 1, 3 do
+                        if CheckGuiQuestProgress(nextTask) == "Active" then
+                            break
+                        end
+                        pcall(function()
+                            CommF:InvokeServer("StartQuest", nextTask.QuestName, nextTask.QuestLevel)
+                        end)
+                        task.wait(0.25)
+                    end
+                end
+
+                ActiveTask = nextTask
+                MobsKilledInQuest = 0
+                QuestInProgress = true
+            end
+        else
+            EnableAura()
+            UpdateKillCounter(ActiveTask.TargetMob)
+            local guiState = CheckGuiQuestProgress(ActiveTask)
+            local nearBossArena = (hrp.Position - ActiveTask.WaitPos).Magnitude <= 150
+            local bossDisappeared = ActiveTask.IsBoss and nearBossArena and not IsBossAvailable(ActiveTask.TargetMob)
+
+            if guiState == "Completed" or MobsKilledInQuest >= ActiveTask.RequiredKills or bossDisappeared then
+                if bossDisappeared and CommF and HasAnyActiveQuest() then
+                    pcall(function()
+                        CommF:InvokeServer("AbandonQuest")
+                    end)
+                end
+                QuestInProgress = false
+                ActiveTask = nil
+                MobsKilledInQuest = 0
+                CancelTween()
+            else
+                SetPhysicsState(character, true)
+                local targetMob = GetClosestTargetMob(ActiveTask.TargetMob)
+
+                if targetMob and targetMob:FindFirstChild("HumanoidRootPart") then
+                    local mobHrp = targetMob.HumanoidRootPart
+                    local farmPos = mobHrp.Position + Vector3.new(0, Config.DistanceFarm, 0)
+                    local farmCFrame = CFrame.new(farmPos) * CFrame.Angles(math.rad(-90), 0, 0)
+
+                    MoveToCFrame(farmCFrame, true)
+
+                    if not ActiveTask.IsBoss and (hrp.Position - mobHrp.Position).Magnitude <= 65 then
+                        BringMobs(targetMob, ActiveTask.TargetMob)
+                    end
+                else
+                    MoveToCFrame(CFrame.new(ActiveTask.WaitPos), false)
+                end
+
+                RunService.Heartbeat:Wait()
+            end
+        end
+    end
+
+    _G.AutoFarmUpperSkylands = false
+    if NoClipConnection then
+        NoClipConnection:Disconnect()
+        NoClipConnection = nil
+    end
+    CancelTween()
+    SetPhysicsState(LocalPlayer.Character, false)
 end)
