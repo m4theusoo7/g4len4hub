@@ -1,7 +1,6 @@
 _G.AutoSaber = true
 
 local Players = game:GetService("Players")
-local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local VirtualInputManager = game:GetService("VirtualInputManager")
@@ -15,76 +14,64 @@ local function Log(msg)
 end
 
 -- ==========================================
--- NOCLIP E ANTI-GRAVIDADE DURANTE O TWEEN
+-- FÍSICA E MOVIMENTO ESTÁVEL (SEM BUG DE TWEEN)
 -- ==========================================
-local BodyVel = nil
-
-local function SetPhysics(state)
+RunService.Stepped:Connect(function()
     local char = LocalPlayer.Character
     if not char or not char:FindFirstChild("HumanoidRootPart") then return end
     local hrp = char.HumanoidRootPart
 
-    if state then
-        if not hrp:FindFirstChild("OmegaAntiGrav") then
-            BodyVel = Instance.new("BodyVelocity")
-            BodyVel.Name = "OmegaAntiGrav"
-            BodyVel.MaxForce = Vector3.new(1e5, 1e5, 1e5)
-            BodyVel.Velocity = Vector3.new(0, 0, 0)
-            BodyVel.Parent = hrp
-        end
-    else
-        if hrp:FindFirstChild("OmegaAntiGrav") then
-            hrp.OmegaAntiGrav:Destroy()
-        end
-    end
-end
-
-RunService.Stepped:Connect(function()
-    if _G.AutoSaber and LocalPlayer.Character then
-        for _, v in ipairs(LocalPlayer.Character:GetDescendants()) do
+    if _G.AutoSaber then
+        for _, v in ipairs(char:GetDescendants()) do
             if v:IsA("BasePart") and v.CanCollide then
                 v.CanCollide = false
             end
         end
+        if not hrp:FindFirstChild("OmegaHold") then
+            local bv = Instance.new("BodyVelocity")
+            bv.Name = "OmegaHold"
+            bv.MaxForce = Vector3.new(1e5, 1e5, 1e5)
+            bv.Velocity = Vector3.zero
+            bv.Parent = hrp
+        end
     else
-        SetPhysics(false)
+        if hrp:FindFirstChild("OmegaHold") then
+            hrp.OmegaHold:Destroy()
+        end
     end
 end)
 
--- ==========================================
--- MOVIMENTO E INTERAÇÃO FÍSICA
--- ==========================================
-local function TweenTo(targetCFrame)
+-- Movimento contínuo por frame (evita rubberbanding e falha de Tween)
+local function MoveTo(targetCFrame, speed)
+    speed = speed or 300
     local char = LocalPlayer.Character
     if not char or not char:FindFirstChild("HumanoidRootPart") then return end
     local hrp = char.HumanoidRootPart
 
-    SetPhysics(true)
-    local dist = (hrp.Position - targetCFrame.Position).Magnitude
+    while _G.AutoSaber and hrp and hrp.Parent do
+        local currentPos = hrp.Position
+        local targetPos = targetCFrame.Position
+        local flatDist = (Vector3.new(currentPos.X, 0, currentPos.Z) - Vector3.new(targetPos.X, 0, targetPos.Z)).Magnitude
 
-    if dist < 8 then
-        hrp.CFrame = targetCFrame
-        return
+        local nextGoal
+        if flatDist > 250 then
+            -- Mantém altitude segura de 220 enquanto cruza o mar
+            nextGoal = Vector3.new(targetPos.X, 220, targetPos.Z)
+        else
+            nextGoal = targetPos
+        end
+
+        local delta = nextGoal - currentPos
+        local dist = delta.Magnitude
+
+        if dist <= 6 then
+            hrp.CFrame = targetCFrame
+            break
+        end
+
+        local step = math.min(dist, speed * RunService.Heartbeat:Wait())
+        hrp.CFrame = CFrame.new(currentPos + delta.Unit * step) * (targetCFrame - targetCFrame.Position)
     end
-
-    -- Rota aérea segura para viagens entre ilhas
-    if dist > 400 and hrp.Position.Y < 160 then
-        local upPos = CFrame.new(hrp.Position.X, 180, hrp.Position.Z)
-        local tUp = TweenService:Create(hrp, TweenInfo.new((180 - hrp.Position.Y) / 300, Enum.EasingStyle.Linear), {CFrame = upPos})
-        tUp:Play()
-        tUp.Completed:Wait()
-
-        local flyTarget = CFrame.new(targetCFrame.Position.X, 180, targetCFrame.Position.Z)
-        local flyDist = (hrp.Position - flyTarget.Position).Magnitude
-        local tFly = TweenService:Create(hrp, TweenInfo.new(flyDist / 320, Enum.EasingStyle.Linear), {CFrame = flyTarget})
-        tFly:Play()
-        tFly.Completed:Wait()
-    end
-
-    local finalDist = (hrp.Position - targetCFrame.Position).Magnitude
-    local tDown = TweenService:Create(hrp, TweenInfo.new(finalDist / 300, Enum.EasingStyle.Linear), {CFrame = targetCFrame})
-    tDown:Play()
-    tDown.Completed:Wait()
 end
 
 local function TouchPart(part)
@@ -94,7 +81,7 @@ local function TouchPart(part)
     local hrp = char.HumanoidRootPart
 
     hrp.CFrame = part.CFrame
-    task.wait(0.2)
+    task.wait(0.25)
     if firetouchinterest then
         pcall(function()
             firetouchinterest(hrp, part, 0)
@@ -126,7 +113,7 @@ local function HasItem(name)
 end
 
 -- ==========================================
--- COMBATE (BOSSES)
+-- COMBATE
 -- ==========================================
 local function EquipWeapon()
     local char = LocalPlayer.Character
@@ -144,14 +131,6 @@ local function EquipWeapon()
     end
 end
 
-local function UseSkills()
-    for _, key in ipairs({Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C}) do
-        VirtualInputManager:SendKeyEvent(true, key, false, game)
-        task.wait(0.05)
-        VirtualInputManager:SendKeyEvent(false, key, false, game)
-    end
-end
-
 local function KillBoss(bossName, waitCFrame)
     Log("Procurando boss: " .. bossName)
     while _G.AutoSaber do
@@ -164,31 +143,32 @@ local function KillBoss(bossName, waitCFrame)
         end
 
         if target then
-            SetPhysics(true)
             if LocalPlayer.Character and not LocalPlayer.Character:FindFirstChild("HasBuso") then
                 pcall(function() CommF:InvokeServer("Buso") end)
             end
             EquipWeapon()
 
-            local pos = target.HumanoidRootPart.CFrame * CFrame.new(0, 20, 0) * CFrame.Angles(math.rad(-90), 0, 0)
-            LocalPlayer.Character.HumanoidRootPart.CFrame = pos
+            LocalPlayer.Character.HumanoidRootPart.CFrame = target.HumanoidRootPart.CFrame * CFrame.new(0, 20, 0) * CFrame.Angles(math.rad(-90), 0, 0)
             target.HumanoidRootPart.CanCollide = false
 
             VirtualUser:CaptureController()
             VirtualUser:Button1Down(Vector2.new(1280, 672))
-            UseSkills()
+            for _, key in ipairs({Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C}) do
+                VirtualInputManager:SendKeyEvent(true, key, false, game)
+                task.wait(0.03)
+                VirtualInputManager:SendKeyEvent(false, key, false, game)
+            end
         else
-            TweenTo(waitCFrame)
+            MoveTo(waitCFrame)
             task.wait(1.5)
-            -- Verifica se ainda está vivo
-            local found = false
+            local stillAlive = false
             for _, v in ipairs(workspace.Enemies:GetChildren()) do
                 if string.find(v.Name, bossName) and v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 then
-                    found = true
+                    stillAlive = true
                 end
             end
-            if not found then
-                Log(bossName .. " derrotado ou não spawnado!")
+            if not stillAlive then
+                Log(bossName .. " finalizado ou ausente!")
                 break
             end
         end
@@ -197,88 +177,98 @@ local function KillBoss(bossName, waitCFrame)
 end
 
 -- ==========================================
--- EXECUÇÃO DO PUZZLE
+-- FLUXO DO PUZZLE COM VERIFICAÇÃO REAL
 -- ==========================================
 task.spawn(function()
     local lvl = LocalPlayer.Data.Level.Value
     if lvl < 200 then
-        Log("ERRO: Você precisa ser Nível 200+ (Atual: " .. lvl .. ")")
+        Log("ERRO: Nível mínimo 200 necessário (Atual: " .. lvl .. ")")
         _G.AutoSaber = false
         return
     end
 
     local ok, progress = pcall(function() return CommF:InvokeServer("ProQuestProgress") end)
-    if not ok or type(progress) ~= "table" then
-        progress = {}
-    end
+    if not ok or type(progress) ~= "table" then progress = {} end
 
-    -- 1. BOTÕES DA JUNGLE + TOCHA + DESERTO
+    -- ETAPA 1 E 2: BOTÕES + TOCHA
     if not progress.UsedTorch then
-        Log("Etapa 1: Ativando os 5 botões da Jungle...")
-        local jungle = workspace:FindFirstChild("Map") and workspace.Map:FindFirstChild("Jungle")
-        local plates = jungle and jungle:FindFirstChild("QuestPlates")
-
-        if plates then
-            for _, plate in ipairs(plates:GetChildren()) do
-                if not _G.AutoSaber then return end
-                local btn = plate:FindFirstChild("Button")
-                if btn and btn:IsA("BasePart") then
-                    TweenTo(btn.CFrame * CFrame.new(0, 2.5, 0))
-                    TouchPart(btn)
-                    task.wait(0.3)
+        if not HasItem("Torch") then
+            Log("Etapa 1: Pisando nos 5 botões da Jungle...")
+            local jungle = workspace:FindFirstChild("Map") and workspace.Map:FindFirstChild("Jungle")
+            local plates = jungle and jungle:FindFirstChild("QuestPlates")
+            if plates then
+                for _, plate in ipairs(plates:GetChildren()) do
+                    if not _G.AutoSaber then return end
+                    local btn = plate:FindFirstChild("Button")
+                    if btn and btn:IsA("BasePart") then
+                        MoveTo(btn.CFrame * CFrame.new(0, 2, 0))
+                        TouchPart(btn)
+                        task.wait(0.3)
+                    end
                 end
             end
-        end
 
-        Log("Etapa 2: Pegando a Tocha no subsolo da Jungle...")
-        if not HasItem("Torch") then
-            TweenTo(CFrame.new(-1612.5, 11.5, 163.5))
+            Log("Etapa 2: Pegando a Tocha...")
+            MoveTo(CFrame.new(-1612.5, 11.5, 163.5))
             task.wait(0.5)
-            local torchPart = jungle and jungle:FindFirstChild("Torch")
-            if torchPart then
-                TouchPart(torchPart)
+            local torchObj = jungle and jungle:FindFirstChild("Torch", true)
+            if torchObj and torchObj:IsA("BasePart") then
+                TouchPart(torchObj)
             end
             task.wait(0.5)
         end
 
-        Log("Etapa 3: Indo ao Deserto queimar a cortina...")
-        TweenTo(CFrame.new(1114.5, 6.5, 4365.0))
+        -- ETAPA 3: QUEIMAR A CORTINA NO DESERTO
+        Log("Etapa 3: Indo queimar a cortina no Deserto...")
+        MoveTo(CFrame.new(1114.5, 6.5, 4365.0))
         EquipItem("Torch")
         task.wait(0.5)
 
         local desert = workspace.Map:FindFirstChild("Desert")
         if desert then
-            local burnDoor = desert:FindFirstChild("Burn")
-            if burnDoor and burnDoor:IsA("BasePart") then
-                TouchPart(burnDoor)
-                task.wait(1.2)
+            -- Procura qualquer BasePart chamada Burn (ou dentro do modelo Burn) e toca nela com a Tocha
+            for _, obj in ipairs(desert:GetDescendants()) do
+                if (obj.Name == "Burn" or (obj.Parent and obj.Parent.Name == "Burn")) and obj:IsA("BasePart") then
+                    EquipItem("Torch")
+                    MoveTo(obj.CFrame)
+                    TouchPart(obj)
+                    task.wait(1)
+                end
             end
         end
     end
 
-    -- 2. PEGAR CÁLICE, ENCHER NA ILHA DE GELO E ENTREGAR AO SICK MAN
+    -- ETAPA 4: PEGAR O CÁLICE (CUP)
     ok, progress = pcall(function() return CommF:InvokeServer("ProQuestProgress") end)
     if not progress.UsedCup then
         if not HasItem("Cup") then
-            Log("Etapa 4: Pegando o Cálice no Deserto...")
-            TweenTo(CFrame.new(1113.5, 4.8, 4349.0))
-            task.wait(0.4)
-            local cupPart = workspace.Map:FindFirstChild("Desert") and workspace.Map.Desert:FindFirstChild("Cup")
-            if cupPart then
-                TouchPart(cupPart)
-            end
+            Log("Etapa 4: Pegando o Cálice dentro da casa do Deserto...")
+            MoveTo(CFrame.new(1113.5, 4.8, 4349.0))
             task.wait(0.5)
+            local desert = workspace.Map:FindFirstChild("Desert")
+            local cupPart = desert and desert:FindFirstChild("Cup", true)
+            if cupPart and cupPart:IsA("BasePart") then
+                TouchPart(cupPart)
+                task.wait(0.5)
+            end
         end
 
-        Log("Etapa 5: Enchendo o Cálice na caverna da Frozen Village...")
-        TweenTo(CFrame.new(1395.5, 37.3, -1321.5))
-        local startWait = tick()
-        while _G.AutoSaber and (tick() - startWait) < 12 do
+        if not HasItem("Cup") then
+            Log("AVISO: Não consegui pegar o Cálice (a cortina pode não ter queimado). Parando para não bugar.")
+            _G.AutoSaber = false
+            return
+        end
+
+        -- ETAPA 5: ENCHER O CÁLICE NA FROZEN VILLAGE
+        Log("Etapa 5: Enchendo o Cálice na caverna de gelo...")
+        MoveTo(CFrame.new(1395.5, 37.3, -1321.5))
+        local timer = 0
+        local filled = false
+        while _G.AutoSaber and timer < 15 do
             local cup = EquipItem("Cup")
-            -- Procura a goteira real na caverna de gelo para alinhar embaixo
-            local iceMap = workspace.Map:FindFirstChild("Ice")
-            if iceMap then
-                for _, obj in ipairs(iceMap:GetDescendants()) do
+            local ice = workspace.Map:FindFirstChild("Ice")
+            if ice then
+                for _, obj in ipairs(ice:GetDescendants()) do
                     if obj.Name == "WaterDrop" and obj:IsA("BasePart") then
                         LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(obj.Position.X, 37.3, obj.Position.Z)
                         break
@@ -286,61 +276,68 @@ task.spawn(function()
                 end
             end
             if cup and cup:FindFirstChild("Handle") and cup.Handle:FindFirstChild("Water") then
-                Log("Cálice cheio!")
+                filled = true
+                Log("Cálice cheio com sucesso!")
                 break
             end
-            task.wait(0.4)
+            task.wait(0.5)
+            timer = timer + 0.5
         end
 
+        -- ETAPA 6: ENTREGAR AO SICK MAN
         Log("Etapa 6: Entregando o Cálice ao Sick Man...")
-        TweenTo(CFrame.new(1454.0, 88.2, -1391.5))
+        MoveTo(CFrame.new(1454.0, 88.2, -1391.5))
         EquipItem("Cup")
-        task.wait(0.4)
+        task.wait(0.5)
         CommF:InvokeServer("ProQuestProgress", "SickMan")
-        task.wait(0.6)
+        task.wait(0.8)
     end
 
-    -- 3. RICH MAN, MOB LEADER E RELÍQUIA
+    -- ETAPA 7, 8, 9: RICH MAN + MOB LEADER + RELÍQUIA
     ok, progress = pcall(function() return CommF:InvokeServer("ProQuestProgress") end)
     if not progress.UsedRelic then
-        Log("Etapa 7: Falando com o Rich Man na Pirate Village...")
-        TweenTo(CFrame.new(-906.0, 13.7, 4077.5))
-        task.wait(0.4)
-        CommF:InvokeServer("ProQuestProgress", "RichSon")
-        task.wait(0.6)
-
-        ok, progress = pcall(function() return CommF:InvokeServer("ProQuestProgress") end)
-        if not progress.KilledMob then
-            Log("Etapa 8: Indo derrotar o Mob Leader...")
-            KillBoss("Mob Leader", CFrame.new(-2852.0, 7.3, 5318.0))
+        if not HasItem("Relic") then
+            Log("Etapa 7: Falando com o Rich Man...")
+            MoveTo(CFrame.new(-906.0, 13.7, 4077.5))
             task.wait(0.5)
+            CommF:InvokeServer("ProQuestProgress", "RichSon")
+            task.wait(0.8)
+
+            ok, progress = pcall(function() return CommF:InvokeServer("ProQuestProgress") end)
+            if not progress.KilledMob then
+                Log("Etapa 8: Derrotando o Mob Leader...")
+                KillBoss("Mob Leader", CFrame.new(-2852.0, 7.3, 5318.0))
+                task.wait(0.5)
+            end
+
+            Log("Etapa 9: Voltando no Rich Man para pegar a Relíquia...")
+            MoveTo(CFrame.new(-906.0, 13.7, 4077.5))
+            task.wait(0.5)
+            CommF:InvokeServer("ProQuestProgress", "RichSon")
+            task.wait(0.8)
         end
 
-        Log("Etapa 9: Pegando a Relíquia com o Rich Man...")
-        TweenTo(CFrame.new(-906.0, 13.7, 4077.5))
-        task.wait(0.4)
-        CommF:InvokeServer("ProQuestProgress", "RichSon")
-        task.wait(0.6)
-
-        Log("Etapa 10: Abrindo a porta do Shanks na Jungle...")
-        TweenTo(CFrame.new(-1406.0, 29.8, 4.5))
+        -- ETAPA 10: ABRIR PORTA DO SHANKS NA JUNGLE
+        Log("Etapa 10: Abrindo a porta da Relíquia na Jungle...")
+        MoveTo(CFrame.new(-1406.0, 29.8, 4.5))
         EquipItem("Relic")
         task.wait(0.5)
         local jungle = workspace.Map:FindFirstChild("Jungle")
         if jungle then
-            local door = jungle:FindFirstChild("Door")
-            if door and door:IsA("BasePart") then
-                TouchPart(door)
-                task.wait(0.8)
+            for _, obj in ipairs(jungle:GetDescendants()) do
+                if (obj.Name == "Door" or (obj.Parent and obj.Parent.Name == "Door")) and obj:IsA("BasePart") then
+                    EquipItem("Relic")
+                    TouchPart(obj)
+                    task.wait(0.8)
+                end
             end
         end
     end
 
-    -- 4. DERROTAR SABER EXPERT
-    Log("Etapa Final: Indo enfrentar o Saber Expert!")
+    -- ETAPA FINAL: DERROTAR SABER EXPERT
+    Log("Etapa Final: Enfrentando o Saber Expert!")
     KillBoss("Saber Expert", CFrame.new(-1402.0, 29.8, -32.0))
 
-    SetPhysics(false)
     _G.AutoSaber = false
-    Log("Concluído! Verifique seu inventário.")
+    Log("Finalizado!")
 end)
