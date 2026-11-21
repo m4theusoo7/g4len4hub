@@ -30,7 +30,11 @@ local CurrentTween = nil
 local LastTweenTargetPos = nil
 local NoClipConnection = nil
 local LastAuraCheck = 0
-local LastEntranceCheck = 0
+local LastEntranceRemote = 0
+local LastTouchFire = 0
+local LastWhirlpoolScan = 0
+local CachedWhirlpoolPos = Config.WhirlpoolPos
+local CachedTouchParts = {}
 local WasOutsideCity = false
 
 local QuestInProgress = false
@@ -62,30 +66,48 @@ local function IsInsideUnderwaterCity(pos)
     return pos and (pos - Config.EntrancePos).Magnitude <= 3000
 end
 
-local function GetWhirlpoolPos()
-    local map = workspace:FindFirstChild("Map")
-    local teleportSpawn = map and map:FindFirstChild("TeleportSpawn")
-    if teleportSpawn then
-        if teleportSpawn:IsA("BasePart") then
-            return teleportSpawn.Position
-        end
-        local part = teleportSpawn:FindFirstChildWhichIsA("BasePart", true)
-        if part then
-            return part.Position
-        end
+local function ScanWhirlpool()
+    if (os.clock() - LastWhirlpoolScan) < 0.6 and #CachedTouchParts > 0 then
+        return CachedWhirlpoolPos, CachedTouchParts
     end
+    LastWhirlpoolScan = os.clock()
 
-    if map then
-        for _, obj in ipairs(map:GetDescendants()) do
-            if obj:IsA("TouchTransmitter") and obj.Parent and obj.Parent:IsA("BasePart") then
-                if (obj.Parent.Position - Config.WhirlpoolPos).Magnitude <= 250 then
-                    return obj.Parent.Position
+    local touchParts = {}
+    local bestPos = nil
+    local bestDist = math.huge
+
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("TouchTransmitter") and obj.Parent and obj.Parent:IsA("BasePart") then
+            local part = obj.Parent
+            local dist = (part.Position - Config.WhirlpoolPos).Magnitude
+            if dist <= 600 then
+                table.insert(touchParts, part)
+                if dist < bestDist then
+                    bestDist = dist
+                    bestPos = part.Position
                 end
             end
         end
     end
 
-    return Config.WhirlpoolPos
+    if not bestPos then
+        for _, obj in ipairs(workspace:GetDescendants()) do
+            if obj:IsA("BasePart") then
+                local lowerName = string.lower(obj.Name)
+                if string.find(lowerName, "teleport") or string.find(lowerName, "whirlpool") then
+                    local dist = (obj.Position - Config.WhirlpoolPos).Magnitude
+                    if dist <= 600 and dist < bestDist then
+                        bestDist = dist
+                        bestPos = obj.Position
+                    end
+                end
+            end
+        end
+    end
+
+    CachedTouchParts = touchParts
+    CachedWhirlpoolPos = bestPos or Config.WhirlpoolPos
+    return CachedWhirlpoolPos, CachedTouchParts
 end
 
 local function CancelTween()
@@ -180,6 +202,9 @@ local function SetPhysicsState(character, enabled)
     for _, part in ipairs(character:GetDescendants()) do
         if part:IsA("BasePart") then
             part.CanCollide = not enabled
+            if enabled then
+                part.CanTouch = true
+            end
         end
     end
 end
@@ -490,37 +515,45 @@ task.spawn(function()
         elseif not IsInsideUnderwaterCity(hrp.Position) then
             WasOutsideCity = true
             SetPhysicsState(character, true)
-            local whirlpoolPos = GetWhirlpoolPos()
+            local whirlpoolPos, touchParts = ScanWhirlpool()
             local distToWhirlpool = (hrp.Position - whirlpoolPos).Magnitude
 
-            if distToWhirlpool > 15 then
-                MoveToCFrame(CFrame.new(whirlpoolPos + Vector3.new(0, 8, 0)), false)
+            if distToWhirlpool > 35 then
+                MoveToCFrame(CFrame.new(whirlpoolPos + Vector3.new(0, 12, 0)), false)
             else
-                MoveToCFrame(CFrame.new(whirlpoolPos), true)
+                CancelTween()
+                -- Mergulha e oscila fisicamente através do centro do redemoinho para ativar a colisão de entrada
+                local t = os.clock()
+                local dipOffset = Vector3.new(
+                    math.cos(t * 3) * 6,
+                    math.sin(t * 6) * 8 - 2,
+                    math.sin(t * 3) * 6
+                )
+                hrp.CFrame = CFrame.new(whirlpoolPos + dipOffset)
+                hrp.AssemblyLinearVelocity = Vector3.new(0, -15, 0)
 
-                if (os.clock() - LastEntranceCheck) >= 1.5 then
-                    LastEntranceCheck = os.clock()
-                    pcall(function()
-                        if CommF then
-                            CommF:InvokeServer("requestEntrance", Config.EntrancePos)
-                        end
-                    end)
-                    pcall(function()
-                        if firetouchinterest then
-                            local map = workspace:FindFirstChild("Map")
-                            if map then
-                                for _, obj in ipairs(map:GetDescendants()) do
-                                    if obj:IsA("TouchTransmitter") and obj.Parent and obj.Parent:IsA("BasePart") then
-                                        if (obj.Parent.Position - whirlpoolPos).Magnitude <= 100 then
-                                            firetouchinterest(hrp, obj.Parent, 0)
-                                            task.wait(0.05)
-                                            firetouchinterest(hrp, obj.Parent, 1)
-                                        end
-                                    end
-                                end
+                if (t - LastTouchFire) >= 0.35 then
+                    LastTouchFire = t
+                    if firetouchinterest then
+                        for _, part in ipairs(touchParts) do
+                            if part and part.Parent then
+                                pcall(function()
+                                    firetouchinterest(hrp, part, 0)
+                                    task.wait(0.03)
+                                    firetouchinterest(hrp, part, 1)
+                                end)
                             end
                         end
-                    end)
+                    end
+                end
+
+                if (t - LastEntranceRemote) >= 1.2 then
+                    LastEntranceRemote = t
+                    if CommF then
+                        pcall(function()
+                            CommF:InvokeServer("requestEntrance", Config.EntrancePos)
+                        end)
+                    end
                 end
             end
 
