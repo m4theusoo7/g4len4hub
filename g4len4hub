@@ -27,6 +27,7 @@ local Config = {
 local CurrentTween = nil
 local LastTweenTargetPos = nil
 local NoClipConnection = nil
+local LastAuraCheck = 0
 
 local QuestInProgress = false
 local ActiveTask = nil
@@ -37,6 +38,20 @@ local function GetLevel()
     local data = LocalPlayer:FindFirstChild("Data")
     local level = data and data:FindFirstChild("Level")
     return level and level.Value or 300
+end
+
+local function EnableAura()
+    if not CommF then return end
+    local character = LocalPlayer.Character
+    local hum = character and character:FindFirstChildOfClass("Humanoid")
+    if not character or not hum or hum.Health <= 0 then return end
+
+    if not character:FindFirstChild("HasBuso") and (os.clock() - LastAuraCheck) >= 3 then
+        LastAuraCheck = os.clock()
+        pcall(function()
+            CommF:InvokeServer("Buso")
+        end)
+    end
 end
 
 local function CancelTween()
@@ -444,6 +459,7 @@ task.spawn(function()
             CancelTween()
             task.wait(0.5)
         elseif not QuestInProgress then
+            EnableAura()
             local nextTask = GetMagmaVillageTaskForLevel()
             local npcPos = GetQuestNpcPos()
             local distToNpc = (hrp.Position - npcPos).Magnitude
@@ -482,6 +498,7 @@ task.spawn(function()
                 QuestInProgress = true
             end
         else
+            EnableAura()
             UpdateKillCounter(ActiveTask.TargetMob)
             local guiState = CheckGuiQuestProgress(ActiveTask)
             local nearBossArena = (hrp.Position - ActiveTask.WaitPos).Magnitude <= 150
