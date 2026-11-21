@@ -14,8 +14,8 @@ local RegisterAttack = NetFolder and NetFolder:FindFirstChild("RE/RegisterAttack
 local RegisterHit = NetFolder and NetFolder:FindFirstChild("RE/RegisterHit")
 
 local Config = {
-    UpperEntrancePos = Vector3.new(-7894.62, 5547.14, -380.29),
-    LowerEntrancePos = Vector3.new(-4607.87, 872.54, -1667.55),
+    UpperEntrancePos = Vector3.new(-7894.61767578125, 5547.1416015625, -380.29119873046875),
+    LowerEntrancePos = Vector3.new(-4607.87255859375, 872.54248046875, -1667.556884765625),
     MaxLevel = 625,
     TweenSpeed = 200,
     DistanceFarm = 8,
@@ -28,7 +28,9 @@ local LastTweenTargetPos = nil
 local LastKnownHrpPos = nil
 local NoClipConnection = nil
 local LastAuraCheck = 0
-local LastEntranceCheck = 0
+local LastEntranceRemote = 0
+local LastTouchFire = 0
+local PortalCache = {}
 
 local QuestInProgress = false
 local ActiveTask = nil
@@ -61,6 +63,39 @@ local function CancelTween()
         CurrentTween = nil
     end
     LastTweenTargetPos = nil
+end
+
+local function ScanSkyPortal(key, basePos)
+    local cached = PortalCache[key]
+    if cached and (os.clock() - cached.LastScan) < 1.0 and #cached.Parts > 0 then
+        return cached.Pos, cached.Parts
+    end
+
+    local touchParts = {}
+    local bestPos = nil
+    local bestDist = math.huge
+
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("TouchTransmitter") and obj.Parent and obj.Parent:IsA("BasePart") then
+            local part = obj.Parent
+            local dist = (part.Position - basePos).Magnitude
+            if dist <= 250 then
+                table.insert(touchParts, part)
+                if dist < bestDist then
+                    bestDist = dist
+                    bestPos = part.Position
+                end
+            end
+        end
+    end
+
+    local finalPos = bestPos or basePos
+    PortalCache[key] = {
+        LastScan = os.clock(),
+        Pos = finalPos,
+        Parts = touchParts
+    }
+    return finalPos, touchParts
 end
 
 local function IsBossAvailable(bossName)
@@ -198,6 +233,9 @@ local function SetPhysicsState(character, enabled)
     for _, part in ipairs(character:GetDescendants()) do
         if part:IsA("BasePart") then
             part.CanCollide = not enabled
+            if enabled then
+                part.CanTouch = true
+            end
         end
     end
 end
@@ -428,29 +466,10 @@ local function GetTargetsInRange(targetMobName, maxRange)
     return targets
 end
 
-local function MoveToCFrame(targetCFrame, snapAtEnd)
+local function TweenStep(targetCFrame, snapAtEnd)
     local character = LocalPlayer.Character
     local hrp = character and character:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
-
-    if LastKnownHrpPos and (hrp.Position - LastKnownHrpPos).Magnitude > 500 then
-        CancelTween()
-    end
-    LastKnownHrpPos = hrp.Position
-
-    if CommF and (os.clock() - LastEntranceCheck) >= 1.5 then
-        if hrp.Position.Y < 3000 and targetCFrame.Position.Y > 4500 then
-            LastEntranceCheck = os.clock()
-            pcall(function()
-                CommF:InvokeServer("requestEntrance", Config.UpperEntrancePos)
-            end)
-        elseif hrp.Position.Y > 4500 and targetCFrame.Position.Y < 2000 then
-            LastEntranceCheck = os.clock()
-            pcall(function()
-                CommF:InvokeServer("requestEntrance", Config.LowerEntrancePos)
-            end)
-        end
-    end
 
     local distance = (hrp.Position - targetCFrame.Position).Magnitude
 
@@ -477,6 +496,69 @@ local function MoveToCFrame(targetCFrame, snapAtEnd)
     local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear)
     CurrentTween = TweenService:Create(hrp, tweenInfo, { CFrame = targetCFrame })
     CurrentTween:Play()
+end
+
+local function UseSkyPortal(hrp, cacheKey, entranceBasePos, destinationPos)
+    local portalPos, touchParts = ScanSkyPortal(cacheKey, entranceBasePos)
+    local distToPortal = (hrp.Position - portalPos).Magnitude
+
+    if distToPortal > 28 then
+        TweenStep(CFrame.new(portalPos + Vector3.new(0, 4, 0)), false)
+        return
+    end
+
+    -- Chegou no portal: cancela o Tween para não atravessar e força a entrada
+    CancelTween()
+    local t = os.clock()
+    local offset = Vector3.new(math.cos(t * 4) * 3, math.sin(t * 6) * 3, math.sin(t * 4) * 3)
+    hrp.CFrame = CFrame.new(portalPos + offset)
+    hrp.AssemblyLinearVelocity = Vector3.zero
+
+    if (t - LastTouchFire) >= 0.35 then
+        LastTouchFire = t
+        if firetouchinterest then
+            for _, part in ipairs(touchParts) do
+                if part and part.Parent then
+                    pcall(function()
+                        firetouchinterest(hrp, part, 0)
+                        task.wait(0.03)
+                        firetouchinterest(hrp, part, 1)
+                    end)
+                end
+            end
+        end
+    end
+
+    if (t - LastEntranceRemote) >= 1.0 then
+        LastEntranceRemote = t
+        if CommF then
+            pcall(function()
+                CommF:InvokeServer("requestEntrance", destinationPos)
+            end)
+        end
+    end
+end
+
+local function MoveToCFrame(targetCFrame, snapAtEnd)
+    local character = LocalPlayer.Character
+    local hrp = character and character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    if LastKnownHrpPos and (hrp.Position - LastKnownHrpPos).Magnitude > 500 then
+        CancelTween()
+    end
+    LastKnownHrpPos = hrp.Position
+
+    -- Rota via portal de nuvem para subir a Upper Yard ou descer ao platô dos God's Guard
+    if hrp.Position.Y < 4500 and targetCFrame.Position.Y > 4500 then
+        UseSkyPortal(hrp, "LowerToUpper", Config.LowerEntrancePos, Config.UpperEntrancePos)
+        return
+    elseif hrp.Position.Y > 4500 and targetCFrame.Position.Y < 2000 then
+        UseSkyPortal(hrp, "UpperToLower", Config.UpperEntrancePos, Config.LowerEntrancePos)
+        return
+    end
+
+    TweenStep(targetCFrame, snapAtEnd)
 end
 
 -- Se já houver missão de Upper Skylands ativa ao executar o script, inicia direto no modo farm
