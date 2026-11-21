@@ -1,55 +1,347 @@
+_G.AutoSaber = true
+
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local VirtualUser = game:GetService("VirtualUser")
+
 local LocalPlayer = Players.LocalPlayer
-local char = LocalPlayer.Character
-local hrp = char:WaitForChild("HumanoidRootPart")
+local CommF = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("CommF_")
 
--- 1. Procura a cortina real dentro do mapa do Deserto
-local desert = workspace:WaitForChild("Map"):WaitForChild("Desert")
-local burnPart = nil
+local function Log(msg)
+    print("[OmegaCore - AutoSaber] " .. tostring(msg))
+end
 
-for _, obj in ipairs(desert:GetDescendants()) do
-    if obj.Name == "Burn" and obj:IsA("BasePart") then
-        burnPart = obj
-        break
+-- ==========================================
+-- FÍSICA E MOVIMENTO ESTÁVEL
+-- ==========================================
+RunService.Stepped:Connect(function()
+    local char = LocalPlayer.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+    local hrp = char.HumanoidRootPart
+
+    if _G.AutoSaber then
+        for _, v in ipairs(char:GetDescendants()) do
+            if v:IsA("BasePart") and v.CanCollide then
+                v.CanCollide = false
+            end
+        end
+        if not hrp:FindFirstChild("OmegaHold") then
+            local bv = Instance.new("BodyVelocity")
+            bv.Name = "OmegaHold"
+            bv.MaxForce = Vector3.new(1e5, 1e5, 1e5)
+            bv.Velocity = Vector3.zero
+            bv.Parent = hrp
+        end
+    else
+        if hrp:FindFirstChild("OmegaHold") then
+            hrp.OmegaHold:Destroy()
+        end
+    end
+end)
+
+local function MoveTo(targetCFrame, speed)
+    speed = speed or 300
+    local char = LocalPlayer.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+    local hrp = char.HumanoidRootPart
+
+    while _G.AutoSaber and hrp and hrp.Parent do
+        local currentPos = hrp.Position
+        local targetPos = targetCFrame.Position
+        local flatDist = (Vector3.new(currentPos.X, 0, currentPos.Z) - Vector3.new(targetPos.X, 0, targetPos.Z)).Magnitude
+
+        local nextGoal = (flatDist > 250) and Vector3.new(targetPos.X, 220, targetPos.Z) or targetPos
+        local delta = nextGoal - currentPos
+        local dist = delta.Magnitude
+
+        if dist <= 6 then
+            hrp.CFrame = targetCFrame
+            break
+        end
+
+        local step = math.min(dist, speed * RunService.Heartbeat:Wait())
+        hrp.CFrame = CFrame.new(currentPos + delta.Unit * step) * (targetCFrame - targetCFrame.Position)
     end
 end
 
-if not burnPart then
-    warn("[OmegaCore] Objeto 'Burn' não encontrado no Desert! A cortina já pode estar queimada.")
-    return
-end
+local function TouchPart(part, toolHandle)
+    if not part or not part:IsA("BasePart") then return end
+    local char = LocalPlayer.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+    local hrp = char.HumanoidRootPart
 
-print("[OmegaCore] Cortina encontrada em:", burnPart.Position)
-
--- 2. Equipa a Tocha
-local torch = char:FindFirstChild("Torch") or LocalPlayer.Backpack:FindFirstChild("Torch")
-if not torch then
-    warn("[OmegaCore] Você não está com a Torch no inventário!")
-    return
-end
-char.Humanoid:EquipTool(torch)
-task.wait(0.3)
-
--- 3. Cola exatamente na cortina e força o toque usando a Handle da Tocha e o HRP
-hrp.CFrame = burnPart.CFrame
-task.wait(0.2)
-
-local handle = torch:FindFirstChild("Handle")
-for i = 1, 5 do
-    hrp.CFrame = burnPart.CFrame
+    hrp.CFrame = part.CFrame
+    task.wait(0.2)
     if firetouchinterest then
         pcall(function()
-            if handle then
-                firetouchinterest(handle, burnPart, 0)
+            if toolHandle and toolHandle:IsA("BasePart") then
+                firetouchinterest(toolHandle, part, 0)
                 task.wait(0.05)
-                firetouchinterest(handle, burnPart, 1)
+                firetouchinterest(toolHandle, part, 1)
             end
-            firetouchinterest(hrp, burnPart, 0)
+            firetouchinterest(hrp, part, 0)
             task.wait(0.05)
-            firetouchinterest(hrp, burnPart, 1)
+            firetouchinterest(hrp, part, 1)
         end)
     end
-    task.wait(0.3)
 end
 
-print("[OmegaCore] Tentativa de queimar concluída! Transparência da cortina:", burnPart.Transparency)
+local function EquipItem(name)
+    local char = LocalPlayer.Character
+    local bp = LocalPlayer.Backpack
+    if not char or not bp then return nil end
+
+    if char:FindFirstChild(name) then return char[name] end
+    local item = bp:FindFirstChild(name)
+    if item then
+        char.Humanoid:EquipTool(item)
+        task.wait(0.25)
+        return item
+    end
+    return nil
+end
+
+local function HasItem(name)
+    local char = LocalPlayer.Character
+    local bp = LocalPlayer.Backpack
+    return (char and char:FindFirstChild(name)) or (bp and bp:FindFirstChild(name))
+end
+
+-- ==========================================
+-- COMBATE
+-- ==========================================
+local function EquipWeapon()
+    local char = LocalPlayer.Character
+    local bp = LocalPlayer.Backpack
+    if not char or not bp then return end
+
+    for _, t in ipairs(char:GetChildren()) do
+        if t:IsA("Tool") and (t.ToolTip == "Melee" or t.ToolTip == "Sword") then return end
+    end
+    for _, t in ipairs(bp:GetChildren()) do
+        if t:IsA("Tool") and (t.ToolTip == "Melee" or t.ToolTip == "Sword") then
+            char.Humanoid:EquipTool(t)
+            break
+        end
+    end
+end
+
+local function KillBoss(bossName, waitCFrame)
+    Log("Procurando boss: " .. bossName)
+    while _G.AutoSaber do
+        local target = nil
+        for _, v in ipairs(workspace.Enemies:GetChildren()) do
+            if string.find(v.Name, bossName) and v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 and v:FindFirstChild("HumanoidRootPart") then
+                target = v
+                break
+            end
+        end
+
+        if target then
+            if LocalPlayer.Character and not LocalPlayer.Character:FindFirstChild("HasBuso") then
+                pcall(function() CommF:InvokeServer("Buso") end)
+            end
+            EquipWeapon()
+
+            LocalPlayer.Character.HumanoidRootPart.CFrame = target.HumanoidRootPart.CFrame * CFrame.new(0, 20, 0) * CFrame.Angles(math.rad(-90), 0, 0)
+            target.HumanoidRootPart.CanCollide = false
+
+            VirtualUser:CaptureController()
+            VirtualUser:Button1Down(Vector2.new(1280, 672))
+            for _, key in ipairs({Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C}) do
+                VirtualInputManager:SendKeyEvent(true, key, false, game)
+                task.wait(0.03)
+                VirtualInputManager:SendKeyEvent(false, key, false, game)
+            end
+        else
+            MoveTo(waitCFrame)
+            task.wait(1.5)
+            local stillAlive = false
+            for _, v in ipairs(workspace.Enemies:GetChildren()) do
+                if string.find(v.Name, bossName) and v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 then
+                    stillAlive = true
+                end
+            end
+            if not stillAlive then
+                Log(bossName .. " finalizado ou ausente!")
+                break
+            end
+        end
+        task.wait()
+    end
+end
+
+-- ==========================================
+-- FLUXO COMPLETO DO PUZZLE
+-- ==========================================
+task.spawn(function()
+    local lvl = LocalPlayer.Data.Level.Value
+    if lvl < 200 then
+        Log("ERRO: Nível mínimo 200 necessário (Atual: " .. lvl .. ")")
+        _G.AutoSaber = false
+        return
+    end
+
+    local ok, progress = pcall(function() return CommF:InvokeServer("ProQuestProgress") end)
+    if not ok or type(progress) ~= "table" then progress = {} end
+
+    -- ETAPA 1, 2 E 3: BOTÕES -> TOCHA -> QUEIMAR CORTINA COM TORCH.HANDLE
+    if not progress.UsedTorch then
+        if not HasItem("Torch") then
+            Log("Etapa 1: Ativando os 5 botões da Jungle...")
+            local jungle = workspace:FindFirstChild("Map") and workspace.Map:FindFirstChild("Jungle")
+            local plates = jungle and jungle:FindFirstChild("QuestPlates")
+            if plates then
+                for _, plate in ipairs(plates:GetChildren()) do
+                    if not _G.AutoSaber then return end
+                    local btn = plate:FindFirstChild("Button")
+                    if btn and btn:IsA("BasePart") then
+                        MoveTo(btn.CFrame * CFrame.new(0, 2, 0))
+                        TouchPart(btn)
+                        task.wait(0.3)
+                    end
+                end
+            end
+
+            Log("Etapa 2: Pegando a Tocha no subsolo da Jungle...")
+            MoveTo(CFrame.new(-1612.5, 11.5, 163.5))
+            task.wait(0.5)
+            local torchObj = jungle and jungle:FindFirstChild("Torch", true)
+            if torchObj and torchObj:IsA("BasePart") then
+                TouchPart(torchObj)
+            end
+            task.wait(0.5)
+        end
+
+        Log("Etapa 3: Indo queimar a cortina no Deserto...")
+        local desert = workspace:WaitForChild("Map"):WaitForChild("Desert")
+        local burnPart = nil
+        for _, obj in ipairs(desert:GetDescendants()) do
+            if obj.Name == "Burn" and obj:IsA("BasePart") then
+                burnPart = obj
+                break
+            end
+        end
+
+        if burnPart then
+            MoveTo(burnPart.CFrame)
+            local torch = EquipItem("Torch")
+            local handle = torch and torch:FindFirstChild("Handle")
+            for i = 1, 5 do
+                if not _G.AutoSaber then return end
+                EquipItem("Torch")
+                TouchPart(burnPart, handle)
+                task.wait(0.3)
+            end
+            Log("Cortina queimada!")
+        else
+            Log("Cortina 'Burn' já estava queimada ou não encontrada.")
+        end
+    end
+
+    -- ETAPA 4: PEGAR O CÁLICE (CUP)
+    ok, progress = pcall(function() return CommF:InvokeServer("ProQuestProgress") end)
+    if not progress.UsedCup then
+        if not HasItem("Cup") then
+            Log("Etapa 4: Pegando o Cálice dentro da casa do Deserto...")
+            local desert = workspace.Map:FindFirstChild("Desert")
+            local cupPart = desert and desert:FindFirstChild("Cup", true)
+            if cupPart and cupPart:IsA("BasePart") then
+                MoveTo(cupPart.CFrame)
+                TouchPart(cupPart)
+                task.wait(0.5)
+            else
+                MoveTo(CFrame.new(1113.5, 4.8, 4349.0))
+                task.wait(0.5)
+            end
+        end
+
+        if not HasItem("Cup") then
+            Log("AVISO: Cálice não entrou no inventário. Parando para evitar loop.")
+            _G.AutoSaber = false
+            return
+        end
+
+        -- ETAPA 5: ENCHER O CÁLICE NA FROZEN VILLAGE
+        Log("Etapa 5: Enchendo o Cálice na caverna de gelo...")
+        MoveTo(CFrame.new(1395.5, 37.3, -1321.5))
+        local timer = 0
+        while _G.AutoSaber and timer < 15 do
+            local cup = EquipItem("Cup")
+            local ice = workspace.Map:FindFirstChild("Ice")
+            if ice then
+                for _, obj in ipairs(ice:GetDescendants()) do
+                    if obj.Name == "WaterDrop" and obj:IsA("BasePart") then
+                        LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(obj.Position.X, 37.3, obj.Position.Z)
+                        break
+                    end
+                end
+            end
+            if cup and cup:FindFirstChild("Handle") and cup.Handle:FindFirstChild("Water") then
+                Log("Cálice cheio com sucesso!")
+                break
+            end
+            task.wait(0.5)
+            timer = timer + 0.5
+        end
+
+        -- ETAPA 6: ENTREGAR AO SICK MAN
+        Log("Etapa 6: Entregando o Cálice ao Sick Man...")
+        MoveTo(CFrame.new(1454.0, 88.2, -1391.5))
+        EquipItem("Cup")
+        task.wait(0.5)
+        CommF:InvokeServer("ProQuestProgress", "SickMan")
+        task.wait(0.8)
+    end
+
+    -- ETAPA 7, 8, 9: RICH MAN + MOB LEADER + RELÍQUIA
+    ok, progress = pcall(function() return CommF:InvokeServer("ProQuestProgress") end)
+    if not progress.UsedRelic then
+        if not HasItem("Relic") then
+            Log("Etapa 7: Falando com o Rich Man...")
+            MoveTo(CFrame.new(-906.0, 13.7, 4077.5))
+            task.wait(0.5)
+            CommF:InvokeServer("ProQuestProgress", "RichSon")
+            task.wait(0.8)
+
+            ok, progress = pcall(function() return CommF:InvokeServer("ProQuestProgress") end)
+            if not progress.KilledMob then
+                Log("Etapa 8: Derrotando o Mob Leader...")
+                KillBoss("Mob Leader", CFrame.new(-2852.0, 7.3, 5318.0))
+                task.wait(0.5)
+            end
+
+            Log("Etapa 9: Voltando no Rich Man para pegar a Relíquia...")
+            MoveTo(CFrame.new(-906.0, 13.7, 4077.5))
+            task.wait(0.5)
+            CommF:InvokeServer("ProQuestProgress", "RichSon")
+            task.wait(0.8)
+        end
+
+        -- ETAPA 10: ABRIR PORTA DO SHANKS NA JUNGLE
+        Log("Etapa 10: Abrindo a porta da Relíquia na Jungle...")
+        MoveTo(CFrame.new(-1406.0, 29.8, 4.5))
+        local relic = EquipItem("Relic")
+        local relicHandle = relic and relic:FindFirstChild("Handle")
+        task.wait(0.4)
+        local jungle = workspace.Map:FindFirstChild("Jungle")
+        if jungle then
+            for _, obj in ipairs(jungle:GetDescendants()) do
+                if (obj.Name == "Door" or (obj.Parent and obj.Parent.Name == "Door")) and obj:IsA("BasePart") then
+                    EquipItem("Relic")
+                    TouchPart(obj, relicHandle)
+                    task.wait(0.5)
+                end
+            end
+        end
+    end
+
+    -- ETAPA FINAL: DERROTAR SABER EXPERT
+    Log("Etapa Final: Enfrentando o Saber Expert!")
+    KillBoss("Saber Expert", CFrame.new(-1402.0, 29.8, -32.0))
+
+    _G.AutoSaber = false
+    Log("Finalizado! Verifique seu inventário.")
+end)
