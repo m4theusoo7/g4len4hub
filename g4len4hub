@@ -1,4 +1,4 @@
-_G.AutoFarmMagmaVillage = true
+_G.AutoFarmUnderwaterCity = true
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
@@ -14,10 +14,11 @@ local RegisterAttack = NetFolder and NetFolder:FindFirstChild("RE/RegisterAttack
 local RegisterHit = NetFolder and NetFolder:FindFirstChild("RE/RegisterHit")
 
 local Config = {
-    QuestName = "MagmaQuest",
-    QuestNpcName = "The Mayor",
-    DefaultQuestPos = Vector3.new(-5317.07, 12.27, 8517.41),
-    MaxLevel = 375,
+    QuestName = "FishmanQuest",
+    QuestNpcName = "King Neptune",
+    DefaultQuestPos = Vector3.new(61122.65, 18.49, 1569.39),
+    EntrancePos = Vector3.new(61163.8515625, 11.6796875, 1819.7841796875),
+    MaxLevel = 450,
     TweenSpeed = 200,
     DistanceFarm = 8,
     BringMobRadius = 250,
@@ -28,6 +29,7 @@ local CurrentTween = nil
 local LastTweenTargetPos = nil
 local NoClipConnection = nil
 local LastAuraCheck = 0
+local LastEntranceCheck = 0
 
 local QuestInProgress = false
 local ActiveTask = nil
@@ -37,7 +39,7 @@ local CountedDeadMobs = setmetatable({}, { __mode = "k" })
 local function GetLevel()
     local data = LocalPlayer:FindFirstChild("Data")
     local level = data and data:FindFirstChild("Level")
-    return level and level.Value or 300
+    return level and level.Value or 375
 end
 
 local function EnableAura()
@@ -54,6 +56,10 @@ local function EnableAura()
     end
 end
 
+local function IsInsideUnderwaterCity(pos)
+    return pos and (pos - Config.EntrancePos).Magnitude <= 3000
+end
+
 local function CancelTween()
     if CurrentTween then
         CurrentTween:Cancel()
@@ -67,61 +73,55 @@ local function IsBossAvailable(bossName)
     if enemies then
         for _, mob in ipairs(enemies:GetChildren()) do
             if mob.Name == bossName then
-                local hum = mob:FindFirstChildOfClass("Humanoid")
-                if hum and hum.Health > 0 then
-                    return true
-                end
+                return true
             end
         end
     end
 
     local storedBoss = ReplicatedStorage:FindFirstChild(bossName)
     if storedBoss then
-        local hum = storedBoss:FindFirstChildOfClass("Humanoid")
-        if not hum or hum.Health > 0 then
-            return true
-        end
+        return true
     end
 
     return false
 end
 
-local function GetAllMagmaTasks()
+local function GetAllUnderwaterTasks()
     return {
-        MagmaAdmiral = {
-            TargetMob = "Magma Admiral",
+        FishmanLord = {
+            TargetMob = "Fishman Lord",
             QuestLevel = 3,
             RequiredKills = 1,
             IsBoss = true,
-            WaitPos = Vector3.new(-5650, 185, 9170)
+            WaitPos = Vector3.new(61350, 55, 1110)
         },
-        MilitarySpy = {
-            TargetMob = "Military Spy",
+        FishmanCommando = {
+            TargetMob = "Fishman Commando",
             QuestLevel = 2,
             RequiredKills = 8,
             IsBoss = false,
-            WaitPos = Vector3.new(-5800, 95, 8790)
+            WaitPos = Vector3.new(61885, 45, 1470)
         },
-        MilitarySoldier = {
-            TargetMob = "Military Soldier",
+        FishmanWarrior = {
+            TargetMob = "Fishman Warrior",
             QuestLevel = 1,
             RequiredKills = 8,
             IsBoss = false,
-            WaitPos = Vector3.new(-5450, 28, 8480)
+            WaitPos = Vector3.new(60930, 35, 1550)
         }
     }
 end
 
-local function GetMagmaVillageTaskForLevel()
+local function GetUnderwaterCityTaskForLevel()
     local level = GetLevel()
-    local tasks = GetAllMagmaTasks()
+    local tasks = GetAllUnderwaterTasks()
 
-    if level >= 350 and IsBossAvailable("Magma Admiral") then
-        return tasks.MagmaAdmiral
-    elseif level >= 325 then
-        return tasks.MilitarySpy
+    if level >= 425 and IsBossAvailable("Fishman Lord") then
+        return tasks.FishmanLord
+    elseif level >= 400 then
+        return tasks.FishmanCommando
     else
-        return tasks.MilitarySoldier
+        return tasks.FishmanWarrior
     end
 end
 
@@ -157,7 +157,7 @@ local function SetPhysicsState(character, enabled)
 end
 
 NoClipConnection = RunService.Stepped:Connect(function()
-    if not _G.AutoFarmMagmaVillage then
+    if not _G.AutoFarmUnderwaterCity then
         if NoClipConnection then
             NoClipConnection:Disconnect()
             NoClipConnection = nil
@@ -204,18 +204,18 @@ local function CheckGuiQuestProgress(taskInfo)
                 local txt = string.lower((obj.Text or "") .. " " .. (obj.ContentText or ""))
                 local matchesMob = false
 
-                if taskInfo.TargetMob == "Military Soldier" then
-                    local hasMilitary = string.find(txt, "military") or string.find(txt, "militar")
-                    local hasSoldier = string.find(txt, "soldier") or string.find(txt, "soldado")
-                    matchesMob = hasMilitary and hasSoldier
-                elseif taskInfo.TargetMob == "Military Spy" then
-                    local hasMilitary = string.find(txt, "military") or string.find(txt, "militar")
-                    local hasSpy = string.find(txt, "spy") or string.find(txt, "espi")
-                    matchesMob = hasMilitary and hasSpy
-                elseif taskInfo.TargetMob == "Magma Admiral" then
-                    local hasMagma = string.find(txt, "magma")
-                    local hasAdmiral = string.find(txt, "admiral") or string.find(txt, "almirante")
-                    matchesMob = hasMagma and hasAdmiral
+                if taskInfo.TargetMob == "Fishman Warrior" then
+                    local hasFishman = string.find(txt, "fishman") or string.find(txt, "peixe")
+                    local hasWarrior = string.find(txt, "warrior") or string.find(txt, "guerreiro")
+                    matchesMob = hasFishman and hasWarrior
+                elseif taskInfo.TargetMob == "Fishman Commando" then
+                    local hasFishman = string.find(txt, "fishman") or string.find(txt, "peixe")
+                    local hasCommando = string.find(txt, "commando") or string.find(txt, "comando")
+                    matchesMob = hasFishman and hasCommando
+                elseif taskInfo.TargetMob == "Fishman Lord" then
+                    local hasFishman = string.find(txt, "fishman") or string.find(txt, "peixe")
+                    local hasLord = string.find(txt, "lord") or string.find(txt, "lorde") or string.find(txt, "senhor")
+                    matchesMob = hasFishman and hasLord
                 end
 
                 if matchesMob then
@@ -233,7 +233,7 @@ local function CheckGuiQuestProgress(taskInfo)
     return "Unknown"
 end
 
--- Localiza o NPC The Mayor dinamicamente (com fallback para DefaultQuestPos)
+-- Localiza o NPC King Neptune dinamicamente (com fallback para DefaultQuestPos)
 local function GetQuestNpcPos()
     local npcs = workspace:FindFirstChild("NPCs")
     local npc = npcs and npcs:FindFirstChild(Config.QuestNpcName)
@@ -270,7 +270,8 @@ local function EquipWeapon()
     return nil
 end
 
-local function UpdateKillCounter(targetMobName)
+local function UpdateKillCounter(targetMobName, isBoss)
+    if isBoss then return end
     local enemies = workspace:FindFirstChild("Enemies")
     if not enemies then return end
 
@@ -406,8 +407,8 @@ local function MoveToCFrame(targetCFrame, snapAtEnd)
     CurrentTween:Play()
 end
 
--- Se já houver missão de Magma Village ativa ao executar o script, inicia direto no modo farm
-local allTasks = GetAllMagmaTasks()
+-- Se já houver missão da Underwater City ativa ao executar o script, inicia direto no modo farm
+local allTasks = GetAllUnderwaterTasks()
 for _, taskCandidate in pairs(allTasks) do
     if CheckGuiQuestProgress(taskCandidate) == "Active" then
         ActiveTask = taskCandidate
@@ -418,7 +419,7 @@ end
 
 -- Thread do Fast Attack
 task.spawn(function()
-    while _G.AutoFarmMagmaVillage and GetLevel() < Config.MaxLevel do
+    while _G.AutoFarmUnderwaterCity and GetLevel() < Config.MaxLevel do
         local character = LocalPlayer.Character
         local hum = character and character:FindFirstChildOfClass("Humanoid")
 
@@ -448,9 +449,9 @@ task.spawn(function()
     end
 end)
 
--- Loop principal sequencial (Lv. 300 ao Lv. 375 em Magma Village)
+-- Loop principal sequencial (Lv. 375 ao Lv. 450 na Underwater City)
 task.spawn(function()
-    while _G.AutoFarmMagmaVillage and GetLevel() < Config.MaxLevel do
+    while _G.AutoFarmUnderwaterCity and GetLevel() < Config.MaxLevel do
         local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
         local hrp = character:WaitForChild("HumanoidRootPart")
         local hum = character:WaitForChild("Humanoid")
@@ -458,9 +459,19 @@ task.spawn(function()
         if hum.Health <= 0 then
             CancelTween()
             task.wait(0.5)
+        elseif not IsInsideUnderwaterCity(hrp.Position) then
+            CancelTween()
+            SetPhysicsState(character, true)
+            if CommF and (os.clock() - LastEntranceCheck) >= 2 then
+                LastEntranceCheck = os.clock()
+                pcall(function()
+                    CommF:InvokeServer("requestEntrance", Config.EntrancePos)
+                end)
+            end
+            task.wait(0.3)
         elseif not QuestInProgress then
             EnableAura()
-            local nextTask = GetMagmaVillageTaskForLevel()
+            local nextTask = GetUnderwaterCityTaskForLevel()
             local npcPos = GetQuestNpcPos()
             local distToNpc = (hrp.Position - npcPos).Magnitude
 
@@ -499,7 +510,7 @@ task.spawn(function()
             end
         else
             EnableAura()
-            UpdateKillCounter(ActiveTask.TargetMob)
+            UpdateKillCounter(ActiveTask.TargetMob, ActiveTask.IsBoss)
             local guiState = CheckGuiQuestProgress(ActiveTask)
             local nearBossArena = (hrp.Position - ActiveTask.WaitPos).Magnitude <= 150
             local bossDisappeared = ActiveTask.IsBoss and nearBossArena and not IsBossAvailable(ActiveTask.TargetMob)
@@ -537,7 +548,7 @@ task.spawn(function()
         end
     end
 
-    _G.AutoFarmMagmaVillage = false
+    _G.AutoFarmUnderwaterCity = false
     if NoClipConnection then
         NoClipConnection:Disconnect()
         NoClipConnection = nil
