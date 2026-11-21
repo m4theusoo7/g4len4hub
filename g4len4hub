@@ -1,4 +1,4 @@
-_G.AutoFarmColosseum = true
+_G.AutoFarmMagmaVillage = true
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
@@ -14,10 +14,10 @@ local RegisterAttack = NetFolder and NetFolder:FindFirstChild("RE/RegisterAttack
 local RegisterHit = NetFolder and NetFolder:FindFirstChild("RE/RegisterHit")
 
 local Config = {
-    QuestName = "ColosseumQuest",
-    QuestNpcName = "Colosseum Quest Giver",
-    DefaultQuestPos = Vector3.new(-1576.11, 7.38, -2983.30),
-    MaxLevel = 300,
+    QuestName = "MagmaQuest",
+    QuestNpcName = "The Mayor",
+    DefaultQuestPos = Vector3.new(-5317.07, 12.27, 8517.41),
+    MaxLevel = 375,
     TweenSpeed = 200,
     DistanceFarm = 8,
     BringMobRadius = 250,
@@ -36,7 +36,7 @@ local CountedDeadMobs = setmetatable({}, { __mode = "k" })
 local function GetLevel()
     local data = LocalPlayer:FindFirstChild("Data")
     local level = data and data:FindFirstChild("Level")
-    return level and level.Value or 275
+    return level and level.Value or 300
 end
 
 local function CancelTween()
@@ -47,23 +47,66 @@ local function CancelTween()
     LastTweenTargetPos = nil
 end
 
-local function GetColosseumTaskForLevel()
-    local level = GetLevel()
+local function IsBossAvailable(bossName)
+    local enemies = workspace:FindFirstChild("Enemies")
+    if enemies then
+        for _, mob in ipairs(enemies:GetChildren()) do
+            if mob.Name == bossName then
+                local hum = mob:FindFirstChildOfClass("Humanoid")
+                if hum and hum.Health > 0 then
+                    return true
+                end
+            end
+        end
+    end
 
-    if level >= 300 then
-        return {
-            TargetMob = "Gladiator",
+    local storedBoss = ReplicatedStorage:FindFirstChild(bossName)
+    if storedBoss then
+        local hum = storedBoss:FindFirstChildOfClass("Humanoid")
+        if not hum or hum.Health > 0 then
+            return true
+        end
+    end
+
+    return false
+end
+
+local function GetAllMagmaTasks()
+    return {
+        MagmaAdmiral = {
+            TargetMob = "Magma Admiral",
+            QuestLevel = 3,
+            RequiredKills = 1,
+            IsBoss = true,
+            WaitPos = Vector3.new(-5650, 185, 9170)
+        },
+        MilitarySpy = {
+            TargetMob = "Military Spy",
             QuestLevel = 2,
             RequiredKills = 8,
-            WaitPos = Vector3.new(-1350, 25, -3050)
-        }
-    else
-        return {
-            TargetMob = "Toga Warrior",
+            IsBoss = false,
+            WaitPos = Vector3.new(-5800, 95, 8790)
+        },
+        MilitarySoldier = {
+            TargetMob = "Military Soldier",
             QuestLevel = 1,
-            RequiredKills = 6,
-            WaitPos = Vector3.new(-1770, 25, -2775)
+            RequiredKills = 8,
+            IsBoss = false,
+            WaitPos = Vector3.new(-5450, 28, 8480)
         }
+    }
+end
+
+local function GetMagmaVillageTaskForLevel()
+    local level = GetLevel()
+    local tasks = GetAllMagmaTasks()
+
+    if level >= 350 and IsBossAvailable("Magma Admiral") then
+        return tasks.MagmaAdmiral
+    elseif level >= 325 then
+        return tasks.MilitarySpy
+    else
+        return tasks.MilitarySoldier
     end
 end
 
@@ -99,7 +142,7 @@ local function SetPhysicsState(character, enabled)
 end
 
 NoClipConnection = RunService.Stepped:Connect(function()
-    if not _G.AutoFarmColosseum then
+    if not _G.AutoFarmMagmaVillage then
         if NoClipConnection then
             NoClipConnection:Disconnect()
             NoClipConnection = nil
@@ -146,10 +189,18 @@ local function CheckGuiQuestProgress(taskInfo)
                 local txt = string.lower((obj.Text or "") .. " " .. (obj.ContentText or ""))
                 local matchesMob = false
 
-                if taskInfo.TargetMob == "Toga Warrior" then
-                    matchesMob = string.find(txt, "toga") or string.find(txt, "warrior") or string.find(txt, "guerreiro")
-                elseif taskInfo.TargetMob == "Gladiator" then
-                    matchesMob = string.find(txt, "gladiator") or string.find(txt, "gladiador")
+                if taskInfo.TargetMob == "Military Soldier" then
+                    local hasMilitary = string.find(txt, "military") or string.find(txt, "militar")
+                    local hasSoldier = string.find(txt, "soldier") or string.find(txt, "soldado")
+                    matchesMob = hasMilitary and hasSoldier
+                elseif taskInfo.TargetMob == "Military Spy" then
+                    local hasMilitary = string.find(txt, "military") or string.find(txt, "militar")
+                    local hasSpy = string.find(txt, "spy") or string.find(txt, "espi")
+                    matchesMob = hasMilitary and hasSpy
+                elseif taskInfo.TargetMob == "Magma Admiral" then
+                    local hasMagma = string.find(txt, "magma")
+                    local hasAdmiral = string.find(txt, "admiral") or string.find(txt, "almirante")
+                    matchesMob = hasMagma and hasAdmiral
                 end
 
                 if matchesMob then
@@ -167,7 +218,7 @@ local function CheckGuiQuestProgress(taskInfo)
     return "Unknown"
 end
 
--- Localiza o NPC Colosseum Quest Giver dinamicamente (com fallback para DefaultQuestPos)
+-- Localiza o NPC The Mayor dinamicamente (com fallback para DefaultQuestPos)
 local function GetQuestNpcPos()
     local npcs = workspace:FindFirstChild("NPCs")
     local npc = npcs and npcs:FindFirstChild(Config.QuestNpcName)
@@ -340,16 +391,19 @@ local function MoveToCFrame(targetCFrame, snapAtEnd)
     CurrentTween:Play()
 end
 
--- Se já houver missão do Colosseum ativa ao executar o script, inicia direto no modo farm
-local initialTask = GetColosseumTaskForLevel()
-if CheckGuiQuestProgress(initialTask) == "Active" then
-    ActiveTask = initialTask
-    QuestInProgress = true
+-- Se já houver missão de Magma Village ativa ao executar o script, inicia direto no modo farm
+local allTasks = GetAllMagmaTasks()
+for _, taskCandidate in pairs(allTasks) do
+    if CheckGuiQuestProgress(taskCandidate) == "Active" then
+        ActiveTask = taskCandidate
+        QuestInProgress = true
+        break
+    end
 end
 
 -- Thread do Fast Attack
 task.spawn(function()
-    while _G.AutoFarmColosseum and GetLevel() < Config.MaxLevel do
+    while _G.AutoFarmMagmaVillage and GetLevel() < Config.MaxLevel do
         local character = LocalPlayer.Character
         local hum = character and character:FindFirstChildOfClass("Humanoid")
 
@@ -379,9 +433,9 @@ task.spawn(function()
     end
 end)
 
--- Loop principal sequencial (Lv. 275 ao Lv. 300 no Colosseum)
+-- Loop principal sequencial (Lv. 300 ao Lv. 375 em Magma Village)
 task.spawn(function()
-    while _G.AutoFarmColosseum and GetLevel() < Config.MaxLevel do
+    while _G.AutoFarmMagmaVillage and GetLevel() < Config.MaxLevel do
         local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
         local hrp = character:WaitForChild("HumanoidRootPart")
         local hum = character:WaitForChild("Humanoid")
@@ -390,7 +444,7 @@ task.spawn(function()
             CancelTween()
             task.wait(0.5)
         elseif not QuestInProgress then
-            local nextTask = GetColosseumTaskForLevel()
+            local nextTask = GetMagmaVillageTaskForLevel()
             local npcPos = GetQuestNpcPos()
             local distToNpc = (hrp.Position - npcPos).Magnitude
 
@@ -430,8 +484,15 @@ task.spawn(function()
         else
             UpdateKillCounter(ActiveTask.TargetMob)
             local guiState = CheckGuiQuestProgress(ActiveTask)
+            local nearBossArena = (hrp.Position - ActiveTask.WaitPos).Magnitude <= 150
+            local bossDisappeared = ActiveTask.IsBoss and nearBossArena and not IsBossAvailable(ActiveTask.TargetMob)
 
-            if guiState == "Completed" or MobsKilledInQuest >= ActiveTask.RequiredKills then
+            if guiState == "Completed" or MobsKilledInQuest >= ActiveTask.RequiredKills or bossDisappeared then
+                if bossDisappeared and CommF and HasAnyActiveQuest() then
+                    pcall(function()
+                        CommF:InvokeServer("AbandonQuest")
+                    end)
+                end
                 QuestInProgress = false
                 ActiveTask = nil
                 MobsKilledInQuest = 0
@@ -447,7 +508,7 @@ task.spawn(function()
 
                     MoveToCFrame(farmCFrame, true)
 
-                    if (hrp.Position - mobHrp.Position).Magnitude <= 65 then
+                    if not ActiveTask.IsBoss and (hrp.Position - mobHrp.Position).Magnitude <= 65 then
                         BringMobs(targetMob, ActiveTask.TargetMob)
                     end
                 else
@@ -459,7 +520,7 @@ task.spawn(function()
         end
     end
 
-    _G.AutoFarmColosseum = false
+    _G.AutoFarmMagmaVillage = false
     if NoClipConnection then
         NoClipConnection:Disconnect()
         NoClipConnection = nil
