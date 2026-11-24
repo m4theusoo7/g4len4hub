@@ -16,6 +16,7 @@ local RegisterHit = NetFolder and NetFolder:FindFirstChild("RE/RegisterHit")
 local Config = {
     -- Coordenadas reais extraidas do scanner (Update 30)
     SkyEntrancePos = Vector3.new(-4208.16, 1089.89, -373.05),
+    SkyArea2SpawnPos = Vector3.new(-5951.80, 5469.44, 2091.98),
     SkyArea2ExitPos = Vector3.new(-6022.24, 5470.50, 2217.33),
     MoleLowerPos = Vector3.new(-4309.40, 1085.80, -556.29),
     MoleUpperPos = Vector3.new(-5949.07, 5467.94, 2086.52),
@@ -33,6 +34,8 @@ local LastTweenTargetPos = nil
 local NoClipConnection = nil
 local LastAuraCheck = 0
 local LastPortalTouch = 0
+local LastCloudAttack = 0
+local PortalCycleStart = nil
 local BlockPortalTouch = false
 
 local QuestInProgress = false
@@ -243,7 +246,6 @@ NoClipConnection = RunService.Stepped:Connect(function()
     local character = LocalPlayer.Character
     local hrp = character and character:FindFirstChild("HumanoidRootPart")
     if character then
-        -- Evita entrar sem querer no portal Sky.Entrance ao farmar God's Guard logo ao lado
         local disableTouch = false
         if BlockPortalTouch and hrp then
             if (hrp.Position - Config.SkyEntrancePos).Magnitude <= 55 then
@@ -324,7 +326,6 @@ local function CheckGuiQuestProgress(taskInfo)
     return "Unknown", taskInfo.DefaultRequiredKills
 end
 
--- Localiza o NPC exato da missão (Mole inferior, Mole superior ou Sky Quest Giver 2)
 local function GetQuestNpcPos(taskInfo)
     local npcs = workspace:FindFirstChild("NPCs")
 
@@ -346,7 +347,6 @@ local function GetQuestNpcPos(taskInfo)
             return Config.MoleUpperPos + Vector3.new(0, 2, 3.5), true
         end
     else
-        -- SkyExp2Quest: localiza dinamicamente o NPC na área superior (Lv. 525-625)
         if npcs then
             local preferred = npcs:FindFirstChild("Sky Quest Giver 2") or npcs:FindFirstChild("Sky Adventurer")
             if preferred and preferred:FindFirstChild("HumanoidRootPart") then
@@ -357,7 +357,7 @@ local function GetQuestNpcPos(taskInfo)
                 if npc.Name ~= "Mole" and npc:FindFirstChild("HumanoidRootPart") then
                     local pos = npc.HumanoidRootPart.Position
                     local low = string.lower(npc.Name)
-                    if pos.Y > 5200 and (string.find(low, "sky") or string.find(low, "quest") or (pos - Config.Sky2StreamPos).Magnitude <= 450) then
+                    if pos.Y > 5200 and (string.find(low, "sky") or string.find(low, "quest") or (pos - Config.Sky2StreamPos).Magnitude <= 550) then
                         return pos + Vector3.new(0, 2, 3.5), true
                     end
                 end
@@ -368,7 +368,6 @@ local function GetQuestNpcPos(taskInfo)
     end
 end
 
--- Busca o centro de spawn em _WorldOrigin.EnemySpawns com fallback para as coordenadas do scanner
 local function GetMobWaitPos(taskInfo)
     local worldOrigin = workspace:FindFirstChild("_WorldOrigin")
     local enemySpawns = worldOrigin and worldOrigin:FindFirstChild("EnemySpawns")
@@ -549,8 +548,110 @@ local function TweenToCFrame(targetCFrame, snapAtEnd)
     CurrentTween:Play()
 end
 
--- Usa o TouchTransmitter real do portal (Workspace.Map.Sky.Entrance ou Workspace.Map.SkyArea2.Exit)
-local function UseRealSkyPortal(hrp, portalPart, fallbackPos)
+-- Verifica se ainda existe barreira de nuvens cobrindo Workspace.Map.Sky.Entrance
+local function GetTempleCloudParts(portalPos)
+    local clouds = {}
+    local map = workspace:FindFirstChild("Map")
+    local sky = map and map:FindFirstChild("Sky")
+    if not sky then return clouds end
+
+    for _, obj in ipairs(sky:GetDescendants()) do
+        if obj:IsA("BasePart") and obj.Name ~= "Entrance" then
+            local horiz = (Vector3.new(obj.Position.X, 0, obj.Position.Z) - Vector3.new(portalPos.X, 0, portalPos.Z)).Magnitude
+            local vert = math.abs(obj.Position.Y - portalPos.Y)
+            if horiz <= 30 and vert <= 14 and obj.Transparency < 0.85 then
+                table.insert(clouds, obj)
+            end
+        end
+    end
+    return clouds
+end
+
+local function BreakCloudsAndEnterSky(hrp, portalPart)
+    local targetPos = (portalPart and portalPart.Position) or Config.SkyEntrancePos
+    local horizDist = (Vector3.new(hrp.Position.X, 0, hrp.Position.Z) - Vector3.new(targetPos.X, 0, targetPos.Z)).Magnitude
+    local vertDist = math.abs(hrp.Position.Y - targetPos.Y)
+
+    -- Aproxima voando 6.5 studs acima do portal para nao ativar "Break the clouds first" antes de atacar
+    if horizDist > 12 or vertDist > 20 then
+        PortalCycleStart = nil
+        BlockPortalTouch = true
+        TweenToCFrame(CFrame.new(targetPos + Vector3.new(0, 6.5, 0)), false)
+        return
+    end
+
+    CancelTween()
+    local t = os.clock()
+    if not PortalCycleStart then
+        PortalCycleStart = t
+    end
+
+    local elapsed = t - PortalCycleStart
+    if elapsed > 4.2 then
+        PortalCycleStart = t
+        elapsed = 0
+    end
+
+    local cloudParts = GetTempleCloudParts(targetPos)
+    local needBreakClouds = (#cloudParts > 0 and elapsed < 2.2) or (elapsed < 1.3)
+
+    if needBreakClouds then
+        -- Fase 1: Fica logo acima da camada de nuvens e ataca para baixo para quebra-las
+        BlockPortalTouch = true
+        local hoverOffset = Vector3.new(math.cos(t * 4) * 3, 6.5, math.sin(t * 4) * 3)
+        hrp.CFrame = CFrame.new(targetPos + hoverOffset) * CFrame.Angles(math.rad(-90), 0, 0)
+        hrp.AssemblyLinearVelocity = Vector3.zero
+
+        if (t - LastCloudAttack) >= 0.12 then
+            LastCloudAttack = t
+            local tool = EquipWeapon()
+            pcall(function()
+                local cam = workspace.CurrentCamera
+                local cx = cam and (cam.ViewportSize.X / 2) or 500
+                local cy = cam and (cam.ViewportSize.Y / 2) or 300
+
+                VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, true, game, 1)
+                VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, false, game, 1)
+                if tool then
+                    tool:Activate()
+                end
+
+                if RegisterAttack and RegisterHit and #cloudParts > 0 then
+                    local cloudTargets = {}
+                    for _, part in ipairs(cloudParts) do
+                        table.insert(cloudTargets, { part.Parent, part })
+                    end
+                    RegisterAttack:FireServer(0)
+                    RegisterHit:FireServer(cloudParts[1], cloudTargets)
+                end
+            end)
+        end
+    else
+        -- Fase 2: Nuvens quebradas -> desce na hitbox de Workspace.Map.Sky.Entrance para subir a Upper Yard
+        BlockPortalTouch = false
+        local enterOffset = Vector3.new(math.cos(t * 5) * 2.5, 0.5, math.sin(t * 5) * 2.5)
+        hrp.CFrame = CFrame.new(targetPos + enterOffset)
+        hrp.AssemblyLinearVelocity = Vector3.zero
+
+        if (t - LastPortalTouch) >= 0.3 then
+            LastPortalTouch = t
+            if portalPart and firetouchinterest then
+                pcall(function()
+                    firetouchinterest(hrp, portalPart, 0)
+                    task.wait(0.03)
+                    firetouchinterest(hrp, portalPart, 1)
+                end)
+            end
+            if CommF then
+                pcall(function()
+                    CommF:InvokeServer("requestEntrance", Config.SkyArea2SpawnPos)
+                end)
+            end
+        end
+    end
+end
+
+local function UseExitPortal(hrp, portalPart, fallbackPos)
     local targetPos = (portalPart and portalPart.Position) or fallbackPos
     local dist = (hrp.Position - targetPos).Magnitude
 
@@ -584,30 +685,31 @@ local function MoveToCFrame(targetCFrame, snapAtEnd)
 
     local map = workspace:FindFirstChild("Map")
 
-    -- 1. Subir para Upper Yard (Y > 5200) atravessando Workspace.Map.Sky.Entrance (-4208.16, 1089.89, -373.05)
+    -- 1. Subir para Upper Yard (Y > 5200): quebra as nuvens do templo e atravessa Workspace.Map.Sky.Entrance
     if hrp.Position.Y < 4000 and targetCFrame.Position.Y > 4000 then
-        BlockPortalTouch = false
         local skyFolder = map and map:FindFirstChild("Sky")
         local entrancePart = skyFolder and skyFolder:FindFirstChild("Entrance")
-        UseRealSkyPortal(hrp, entrancePart, Config.SkyEntrancePos)
+        BreakCloudsAndEnterSky(hrp, entrancePart)
         return
+    else
+        PortalCycleStart = nil
     end
 
-    -- 2. Descer de Upper Yard (Y > 5200) para os God's Guard (Y ~ 1088) atravessando Workspace.Map.SkyArea2.Exit (-6022.24, 5470.50, 2217.33)
+    -- 2. Descer de Upper Yard (Y > 5200) para os God's Guard (Y ~ 1088) atravessando Workspace.Map.SkyArea2.Exit
     if hrp.Position.Y > 4000 and targetCFrame.Position.Y < 2500 then
         BlockPortalTouch = false
         local skyArea2 = map and map:FindFirstChild("SkyArea2")
         local exitPart = skyArea2 and skyArea2:FindFirstChild("Exit")
-        UseRealSkyPortal(hrp, exitPart, Config.SkyArea2ExitPos)
+        UseExitPortal(hrp, exitPart, Config.SkyArea2ExitPos)
         return
     end
 
-    -- 3. Navegação na mesma camada (protege contra toque acidental no Sky.Entrance durante God's Guard)
+    -- 3. Navegacao na mesma camada (protege contra toque acidental no Sky.Entrance durante God's Guard)
     BlockPortalTouch = (targetCFrame.Position.Y < 2500)
     TweenToCFrame(targetCFrame, snapAtEnd)
 end
 
--- Se já houver missão de Upper Skylands ativa ao executar o script, continua direto
+-- Se ja houver missao de Upper Skylands ativa ao executar o script, continua direto
 local allTasks = GetAllSkylandsTasks()
 for _, taskCandidate in pairs(allTasks) do
     local state = CheckGuiQuestProgress(taskCandidate)
