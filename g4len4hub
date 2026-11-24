@@ -27,9 +27,10 @@ local CurrentTween = nil
 local LastTweenTargetPos = nil
 local NoClipConnection = nil
 local LastAuraCheck = 0
-local LastEntranceCheck = 0
-local LowerEntranceAttempts = 0
-local NeedExitTouch = false
+local LastEntranceRemote = 0
+local LastTouchFire = 0
+local DescentStartTime = nil
+local DescentForceTween = false
 
 local QuestInProgress = false
 local ActiveTask = nil
@@ -209,9 +210,6 @@ local function SetPhysicsState(character, enabled)
     for _, part in ipairs(character:GetDescendants()) do
         if part:IsA("BasePart") then
             part.CanCollide = not enabled
-            if not enabled then
-                part.CanTouch = true
-            end
         end
     end
 end
@@ -226,26 +224,496 @@ NoClipConnection = RunService.Stepped:Connect(function()
     end
 
     local character = LocalPlayer.Character
-    local hrp = character and character:FindFirstChild("HumanoidRootPart")
     if character then
-        -- Bloqueia CanTouch perto dos portais de nuvem para impedir que o portal puxe o boneco de volta
-        local nearPortal = false
-        if hrp and not NeedExitTouch then
-            local distLower = (hrp.Position - Config.LowerEntrancePos).Magnitude
-            local distUpper = (hrp.Position - Config.UpperEntrancePos).Magnitude
-            nearPortal = (distLower <= 80) or (distUpper <= 45)
-        end
-
         for _, part in ipairs(character:GetDescendants()) do
-            if part:IsA("BasePart") then
-                if part.CanCollide then
-                    part.CanCollide = false
-                end
-                part.CanTouch = not nearPortal
+            if part:IsA("BasePart") and part.CanCollide then
+                part.CanCollide = false
             end
         end
     end
 end)
 
 local function HasAnyActiveQuest()
-    local playerGui = LocalPlayer:FindFirstChild("PlayerGui
+    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+    local main = playerGui and playerGui:FindFirstChild("Main")
+    local questGui = main and main:FindFirstChild("Quest")
+    return questGui and questGui.Visible or false
+end
+
+local function CheckGuiQuestProgress(taskInfo)
+    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+    local main = playerGui and playerGui:FindFirstChild("Main")
+    if not main or not taskInfo then return "Unknown" end
+
+    for _, obj in ipairs(main:GetDescendants()) do
+        if obj:IsA("TextLabel") and obj.Visible then
+            local isDialogue = false
+            local parent = obj.Parent
+            while parent and parent ~= main do
+                local pName = string.lower(parent.Name)
+                if string.find(pName, "dialogue") or string.find(pName, "questc") then
+                    isDialogue = true
+                    break
+                end
+                parent = parent.Parent
+            end
+
+            if not isDialogue then
+                local txt = string.lower((obj.Text or "") .. " " .. (obj.ContentText or ""))
+                local matchesMob = false
+
+                if taskInfo.TargetMob == "God's Guard" then
+                    local hasGod = string.find(txt, "god") or string.find(txt, "deus")
+                    local hasGuard = string.find(txt, "guard") or string.find(txt, "guarda")
+                    matchesMob = hasGod and hasGuard
+                elseif taskInfo.TargetMob == "Shanda" then
+                    matchesMob = string.find(txt, "shanda") ~= nil
+                elseif taskInfo.TargetMob == "Wysper" then
+                    matchesMob = string.find(txt, "wysper") ~= nil
+                elseif taskInfo.TargetMob == "Royal Squad" then
+                    local hasRoyal = string.find(txt, "royal") or string.find(txt, "real")
+                    local hasSquad = string.find(txt, "squad") or string.find(txt, "esquadr")
+                    matchesMob = hasRoyal and hasSquad
+                elseif taskInfo.TargetMob == "Royal Soldier" then
+                    local hasRoyal = string.find(txt, "royal") or string.find(txt, "real")
+                    local hasSoldier = string.find(txt, "soldier") or string.find(txt, "soldado")
+                    matchesMob = hasRoyal and hasSoldier
+                elseif taskInfo.TargetMob == "Thunder God" then
+                    local hasThunder = string.find(txt, "thunder") or string.find(txt, "trov")
+                    local hasGod = string.find(txt, "god") or string.find(txt, "deus")
+                    matchesMob = hasThunder and hasGod
+                end
+
+                if matchesMob then
+                    local donePattern = taskInfo.RequiredKills .. "/" .. taskInfo.RequiredKills
+                    if string.find(txt, donePattern) then
+                        return "Completed"
+                    elseif string.find(txt, "[0-" .. (taskInfo.RequiredKills - 1) .. "]/" .. taskInfo.RequiredKills) then
+                        return "Active"
+                    end
+                end
+            end
+        end
+    end
+
+    return "Unknown"
+end
+
+-- Localiza o NPC da missão dinamicamente (Mole ou Sky Adventurer, com fallback para DefaultQuestPos)
+local function GetQuestNpcPos(taskInfo)
+    local npcs = workspace:FindFirstChild("NPCs")
+    local npc = npcs and npcs:FindFirstChild(taskInfo.QuestNpcName)
+    if npc and npc:FindFirstChild("HumanoidRootPart") then
+        return npc.HumanoidRootPart.Position + Vector3.new(0, 3, 3.5)
+    end
+
+    local storedNpc = ReplicatedStorage:FindFirstChild(taskInfo.QuestNpcName)
+    if storedNpc and storedNpc:FindFirstChild("HumanoidRootPart") then
+        return storedNpc.HumanoidRootPart.Position + Vector3.new(0, 3, 3.5)
+    end
+
+    return taskInfo.DefaultQuestPos
+end
+
+-- Busca a posição real de spawn dos mobs em _WorldOrigin.EnemySpawns (com fallback para WaitPos)
+local function GetMobWaitPos(taskInfo)
+    local worldOrigin = workspace:FindFirstChild("_WorldOrigin")
+    local enemySpawns = worldOrigin and worldOrigin:FindFirstChild("EnemySpawns")
+    if enemySpawns then
+        local sum = Vector3.zero
+        local count = 0
+        for _, spawnPart in ipairs(enemySpawns:GetChildren()) do
+            if spawnPart:IsA("BasePart") and string.find(spawnPart.Name, taskInfo.TargetMob, 1, true) then
+                if IsValidMobAltitude(taskInfo.TargetMob, spawnPart.Position) then
+                    sum += spawnPart.Position
+                    count += 1
+                end
+            end
+        end
+        if count > 0 then
+            return (sum / count) + Vector3.new(0, 25, 0)
+        end
+    end
+
+    return taskInfo.WaitPos
+end
+
+local function EquipWeapon()
+    local character = LocalPlayer.Character
+    local backpack = LocalPlayer:FindFirstChild("Backpack")
+    local hum = character and character:FindFirstChildOfClass("Humanoid")
+    if not character or not backpack or not hum then return nil end
+
+    local equipped = character:FindFirstChildOfClass("Tool")
+    if equipped and (equipped.ToolTip == "Melee" or equipped.ToolTip == "Sword" or equipped.Name == "Combat") then
+        return equipped
+    end
+
+    for _, tool in ipairs(backpack:GetChildren()) do
+        if tool:IsA("Tool") and (tool.ToolTip == "Melee" or tool.ToolTip == "Sword" or tool.Name == "Combat") then
+            hum:EquipTool(tool)
+            return tool
+        end
+    end
+
+    return nil
+end
+
+local function UpdateKillCounter(targetMobName)
+    local enemies = workspace:FindFirstChild("Enemies")
+    if not enemies then return end
+
+    for _, mob in ipairs(enemies:GetChildren()) do
+        if mob.Name == targetMobName and not CountedDeadMobs[mob] then
+            local mobHum = mob:FindFirstChildOfClass("Humanoid")
+            if mobHum and mobHum.Health <= 0 then
+                CountedDeadMobs[mob] = true
+                if QuestInProgress then
+                    MobsKilledInQuest += 1
+                end
+            end
+        end
+    end
+end
+
+local function GetClosestTargetMob(targetMobName)
+    local character = LocalPlayer.Character
+    local hrp = character and character:FindFirstChild("HumanoidRootPart")
+    local enemies = workspace:FindFirstChild("Enemies")
+    if not hrp or not enemies then return nil end
+
+    local closestMob = nil
+    local shortestDist = 1500
+
+    for _, mob in ipairs(enemies:GetChildren()) do
+        if mob.Name == targetMobName then
+            local mobHum = mob:FindFirstChildOfClass("Humanoid")
+            local mobHrp = mob:FindFirstChild("HumanoidRootPart")
+            if mobHum and mobHrp and mobHum.Health > 0 and IsValidMobAltitude(targetMobName, mobHrp.Position) then
+                local dist = (hrp.Position - mobHrp.Position).Magnitude
+                if dist < shortestDist then
+                    shortestDist = dist
+                    closestMob = mob
+                end
+            end
+        end
+    end
+
+    return closestMob
+end
+
+local function BringMobs(anchorMob, targetMobName)
+    local enemies = workspace:FindFirstChild("Enemies")
+    local anchorHrp = anchorMob and anchorMob:FindFirstChild("HumanoidRootPart")
+    if not enemies or not anchorHrp then return end
+
+    pcall(function()
+        sethiddenproperty(LocalPlayer, "SimulationRadius", math.huge)
+    end)
+
+    local anchorCFrame = anchorHrp.CFrame
+    anchorHrp.AssemblyLinearVelocity = Vector3.zero
+
+    for _, mob in ipairs(enemies:GetChildren()) do
+        if mob.Name == targetMobName then
+            local mobHum = mob:FindFirstChildOfClass("Humanoid")
+            local mobHrp = mob:FindFirstChild("HumanoidRootPart")
+            if mobHum and mobHrp and mobHum.Health > 0 and IsValidMobAltitude(targetMobName, mobHrp.Position) then
+                local dist = (mobHrp.Position - anchorCFrame.Position).Magnitude
+                local heightDiff = math.abs(mobHrp.Position.Y - anchorCFrame.Position.Y)
+                if dist <= Config.BringMobRadius and heightDiff <= 80 then
+                    for _, part in ipairs(mob:GetDescendants()) do
+                        if part:IsA("BasePart") then
+                            part.CanCollide = false
+                        end
+                    end
+
+                    if mob ~= anchorMob then
+                        mobHrp.CFrame = anchorCFrame
+                    end
+
+                    mobHrp.AssemblyLinearVelocity = Vector3.zero
+                    mobHrp.AssemblyAngularVelocity = Vector3.zero
+                    mobHum.WalkSpeed = 0
+                    mobHum.JumpPower = 0
+                end
+            end
+        end
+    end
+end
+
+local function GetTargetsInRange(targetMobName, maxRange)
+    local character = LocalPlayer.Character
+    local hrp = character and character:FindFirstChild("HumanoidRootPart")
+    local enemies = workspace:FindFirstChild("Enemies")
+    local targets = {}
+    if not hrp or not enemies or not targetMobName then return targets end
+
+    for _, mob in ipairs(enemies:GetChildren()) do
+        if mob.Name == targetMobName then
+            local mobHum = mob:FindFirstChildOfClass("Humanoid")
+            local mobHrp = mob:FindFirstChild("HumanoidRootPart")
+            if mobHum and mobHrp and mobHum.Health > 0 then
+                if (hrp.Position - mobHrp.Position).Magnitude <= maxRange then
+                    table.insert(targets, { mob, mobHrp })
+                end
+            end
+        end
+    end
+
+    return targets
+end
+
+local function TriggerNearbyPortal(hrp, centerPos, radius, destinationPos)
+    local t = os.clock()
+    if (t - LastTouchFire) >= 0.35 then
+        LastTouchFire = t
+        if firetouchinterest then
+            for _, obj in ipairs(workspace:GetDescendants()) do
+                if obj:IsA("TouchTransmitter") and obj.Parent and obj.Parent:IsA("BasePart") then
+                    local part = obj.Parent
+                    if (part.Position - centerPos).Magnitude <= radius then
+                        pcall(function()
+                            firetouchinterest(hrp, part, 0)
+                            task.wait(0.03)
+                            firetouchinterest(hrp, part, 1)
+                        end)
+                    end
+                end
+            end
+        end
+    end
+
+    if CommF and (t - LastEntranceRemote) >= 1.0 then
+        LastEntranceRemote = t
+        pcall(function()
+            CommF:InvokeServer("requestEntrance", destinationPos)
+        end)
+    end
+end
+
+local function TweenToCFrame(targetCFrame, snapAtEnd)
+    local character = LocalPlayer.Character
+    local hrp = character and character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    local distance = (hrp.Position - targetCFrame.Position).Magnitude
+
+    if distance <= 3.5 then
+        CancelTween()
+        if snapAtEnd then
+            hrp.CFrame = targetCFrame
+        end
+        return
+    end
+
+    local targetMoved = not LastTweenTargetPos or (LastTweenTargetPos - targetCFrame.Position).Magnitude > 4
+
+    if CurrentTween and CurrentTween.PlaybackState == Enum.PlaybackState.Playing and not targetMoved then
+        return
+    end
+
+    if CurrentTween then
+        CurrentTween:Cancel()
+    end
+
+    LastTweenTargetPos = targetCFrame.Position
+    local duration = math.max(distance / Config.TweenSpeed, 0.05)
+    local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear)
+    CurrentTween = TweenService:Create(hrp, tweenInfo, { CFrame = targetCFrame })
+    CurrentTween:Play()
+end
+
+local function MoveToCFrame(targetCFrame, snapAtEnd)
+    local character = LocalPlayer.Character
+    local hrp = character and character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    -- Subir para Upper Yard (Y > 5500): voa de Tween até o portal de nuvem inferior e ativa o teleporte
+    if hrp.Position.Y < 4500 and targetCFrame.Position.Y > 4500 then
+        DescentStartTime = nil
+        DescentForceTween = false
+        local distToLowerPortal = (hrp.Position - Config.LowerEntrancePos).Magnitude
+
+        if distToLowerPortal > 25 then
+            TweenToCFrame(CFrame.new(Config.LowerEntrancePos), false)
+        else
+            CancelTween()
+            hrp.CFrame = CFrame.new(Config.LowerEntrancePos)
+            hrp.AssemblyLinearVelocity = Vector3.zero
+            TriggerNearbyPortal(hrp, Config.LowerEntrancePos, 65, Config.UpperEntrancePos)
+        end
+        return
+    end
+
+    -- Descer de Upper Yard (Y > 5500) para os God's Guard (Y ~ 860)
+    if hrp.Position.Y > 4500 and targetCFrame.Position.Y < 2000 then
+        if not DescentStartTime then
+            DescentStartTime = os.clock()
+            DescentForceTween = false
+        end
+
+        if (os.clock() - DescentStartTime) > 2.5 then
+            DescentForceTween = true
+        end
+
+        if not DescentForceTween then
+            local distToUpperPortal = (hrp.Position - Config.UpperEntrancePos).Magnitude
+            if distToUpperPortal > 20 then
+                TweenToCFrame(CFrame.new(Config.UpperEntrancePos), false)
+            else
+                CancelTween()
+                hrp.CFrame = CFrame.new(Config.UpperEntrancePos)
+                hrp.AssemblyLinearVelocity = Vector3.zero
+                TriggerNearbyPortal(hrp, Config.UpperEntrancePos, 45, Config.LowerEntrancePos)
+            end
+            return
+        end
+    else
+        DescentStartTime = nil
+        DescentForceTween = false
+    end
+
+    TweenToCFrame(targetCFrame, snapAtEnd)
+end
+
+-- Se já houver missão de Upper Skylands ativa ao executar o script, inicia direto no modo farm
+local allTasks = GetAllSkylandsTasks()
+for _, taskCandidate in pairs(allTasks) do
+    if CheckGuiQuestProgress(taskCandidate) == "Active" then
+        ActiveTask = taskCandidate
+        QuestInProgress = true
+        break
+    end
+end
+
+-- Thread do Fast Attack
+task.spawn(function()
+    while _G.AutoFarmUpperSkylands and GetLevel() < Config.MaxLevel do
+        local character = LocalPlayer.Character
+        local hum = character and character:FindFirstChildOfClass("Humanoid")
+
+        if character and hum and hum.Health > 0 and QuestInProgress and ActiveTask then
+            local tool = EquipWeapon()
+            local targets = GetTargetsInRange(ActiveTask.TargetMob, 25)
+
+            if tool and #targets > 0 then
+                pcall(function()
+                    local cam = workspace.CurrentCamera
+                    local cx = cam and (cam.ViewportSize.X / 2) or 500
+                    local cy = cam and (cam.ViewportSize.Y / 2) or 300
+
+                    VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, true, game, 1)
+                    VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, false, game, 1)
+                    tool:Activate()
+
+                    if RegisterAttack and RegisterHit then
+                        RegisterAttack:FireServer(0)
+                        RegisterHit:FireServer(targets[1][2], targets)
+                    end
+                end)
+            end
+        end
+
+        task.wait(Config.AttackDelay)
+    end
+end)
+
+-- Loop principal sequencial (Lv. 450 ao Lv. 625 em Upper Skylands)
+task.spawn(function()
+    while _G.AutoFarmUpperSkylands and GetLevel() < Config.MaxLevel do
+        local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+        local hrp = character:WaitForChild("HumanoidRootPart")
+        local hum = character:WaitForChild("Humanoid")
+
+        if hum.Health <= 0 then
+            CancelTween()
+            task.wait(0.5)
+        elseif not QuestInProgress then
+            EnableAura()
+            local nextTask = GetUpperSkylandsTaskForLevel()
+            local npcPos = GetQuestNpcPos(nextTask)
+            local distToNpc = (hrp.Position - npcPos).Magnitude
+
+            SetPhysicsState(character, true)
+
+            if distToNpc > 7 then
+                MoveToCFrame(CFrame.new(npcPos), false)
+                RunService.Heartbeat:Wait()
+            else
+                CancelTween()
+                hrp.AssemblyLinearVelocity = Vector3.zero
+                task.wait(0.2)
+
+                if CommF then
+                    if HasAnyActiveQuest() and CheckGuiQuestProgress(nextTask) ~= "Active" then
+                        pcall(function()
+                            CommF:InvokeServer("AbandonQuest")
+                        end)
+                        task.wait(0.2)
+                    end
+
+                    for _ = 1, 3 do
+                        if CheckGuiQuestProgress(nextTask) == "Active" then
+                            break
+                        end
+                        pcall(function()
+                            CommF:InvokeServer("StartQuest", nextTask.QuestName, nextTask.QuestLevel)
+                        end)
+                        task.wait(0.25)
+                    end
+                end
+
+                ActiveTask = nextTask
+                MobsKilledInQuest = 0
+                QuestInProgress = true
+            end
+        else
+            EnableAura()
+            UpdateKillCounter(ActiveTask.TargetMob)
+            local guiState = CheckGuiQuestProgress(ActiveTask)
+            local waitPos = GetMobWaitPos(ActiveTask)
+            local nearBossArena = (hrp.Position - waitPos).Magnitude <= 150
+            local bossDisappeared = ActiveTask.IsBoss and nearBossArena and not IsBossAvailable(ActiveTask.TargetMob)
+
+            if guiState == "Completed" or MobsKilledInQuest >= ActiveTask.RequiredKills or bossDisappeared then
+                if bossDisappeared and CommF and HasAnyActiveQuest() then
+                    pcall(function()
+                        CommF:InvokeServer("AbandonQuest")
+                    end)
+                end
+                QuestInProgress = false
+                ActiveTask = nil
+                MobsKilledInQuest = 0
+                CancelTween()
+            else
+                SetPhysicsState(character, true)
+                local targetMob = GetClosestTargetMob(ActiveTask.TargetMob)
+
+                if targetMob and targetMob:FindFirstChild("HumanoidRootPart") then
+                    local mobHrp = targetMob.HumanoidRootPart
+                    local farmPos = mobHrp.Position + Vector3.new(0, Config.DistanceFarm, 0)
+                    local farmCFrame = CFrame.new(farmPos) * CFrame.Angles(math.rad(-90), 0, 0)
+
+                    MoveToCFrame(farmCFrame, true)
+
+                    if not ActiveTask.IsBoss and (hrp.Position - mobHrp.Position).Magnitude <= 65 then
+                        BringMobs(targetMob, ActiveTask.TargetMob)
+                    end
+                else
+                    MoveToCFrame(CFrame.new(waitPos), false)
+                end
+
+                RunService.Heartbeat:Wait()
+            end
+        end
+    end
+
+    _G.AutoFarmUpperSkylands = false
+    if NoClipConnection then
+        NoClipConnection:Disconnect()
+        NoClipConnection = nil
+    end
+    CancelTween()
+    SetPhysicsState(LocalPlayer.Character, false)
+end)
