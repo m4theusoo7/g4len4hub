@@ -1,247 +1,325 @@
-_G.AutoUnlockSea2 = true
-
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local VirtualInputManager = game:GetService("VirtualInputManager")
-
 local LocalPlayer = Players.LocalPlayer
+
 local Remotes = ReplicatedStorage:FindFirstChild("Remotes")
 local CommF = Remotes and Remotes:FindFirstChild("CommF_")
-local NetFolder = ReplicatedStorage:FindFirstChild("Modules") and ReplicatedStorage.Modules:FindFirstChild("Net")
-local RegisterAttack = NetFolder and NetFolder:FindFirstChild("RE/RegisterAttack")
-local RegisterHit = NetFolder and NetFolder:FindFirstChild("RE/RegisterHit")
 
-local Config = {
-    -- Coordenadas de referencia (atualizadas dinamicamente via _WorldOrigin e NPCs)
-    PrisonFallbackPos = Vector3.new(4854.17, 5.65, 740.19),
-    FrozenCaveDoorFallback = Vector3.new(1347.70, 37.30, -1325.00),
-    IceAdmiralFallbackPos = Vector3.new(1347.70, 37.30, -1385.00),
-    MiddleTownFallbackPos = Vector3.new(-651.00, 7.30, 1581.00),
+local function fmtVec(v)
+    return string.format("Vector3.new(%.2f, %.2f, %.2f)", v.X, v.Y, v.Z)
+end
 
-    -- Portais de saida caso execute vindo de Upper Yard ou Underwater City
-    SkyArea2ExitPos = Vector3.new(-6022.24, 5470.50, 2217.33),
-    UnderwaterExitPos = Vector3.new(61170.05, -2.00, 1952.83),
+local function isSea2QuestRelated(name)
+    local low = string.lower(name or "")
+    local keywords = {
+        "detective", "military", "prison", "impel", "frozen", "ice",
+        "admiral", "door", "gate", "key", "captain", "experienced",
+        "middle", "dressrosa", "second", "sea", "warden", "chief"
+    }
+    for _, kw in ipairs(keywords) do
+        if string.find(low, kw, 1, true) then
+            return true
+        end
+    end
+    return false
+end
 
-    MinLevel = 700,
-    TweenSpeed = 225,
-    DistanceFarm = 8,
-    AttackDelay = 0.08
+local detectedPositions = {
+    Prison = Vector3.new(4854.17, 25.00, 740.19),
+    IceAdmiral = Vector3.new(1347.70, 50.00, -1385.00),
+    MiddleTown = Vector3.new(-651.00, 25.00, 1581.00)
 }
 
-local CurrentTween = nil
-local LastTweenTargetPos = nil
-local NoClipConnection = nil
-local LastAuraCheck = 0
-local LastPortalTouch = 0
-local LastDoorTouch = 0
+local function RunScan()
+    local lines = {}
+    local function add(txt)
+        table.insert(lines, txt)
+    end
 
--- Flags locais de seguranca combinadas com o progresso do servidor
-local LocalDoorOpened = false
-local LocalAdmiralKilled = false
-local LocalDetectiveReported = false
-
-local function GetLevel()
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    local playerPos = hrp and hrp.Position or Vector3.zero
     local data = LocalPlayer:FindFirstChild("Data")
-    local level = data and data:FindFirstChild("Level")
-    return level and level.Value or 1
-end
+    local lvl = data and data:FindFirstChild("Level") and data.Level.Value or 0
 
-local function EnableAura()
-    if not CommF then return end
-    local character = LocalPlayer.Character
-    local hum = character and character:FindFirstChildOfClass("Humanoid")
-    if not character or not hum or hum.Health <= 0 then return end
+    add("=== OMEGACORE SCANNER (UNLOCK SEA 2) ===")
+    add(string.format("[PLAYER] Lv.%d | %s", lvl, fmtVec(playerPos)))
 
-    if not character:FindFirstChild("HasBuso") and (os.clock() - LastAuraCheck) >= 3 then
-        LastAuraCheck = os.clock()
-        pcall(function()
-            CommF:InvokeServer("Buso")
+    -- 0. Estado da DressrosaQuestProgress
+    add("\n[QUEST STATUS]")
+    if CommF then
+        local ok, res = pcall(function()
+            return CommF:InvokeServer("DressrosaQuestProgress")
         end)
-    end
-end
-
-local function CancelTween()
-    if CurrentTween then
-        CurrentTween:Cancel()
-        CurrentTween = nil
-    end
-    LastTweenTargetPos = nil
-end
-
-local function SetPhysicsState(character, enabled)
-    if not character then return end
-    local hrp = character:FindFirstChild("HumanoidRootPart")
-    local hum = character:FindFirstChildOfClass("Humanoid")
-
-    if hum and enabled then
-        hum.Sit = false
-    end
-
-    if hrp then
-        local bv = hrp:FindFirstChild("FarmBodyVelocity")
-        if enabled then
-            if not bv then
-                bv = Instance.new("BodyVelocity")
-                bv.Name = "FarmBodyVelocity"
-                bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-                bv.Velocity = Vector3.zero
-                bv.Parent = hrp
+        if ok then
+            if type(res) == "table" then
+                local parts = {}
+                for k, v in pairs(res) do
+                    table.insert(parts, tostring(k) .. "=" .. tostring(v))
+                end
+                add("- DressrosaQuestProgress: { " .. table.concat(parts, ", ") .. " }")
+            else
+                add("- DressrosaQuestProgress: " .. tostring(res))
             end
-        elseif bv then
-            bv:Destroy()
+        else
+            add("- DressrosaQuestProgress ERRO: " .. tostring(res))
         end
     end
 
-    for _, part in ipairs(character:GetDescendants()) do
-        if part:IsA("BasePart") then
-            part.CanCollide = not enabled
-            if not enabled then
-                part.CanTouch = true
+    -- 1. Todas as Locations (para detectar nomes novos do Update 30)
+    add("\n[LOCATIONS]")
+    local worldOrigin = workspace:FindFirstChild("_WorldOrigin")
+    local locations = worldOrigin and worldOrigin:FindFirstChild("Locations")
+    if locations then
+        for _, loc in ipairs(locations:GetChildren()) do
+            if loc:IsA("BasePart") then
+                add(string.format("- %s | %s", loc.Name, fmtVec(loc.Position)))
+                local low = string.lower(loc.Name)
+                if string.find(low, "prison", 1, true) or string.find(low, "impel", 1, true) then
+                    detectedPositions.Prison = loc.Position + Vector3.new(0, 35, 0)
+                elseif string.find(low, "frozen", 1, true) or string.find(low, "ice", 1, true) then
+                    detectedPositions.IceAdmiral = loc.Position + Vector3.new(0, 35, 0)
+                elseif string.find(low, "middle", 1, true) then
+                    detectedPositions.MiddleTown = loc.Position + Vector3.new(0, 35, 0)
+                end
             end
         end
     end
-end
 
-NoClipConnection = RunService.Stepped:Connect(function()
-    if not _G.AutoUnlockSea2 then
-        if NoClipConnection then
-            NoClipConnection:Disconnect()
-            NoClipConnection = nil
-        end
-        return
-    end
-
-    local character = LocalPlayer.Character
-    if character then
-        for _, part in ipairs(character:GetDescendants()) do
-            if part:IsA("BasePart") and part.CanCollide then
-                part.CanCollide = false
+    -- 2. NPCs (Workspace + ReplicatedStorage)
+    add("\n[NPCS]")
+    local seenNpcs = {}
+    local npcsFolder = workspace:FindFirstChild("NPCs")
+    if npcsFolder then
+        for _, npc in ipairs(npcsFolder:GetChildren()) do
+            local nHrp = npc:FindFirstChild("HumanoidRootPart")
+            if nHrp and (isSea2QuestRelated(npc.Name) or (nHrp.Position - playerPos).Magnitude <= 1500) then
+                seenNpcs[npc.Name] = true
+                add(string.format("- [WS] %s | %s", npc.Name, fmtVec(nHrp.Position)))
             end
         end
     end
-end)
+    for _, obj in ipairs(ReplicatedStorage:GetChildren()) do
+        if obj:IsA("Model") and obj:FindFirstChild("HumanoidRootPart") and isSea2QuestRelated(obj.Name) and not seenNpcs[obj.Name] then
+            add(string.format("- [RS] %s | %s", obj.Name, fmtVec(obj.HumanoidRootPart.Position)))
+        end
+    end
 
-local function TweenToCFrame(targetCFrame, snapAtEnd)
-    local character = LocalPlayer.Character
-    local hrp = character and character:FindFirstChild("HumanoidRootPart")
+    -- 3. EnemySpawns (Ice Admiral / Prison / Frozen)
+    add("\n[ENEMY SPAWNS]")
+    local enemySpawns = worldOrigin and worldOrigin:FindFirstChild("EnemySpawns")
+    if enemySpawns then
+        local groups = {}
+        for _, sp in ipairs(enemySpawns:GetChildren()) do
+            if sp:IsA("BasePart") and (isSea2QuestRelated(sp.Name) or (sp.Position - playerPos).Magnitude <= 1200) then
+                groups[sp.Name] = groups[sp.Name] or {}
+                table.insert(groups[sp.Name], sp.Position)
+            end
+        end
+        for mobName, posList in pairs(groups) do
+            local sum = Vector3.zero
+            for _, p in ipairs(posList) do sum += p end
+            local avg = sum / #posList
+            add(string.format("- %s (x%d) | Centro: %s", mobName, #posList, fmtVec(avg)))
+            if string.find(string.lower(mobName), "ice admiral", 1, true) then
+                detectedPositions.IceAdmiral = avg + Vector3.new(0, 20, 0)
+            end
+        end
+    end
+
+    -- 4. Portas / TouchTransmitters / ProximityPrompts proximos
+    add("\n[PORTAS / INTERACOES]")
+    local seenParts = {}
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        local isDoorName = obj:IsA("BasePart") and (string.lower(obj.Name) == "door" or string.find(string.lower(obj:GetFullName()), "ice", 1, true))
+        if obj:IsA("TouchTransmitter") or obj:IsA("ProximityPrompt") or obj:IsA("ClickDetector") or isDoorName then
+            local part = obj:IsA("BasePart") and obj or (obj.Parent and (obj.Parent:IsA("BasePart") and obj.Parent or obj.Parent:FindFirstChildWhichIsA("BasePart")))
+            if part and not seenParts[part] then
+                local lowFull = string.lower(part:GetFullName())
+                local isChest = string.find(lowFull, "chest", 1, true)
+                local nearPlayer = (part.Position - playerPos).Magnitude <= 450
+                local nearAdmiral = (part.Position - detectedPositions.IceAdmiral).Magnitude <= 350
+                if not isChest and (nearPlayer or nearAdmiral) then
+                    seenParts[part] = true
+                    add(string.format("- [%s] %s | %s | CanCollide:%s", obj.ClassName, part:GetFullName(), fmtVec(part.Position), tostring(part.CanCollide)))
+                end
+            end
+        end
+    end
+
+    -- 5. Enemies ativos
+    add("\n[ENEMIES ATIVOS]")
+    local enemies = workspace:FindFirstChild("Enemies")
+    if enemies then
+        for _, mob in ipairs(enemies:GetChildren()) do
+            local mHrp = mob:FindFirstChild("HumanoidRootPart")
+            if mHrp and (isSea2QuestRelated(mob.Name) or (mHrp.Position - playerPos).Magnitude <= 800) then
+                add(string.format("- %s | %s", mob.Name, fmtVec(mHrp.Position)))
+            end
+        end
+    end
+
+    return table.concat(lines, "\n")
+end
+
+-- UI Mobile compacta
+local parentGui = (gethui and gethui()) or game:GetService("CoreGui")
+if parentGui:FindFirstChild("OmegaSea2ScannerUI") then
+    parentGui.OmegaSea2ScannerUI:Destroy()
+end
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "OmegaSea2ScannerUI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = parentGui
+
+local Frame = Instance.new("Frame")
+Frame.Size = UDim2.new(0, 390, 0, 295)
+Frame.Position = UDim2.new(0.5, -195, 0.5, -147)
+Frame.BackgroundColor3 = Color3.fromRGB(20, 22, 28)
+Frame.BorderSizePixel = 0
+Frame.Active = true
+Frame.Draggable = true
+Frame.Parent = ScreenGui
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, -10, 0, 26)
+Title.Position = UDim2.new(0, 8, 0, 4)
+Title.BackgroundTransparency = 1
+Title.Text = "OmegaCore - Scanner Unlock Sea 2"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.Font = Enum.Font.GothamBold
+Title.TextSize = 13
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = Frame
+
+local Scroll = Instance.new("ScrollingFrame")
+Scroll.Size = UDim2.new(1, -16, 1, -112)
+Scroll.Position = UDim2.new(0, 8, 0, 32)
+Scroll.BackgroundColor3 = Color3.fromRGB(14, 15, 20)
+Scroll.BorderSizePixel = 0
+Scroll.ScrollBarThickness = 5
+Scroll.Parent = Frame
+
+local OutputBox = Instance.new("TextBox")
+OutputBox.Size = UDim2.new(1, -8, 0, 1200)
+OutputBox.Position = UDim2.new(0, 4, 0, 4)
+OutputBox.BackgroundTransparency = 1
+OutputBox.TextColor3 = Color3.fromRGB(120, 255, 160)
+OutputBox.Font = Enum.Font.Code
+OutputBox.TextSize = 11
+OutputBox.TextXAlignment = Enum.TextXAlignment.Left
+OutputBox.TextYAlignment = Enum.TextYAlignment.Top
+OutputBox.MultiLine = true
+OutputBox.ClearTextOnFocus = false
+OutputBox.TextWrapped = true
+OutputBox.Parent = Scroll
+
+local function appendScan()
+    local res = RunScan()
+    if OutputBox.Text == "" then
+        OutputBox.Text = res
+    else
+        OutputBox.Text = OutputBox.Text .. "\n\n" .. res
+    end
+    local lineCount = select(2, OutputBox.Text:gsub("\n", "\n")) + 20
+    local h = math.max(1200, lineCount * 15)
+    Scroll.CanvasSize = UDim2.new(0, 0, 0, h)
+    OutputBox.Size = UDim2.new(1, -8, 0, h)
+end
+
+appendScan()
+
+local function makeBtn(text, posX, posY, sizeW, color, callback)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(sizeW, -5, 0, 30)
+    btn.Position = UDim2.new(posX, 3, 1, posY)
+    btn.BackgroundColor3 = color
+    btn.Text = text
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 11
+    btn.BorderSizePixel = 0
+    btn.Parent = Frame
+    btn.MouseButton1Click:Connect(callback)
+    return btn
+end
+
+local isFlying = false
+local function flyTo(targetPos, btn, defaultLabel)
+    if isFlying then return end
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
 
-    local distance = (hrp.Position - targetCFrame.Position).Magnitude
-
-    if distance <= 3.5 then
-        CancelTween()
-        if snapAtEnd then
-            hrp.CFrame = targetCFrame
-        end
-        return
-    end
-
-    local targetMoved = not LastTweenTargetPos or (LastTweenTargetPos - targetCFrame.Position).Magnitude > 4
-
-    if CurrentTween and CurrentTween.PlaybackState == Enum.PlaybackState.Playing and not targetMoved then
-        return
-    end
-
-    if CurrentTween then
-        CurrentTween:Cancel()
-    end
-
-    LastTweenTargetPos = targetCFrame.Position
-    local duration = math.max(distance / Config.TweenSpeed, 0.05)
-    local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear)
-    CurrentTween = TweenService:Create(hrp, tweenInfo, { CFrame = targetCFrame })
-    CurrentTween:Play()
-end
-
-local function UseExitPortal(hrp, portalPart, fallbackPos)
-    local targetPos = (portalPart and portalPart.Position) or fallbackPos
+    isFlying = true
+    btn.Text = "VOANDO..."
     local dist = (hrp.Position - targetPos).Magnitude
 
-    if dist > 14 then
-        TweenToCFrame(CFrame.new(targetPos + Vector3.new(0, 2, 0)), false)
-        return
-    end
+    local bv = Instance.new("BodyVelocity")
+    bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+    bv.Velocity = Vector3.zero
+    bv.Parent = hrp
 
-    CancelTween()
-    local t = os.clock()
-    local offset = Vector3.new(math.cos(t * 6) * 2.5, math.sin(t * 8) * 2, math.sin(t * 6) * 2.5)
-    hrp.CFrame = CFrame.new(targetPos + offset)
-    hrp.AssemblyLinearVelocity = Vector3.zero
-
-    if (t - LastPortalTouch) >= 0.3 then
-        LastPortalTouch = t
-        if portalPart and firetouchinterest then
-            pcall(function()
-                firetouchinterest(hrp, portalPart, 0)
-                task.wait(0.03)
-                firetouchinterest(hrp, portalPart, 1)
-            end)
+    local noclip = RunService.Stepped:Connect(function()
+        if char then
+            for _, p in ipairs(char:GetDescendants()) do
+                if p:IsA("BasePart") then p.CanCollide = false end
+            end
         end
-    end
-end
-
-local function MoveToCFrame(targetCFrame, snapAtEnd)
-    local character = LocalPlayer.Character
-    local hrp = character and character:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-
-    local map = workspace:FindFirstChild("Map")
-
-    -- Sai de Upper Yard se o jogador iniciar o script la em cima
-    if hrp.Position.Y > 4000 then
-        local skyArea2 = map and map:FindFirstChild("SkyArea2")
-        local exitPart = skyArea2 and skyArea2:FindFirstChild("Exit")
-        UseExitPortal(hrp, exitPart, Config.SkyArea2ExitPos)
-        return
-    end
-
-    -- Sai de Underwater City se o jogador iniciar o script la dentro
-    if hrp.Position.X > 50000 then
-        local tpSpawn = map and map:FindFirstChild("TeleportSpawn")
-        local exitPart = tpSpawn and tpSpawn:FindFirstChild("Exit")
-        UseExitPortal(hrp, exitPart, Config.UnderwaterExitPos)
-        return
-    end
-
-    TweenToCFrame(targetCFrame, snapAtEnd)
-end
-
--- Consulta o estado oficial da quest do Sea 2 no servidor
-local function GetQuestProgress()
-    local state = {
-        UsedKey = LocalDoorOpened,
-        KilledIceAdmiral = LocalAdmiralKilled,
-        TalkedDetective = LocalDetectiveReported
-    }
-
-    if not CommF then return state end
-
-    local ok, res = pcall(function()
-        return CommF:InvokeServer("DressrosaQuestProgress")
     end)
 
-    if ok and type(res) == "table" then
-        if res.UsedKey then
-            state.UsedKey = true
-            LocalDoorOpened = true
-        end
-        if res.KilledIceAdmiral then
-            state.KilledIceAdmiral = true
-            LocalAdmiralKilled = true
-        end
-        if res.TalkedDetective and state.KilledIceAdmiral then
-            state.TalkedDetective = true
-            LocalDetectiveReported = true
-        end
-    end
-
-    return state
+    local tween = TweenService:Create(hrp, TweenInfo.new(math.max(dist / 240, 0.2), Enum.EasingStyle.Linear), {
+        CFrame = CFrame.new(targetPos)
+    })
+    tween:Play()
+    tween.Completed:Connect(function()
+        noclip:Disconnect()
+        bv:Destroy()
+        isFlying = false
+        btn.Text = "OK!"
+        task.wait(0.4)
+        appendScan()
+        task.delay(1.2, function()
+            if btn then btn.Text = defaultLabel end
+        end)
+    end)
 end
 
--- Verifica e equipa a Key para abrir a porta de Frozen Village
-local function FindAndEquipKey()
-    local character = LocalPlayer.Character
-    local backpack = LocalPlayer:FindFirstChild("Backpack")
-    local hum = character
+-- Linha 1: Atalhos de voo
+local bPrison
+bPrison = makeBtn("1. IR PRISON", 0, -72, 0.33, Color3.fromRGB(215, 130, 35), function()
+    flyTo(detectedPositions.Prison, bPrison, "1. IR PRISON")
+end)
+
+local bFrozen
+bFrozen = makeBtn("2. IR ICE ADMIRAL", 0.33, -72, 0.34, Color3.fromRGB(45, 145, 195), function()
+    flyTo(detectedPositions.IceAdmiral, bFrozen, "2. IR ICE ADMIRAL")
+end)
+
+local bMiddle
+bMiddle = makeBtn("3. IR MIDDLE TOWN", 0.67, -72, 0.33, Color3.fromRGB(130, 95, 205), function()
+    flyTo(detectedPositions.MiddleTown, bMiddle, "3. IR MIDDLE TOWN")
+end)
+
+-- Linha 2: Acoes
+makeBtn("RE-ESCANEAR", 0, -36, 0.36, Color3.fromRGB(45, 110, 210), appendScan)
+
+local copyBtn
+copyBtn = makeBtn("COPIAR TUDO", 0.36, -36, 0.40, Color3.fromRGB(35, 160, 90), function()
+    if setclipboard then
+        setclipboard(OutputBox.Text)
+    elseif toclipboard then
+        toclipboard(OutputBox.Text)
+    end
+    copyBtn.Text = "COPIADO!"
+    task.delay(1.5, function()
+        if copyBtn then copyBtn.Text = "COPIAR TUDO" end
+    end)
+end)
+
+makeBtn("FECHAR", 0.76, -36, 0.24, Color3.fromRGB(190, 55, 55), function()
+    ScreenGui:Destroy()
+end)
