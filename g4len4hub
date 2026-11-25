@@ -1,4 +1,4 @@
-_G.OmegaSea2_Missao1_Key = true
+_G.OmegaSea2_Missao2_Porta = true
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
@@ -10,7 +10,9 @@ local Remotes = ReplicatedStorage:FindFirstChild("Remotes")
 local CommF = Remotes and Remotes:FindFirstChild("CommF_")
 
 local Config = {
-    PrisonFallbackPos = Vector3.new(4854.17, 25.00, 740.19),
+    FrozenIslandFallback = Vector3.new(1140.00, 25.00, -1220.00),
+    CaveDoorFallback = Vector3.new(1347.70, 37.30, -1325.00),
+    IceAdmiralFallback = Vector3.new(1347.70, 37.30, -1385.00),
     SkyArea2ExitPos = Vector3.new(-6022.24, 5470.50, 2217.33),
     UnderwaterExitPos = Vector3.new(61170.05, -2.00, 1952.83),
     TweenSpeed = 225
@@ -19,56 +21,80 @@ local Config = {
 local CurrentTween = nil
 local LastTweenTarget = nil
 local LastPortalTouch = 0
+local LastDoorInteract = 0
 
 -- Barra compacta de status na tela
 local parentGui = (gethui and gethui()) or game:GetService("CoreGui")
-if parentGui:FindFirstChild("OmegaSea2Missao1UI") then
-    parentGui.OmegaSea2Missao1UI:Destroy()
+if parentGui:FindFirstChild("OmegaSea2Missao2UI") then
+    parentGui.OmegaSea2Missao2UI:Destroy()
 end
 
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "OmegaSea2Missao1UI"
+ScreenGui.Name = "OmegaSea2Missao2UI"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.Parent = parentGui
 
 local StatusBox = Instance.new("TextLabel")
-StatusBox.Size = UDim2.new(0, 350, 0, 48)
-StatusBox.Position = UDim2.new(0.5, -175, 0, 12)
+StatusBox.Size = UDim2.new(0, 360, 0, 50)
+StatusBox.Position = UDim2.new(0.5, -180, 0, 12)
 StatusBox.BackgroundColor3 = Color3.fromRGB(18, 20, 26)
 StatusBox.TextColor3 = Color3.fromRGB(120, 255, 160)
 StatusBox.Font = Enum.Font.GothamBold
 StatusBox.TextSize = 12
 StatusBox.TextWrapped = true
 StatusBox.BorderSizePixel = 0
-StatusBox.Text = "[Missao 1 - Key] Iniciando..."
+StatusBox.Text = "[Missao 2 - Porta] Iniciando..."
 StatusBox.Parent = ScreenGui
 
 local function setStatus(msg, color)
-    StatusBox.Text = "[Missao 1 - Key] " .. msg
+    StatusBox.Text = "[Missao 2 - Porta] " .. msg
     if color then
         StatusBox.TextColor3 = color
     end
 end
 
-local function hasKey()
+local function findKeyTool()
     local char = LocalPlayer.Character
     local backpack = LocalPlayer:FindFirstChild("Backpack")
-    for _, container in ipairs({ char, backpack }) do
-        if container then
-            for _, item in ipairs(container:GetChildren()) do
-                if item:IsA("Tool") and string.find(string.lower(item.Name), "key", 1, true) then
-                    return true, item.Name
-                end
+
+    if char then
+        for _, item in ipairs(char:GetChildren()) do
+            if item:IsA("Tool") and string.find(string.lower(item.Name), "key", 1, true) then
+                return item, true
             end
         end
     end
-    return false, nil
+
+    if backpack then
+        for _, item in ipairs(backpack:GetChildren()) do
+            if item:IsA("Tool") and string.find(string.lower(item.Name), "key", 1, true) then
+                return item, false
+            end
+        end
+    end
+
+    return nil, false
 end
 
-local function getLevel()
-    local data = LocalPlayer:FindFirstChild("Data")
-    local level = data and data:FindFirstChild("Level")
-    return level and level.Value or 0
+local function equipKey()
+    local char = LocalPlayer.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    local keyTool, isEquipped = findKeyTool()
+    if keyTool and not isEquipped and hum then
+        hum:EquipTool(keyTool)
+    end
+    return keyTool
+end
+
+local function isDoorAlreadyUsed()
+    if not CommF then return false end
+    local ok, prog = pcall(function()
+        return CommF:InvokeServer("DressrosaQuestProgress")
+    end)
+    if ok and type(prog) == "table" and prog.UsedKey then
+        return true
+    end
+    return false
 end
 
 local function cancelTween()
@@ -89,11 +115,11 @@ local function setPhysics(character, enabled)
     end
 
     if hrp then
-        local bv = hrp:FindFirstChild("OmegaKeyBV")
+        local bv = hrp:FindFirstChild("OmegaDoorBV")
         if enabled then
             if not bv then
                 bv = Instance.new("BodyVelocity")
-                bv.Name = "OmegaKeyBV"
+                bv.Name = "OmegaDoorBV"
                 bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
                 bv.Velocity = Vector3.zero
                 bv.Parent = hrp
@@ -106,6 +132,9 @@ local function setPhysics(character, enabled)
     for _, part in ipairs(character:GetDescendants()) do
         if part:IsA("BasePart") then
             part.CanCollide = not enabled
+            if not enabled then
+                part.CanTouch = true
+            end
         end
     end
 end
@@ -159,7 +188,6 @@ end
 local function moveTo(hrp, targetPos)
     local map = workspace:FindFirstChild("Map")
 
-    -- Sai de Upper Yard se estiver la em cima
     if hrp.Position.Y > 4000 then
         local skyArea2 = map and map:FindFirstChild("SkyArea2")
         local exitPart = skyArea2 and skyArea2:FindFirstChild("Exit")
@@ -167,7 +195,6 @@ local function moveTo(hrp, targetPos)
         return false
     end
 
-    -- Sai de Underwater City se estiver la dentro
     if hrp.Position.X > 50000 then
         local tpSpawn = map and map:FindFirstChild("TeleportSpawn")
         local exitPart = tpSpawn and tpSpawn:FindFirstChild("Exit")
@@ -178,43 +205,82 @@ local function moveTo(hrp, targetPos)
     return tweenTo(hrp, targetPos)
 end
 
-local function getPrisonPos()
+-- Localiza a ancora da caverna usando o spawn do Ice Admiral ou Frozen Village
+local function getCaveAnchorPos()
     local worldOrigin = workspace:FindFirstChild("_WorldOrigin")
+
+    local enemySpawns = worldOrigin and worldOrigin:FindFirstChild("EnemySpawns")
+    if enemySpawns then
+        for _, sp in ipairs(enemySpawns:GetChildren()) do
+            if sp:IsA("BasePart") and string.find(string.lower(sp.Name), "ice admiral", 1, true) then
+                return sp.Position
+            end
+        end
+    end
+
     local locations = worldOrigin and worldOrigin:FindFirstChild("Locations")
     if locations then
         for _, loc in ipairs(locations:GetChildren()) do
             if loc:IsA("BasePart") then
                 local low = string.lower(loc.Name)
-                if string.find(low, "prison", 1, true) or string.find(low, "impel", 1, true) then
-                    return loc.Position + Vector3.new(0, 25, 0)
+                if string.find(low, "frozen", 1, true) or string.find(low, "ice", 1, true) then
+                    return loc.Position + Vector3.new(0, 20, 0)
                 end
             end
         end
     end
-    return Config.PrisonFallbackPos
+
+    return Config.CaveDoorFallback
 end
 
-local function findMilitaryDetective()
-    local npcs = workspace:FindFirstChild("NPCs")
-    if not npcs then return nil end
+-- Procura dinamicamente a porta de madeira na caverna de Frozen Village
+local function findCaveDoor(anchorPos)
+    local map = workspace:FindFirstChild("Map")
+    if not map then return nil end
 
-    local exact = npcs:FindFirstChild("Military Detective")
-    if exact and exact:FindFirstChild("HumanoidRootPart") then
-        return exact
-    end
-
-    for _, npc in ipairs(npcs:GetChildren()) do
-        local low = string.lower(npc.Name)
-        if (string.find(low, "detective", 1, true) or string.find(low, "military", 1, true)) and npc:FindFirstChild("HumanoidRootPart") then
-            return npc
+    -- 1. Busca direta em pastas da ilha de gelo
+    for _, folder in ipairs(map:GetChildren()) do
+        local low = string.lower(folder.Name)
+        if string.find(low, "ice", 1, true) or string.find(low, "frozen", 1, true) then
+            for _, obj in ipairs(folder:GetDescendants()) do
+                if obj:IsA("BasePart") then
+                    local objLow = string.lower(obj.Name)
+                    if objLow == "door" or string.find(objLow, "door", 1, true) then
+                        return obj
+                    end
+                end
+            end
         end
     end
 
-    return nil
+    -- 2. Busca por proximidade ao spawn do Ice Admiral (ignora baus)
+    local bestDoor = nil
+    local bestDist = 180
+
+    for _, folder in ipairs(map:GetChildren()) do
+        for _, obj in ipairs(folder:GetDescendants()) do
+            if obj:IsA("BasePart") then
+                local fullLow = string.lower(obj:GetFullName())
+                local isChest = string.find(fullLow, "chest", 1, true)
+                local hasInteract = obj:FindFirstChildOfClass("TouchTransmitter") or obj:FindFirstChildOfClass("ProximityPrompt") or obj:FindFirstChildOfClass("ClickDetector")
+                local isDoorName = string.find(string.lower(obj.Name), "door", 1, true)
+
+                if not isChest and (isDoorName or hasInteract) then
+                    local d = (obj.Position - anchorPos).Magnitude
+                    if d < bestDist then
+                        bestDist = d
+                        bestDoor = obj
+                    end
+                end
+            end
+        end
+    end
+
+    return bestDoor
 end
 
 local noclipConn = RunService.Stepped:Connect(function()
-    if not _G.OmegaSea2_Missao1_Key then return end
+    if not _G.OmegaSea2_Missao2_Porta then return end
     local char = LocalPlayer.Character
     if char then
         for _, p in ipairs(char:GetDescendants()) do
@@ -226,37 +292,25 @@ local noclipConn = RunService.Stepped:Connect(function()
 end)
 
 task.spawn(function()
-    if getLevel() < 700 then
-        setStatus("Requer Lv. 700+ (Atual: " .. getLevel() .. ")", Color3.fromRGB(255, 100, 100))
-        _G.OmegaSea2_Missao1_Key = false
+    if isDoorAlreadyUsed() then
+        setStatus("A porta secreta ja esta aberta! Pode ir para a Parte 3 (Ice Admiral).", Color3.fromRGB(120, 255, 160))
+        _G.OmegaSea2_Missao2_Porta = false
         noclipConn:Disconnect()
         return
     end
 
-    local gotKey, keyName = hasKey()
-    if gotKey then
-        setStatus("Chave ja esta na mochila (" .. keyName .. ")! Pronto para a Parte 2.", Color3.fromRGB(120, 255, 160))
-        _G.OmegaSea2_Missao1_Key = false
+    local initialKey = findKeyTool()
+    if not initialKey then
+        setStatus("Key nao encontrada! Rode a Missao 1 na Prison primeiro.", Color3.fromRGB(255, 100, 100))
+        _G.OmegaSea2_Missao2_Porta = false
         noclipConn:Disconnect()
         return
     end
 
-    if CommF then
-        local ok, prog = pcall(function()
-            return CommF:InvokeServer("DressrosaQuestProgress")
-        end)
-        if ok and type(prog) == "table" and prog.UsedKey then
-            setStatus("Voce ja usou a Key antes! Pode ir direto para o Ice Admiral (Parte 3).", Color3.fromRGB(120, 255, 160))
-            _G.OmegaSea2_Missao1_Key = false
-            noclipConn:Disconnect()
-            return
-        end
-    end
+    local anchorPos = getCaveAnchorPos()
+    local interactAttempts = 0
 
-    local prisonPos = getPrisonPos()
-    local talkedAttempts = 0
-
-    while _G.OmegaSea2_Missao1_Key do
+    while _G.OmegaSea2_Missao2_Porta do
         local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
         local hrp = char:WaitForChild("HumanoidRootPart")
         local hum = char:WaitForChild("Humanoid")
@@ -267,71 +321,76 @@ task.spawn(function()
         else
             setPhysics(char, true)
 
-            local success, newKey = hasKey()
-            if success then
+            -- Checa se a porta ja abriu ou se a Key foi consumida
+            if isDoorAlreadyUsed() or not findKeyTool() then
                 cancelTween()
-                setStatus("SUCESSO! Voce pegou a " .. newKey .. ". Avise para a Parte 2!", Color3.fromRGB(120, 255, 160))
+                setStatus("SUCESSO! Porta secreta aberta. Avise para a Parte 3 (Ice Admiral)!", Color3.fromRGB(120, 255, 160))
                 break
             end
 
-            local detective = findMilitaryDetective()
-            if not detective then
-                setStatus("Indo ate a Prison...", Color3.fromRGB(255, 215, 90))
-                moveTo(hrp, prisonPos)
+            local doorPart = findCaveDoor(anchorPos)
+            local targetPos = (doorPart and doorPart.Position) or anchorPos
+            local dist = (hrp.Position - targetPos).Magnitude
 
-                if (hrp.Position - prisonPos).Magnitude <= 80 then
+            if dist > 8 then
+                setStatus("Voando ate Frozen Village...", Color3.fromRGB(255, 215, 90))
+                moveTo(hrp, targetPos + Vector3.new(0, 1.5, 0))
+
+                if dist <= 120 then
                     pcall(function()
-                        LocalPlayer:RequestStreamAroundAsync(prisonPos)
+                        LocalPlayer:RequestStreamAroundAsync(targetPos)
                     end)
                 end
                 RunService.Heartbeat:Wait()
             else
-                local npcPos = detective.HumanoidRootPart.Position + Vector3.new(0, 2, 3.5)
-                if (hrp.Position - npcPos).Magnitude > 6 then
-                    setStatus("Indo ate " .. detective.Name .. "...", Color3.fromRGB(255, 215, 90))
-                    moveTo(hrp, npcPos)
-                    RunService.Heartbeat:Wait()
-                else
-                    cancelTween()
-                    hrp.AssemblyLinearVelocity = Vector3.zero
-                    talkedAttempts += 1
-                    setStatus("Conversando com " .. detective.Name .. " (" .. talkedAttempts .. ")...", Color3.fromRGB(120, 200, 255))
+                cancelTween()
+                local keyTool = equipKey()
+                interactAttempts += 1
+                setStatus("Usando Key na porta (" .. interactAttempts .. ")...", Color3.fromRGB(120, 200, 255))
+
+                -- Encosta levemente na porta com a Key equipada
+                local t = os.clock()
+                local wiggle = Vector3.new(math.cos(t * 6) * 2, 0.5, math.sin(t * 6) * 2)
+                hrp.CFrame = CFrame.new(targetPos + wiggle)
+                hrp.AssemblyLinearVelocity = Vector3.zero
+
+                if (t - LastDoorInteract) >= 0.35 then
+                    LastDoorInteract = t
+
+                    if keyTool then
+                        pcall(function()
+                            keyTool:Activate()
+                        end)
+                    end
+
+                    if doorPart then
+                        if firetouchinterest then
+                            pcall(function()
+                                firetouchinterest(hrp, doorPart, 0)
+                                task.wait(0.03)
+                                firetouchinterest(hrp, doorPart, 1)
+                            end)
+                        end
+
+                        local prompt = doorPart:FindFirstChildWhichIsA("ProximityPrompt", true)
+                        if prompt and fireproximityprompt then
+                            pcall(fireproximityprompt, prompt)
+                        end
+
+                        local click = doorPart:FindFirstChildWhichIsA("ClickDetector", true)
+                        if click and fireclickdetector then
+                            pcall(fireclickdetector, click)
+                        end
+                    end
 
                     if CommF then
                         pcall(function()
-                            CommF:InvokeServer("DressrosaQuestProgress")
+                            CommF:InvokeServer("DressrosaQuestProgress", "UseKey")
                         end)
-                        task.wait(0.15)
-                        pcall(function()
-                            CommF:InvokeServer("DressrosaQuestProgress", "Detective")
-                        end)
-                    end
-
-                    local prompt = detective:FindFirstChildWhichIsA("ProximityPrompt", true)
-                    if prompt and fireproximityprompt then
-                        pcall(fireproximityprompt, prompt)
-                    end
-
-                    local click = detective:FindFirstChildWhichIsA("ClickDetector", true)
-                    if click and fireclickdetector then
-                        pcall(fireclickdetector, click)
-                    end
-
-                    task.wait(0.7)
-
-                    if talkedAttempts >= 8 then
-                        setStatus("Chegou no NPC, mas a Key nao veio. Me diga o que apareceu na tela!", Color3.fromRGB(255, 130, 100))
-                        break
                     end
                 end
-            end
-        end
-    end
 
-    _G.OmegaSea2_Missao1_Key = false
-    if noclipConn then
-        noclipConn:Disconnect()
-    end
-    cancelTween()
-    setPhysics(LocalPlayer.Character, false)
-end)
+                task.wait(0.4)
+
+                -- Se a porta perdeu colisao/ficou transparente, conclui
+                if doorPart and (not doorPart.
