@@ -750,3 +750,266 @@ task.spawn(function()
     cancelTween()
     setPhysics(LocalPlayer.Character, false)
 end)
+_G.OmegaSea2_Missao3_Boss = true
+
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+
+local LocalPlayer = Players.LocalPlayer
+local Remotes = ReplicatedStorage:FindFirstChild("Remotes")
+local CommF = Remotes and Remotes:FindFirstChild("CommF_")
+local NetFolder = ReplicatedStorage:FindFirstChild("Modules") and ReplicatedStorage.Modules:FindFirstChild("Net")
+local RegisterAttack = NetFolder and NetFolder:FindFirstChild("RE/RegisterAttack")
+local RegisterHit = NetFolder and NetFolder:FindFirstChild("RE/RegisterHit")
+
+local Config = {
+    IceAdmiralFallback = Vector3.new(1347.70, 37.30, -1385.00),
+    SkyArea2ExitPos = Vector3.new(-6022.24, 5470.50, 2217.33),
+    UnderwaterExitPos = Vector3.new(61170.05, -2.00, 1952.83),
+    TweenSpeed = 225,
+    DistanceFarm = 8,
+    AttackDelay = 0.08
+}
+
+local CurrentTween = nil
+local LastTweenTarget = nil
+local LastPortalTouch = 0
+local LastAuraCheck = 0
+
+-- Barra compacta de status na tela
+local parentGui = (gethui and gethui()) or game:GetService("CoreGui")
+if parentGui:FindFirstChild("OmegaSea2Missao3UI") then
+    parentGui.OmegaSea2Missao3UI:Destroy()
+end
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "OmegaSea2Missao3UI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = parentGui
+
+local StatusBox = Instance.new("TextLabel")
+StatusBox.Size = UDim2.new(0, 360, 0, 50)
+StatusBox.Position = UDim2.new(0.5, -180, 0, 12)
+StatusBox.BackgroundColor3 = Color3.fromRGB(18, 20, 26)
+StatusBox.TextColor3 = Color3.fromRGB(120, 255, 160)
+StatusBox.Font = Enum.Font.GothamBold
+StatusBox.TextSize = 12
+StatusBox.TextWrapped = true
+StatusBox.BorderSizePixel = 0
+StatusBox.Text = "[Missao 3 - Ice Admiral] Iniciando..."
+StatusBox.Parent = ScreenGui
+
+local function setStatus(msg, color)
+    StatusBox.Text = "[Missao 3 - Ice Admiral] " .. msg
+    if color then
+        StatusBox.TextColor3 = color
+    end
+end
+
+local function getQuestState()
+    if not CommF then return nil end
+    local ok, prog = pcall(function()
+        return CommF:InvokeServer("DressrosaQuestProgress")
+    end)
+    if ok and type(prog) == "table" then
+        return prog
+    end
+    return nil
+end
+
+local function enableAura()
+    if not CommF then return end
+    local char = LocalPlayer.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if not char or not hum or hum.Health <= 0 then return end
+
+    if not char:FindFirstChild("HasBuso") and (os.clock() - LastAuraCheck) >= 3 then
+        LastAuraCheck = os.clock()
+        pcall(function()
+            CommF:InvokeServer("Buso")
+        end)
+    end
+end
+
+local function equipCombatWeapon()
+    local char = LocalPlayer.Character
+    local backpack = LocalPlayer:FindFirstChild("Backpack")
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if not char or not backpack or not hum then return nil end
+
+    local equipped = char:FindFirstChildOfClass("Tool")
+    if equipped and (equipped.ToolTip == "Melee" or equipped.ToolTip == "Sword" or equipped.Name == "Combat") then
+        return equipped
+    end
+
+    for _, tool in ipairs(backpack:GetChildren()) do
+        if tool:IsA("Tool") and (tool.ToolTip == "Melee" or tool.ToolTip == "Sword" or tool.Name == "Combat") then
+            hum:EquipTool(tool)
+            return tool
+        end
+    end
+
+    return nil
+end
+
+local function cancelTween()
+    if CurrentTween then
+        CurrentTween:Cancel()
+        CurrentTween = nil
+    end
+    LastTweenTarget = nil
+end
+
+local function setPhysics(character, enabled)
+    if not character then return end
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    local hum = character:FindFirstChildOfClass("Humanoid")
+
+    if hum and enabled then
+        hum.Sit = false
+    end
+
+    if hrp then
+        local bv = hrp:FindFirstChild("OmegaBossBV")
+        if enabled then
+            if not bv then
+                bv = Instance.new("BodyVelocity")
+                bv.Name = "OmegaBossBV"
+                bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+                bv.Velocity = Vector3.zero
+                bv.Parent = hrp
+            end
+        elseif bv then
+            bv:Destroy()
+        end
+    end
+
+    for _, part in ipairs(character:GetDescendants()) do
+        if part:IsA("BasePart") then
+            part.CanCollide = not enabled
+            if not enabled then
+                part.CanTouch = true
+            end
+        end
+    end
+end
+
+local function tweenToCFrame(hrp, targetCFrame, snapAtEnd)
+    local dist = (hrp.Position - targetCFrame.Position).Magnitude
+    if dist <= 3.5 then
+        cancelTween()
+        if snapAtEnd then
+            hrp.CFrame = targetCFrame
+        end
+        return true
+    end
+
+    if CurrentTween and CurrentTween.PlaybackState == Enum.PlaybackState.Playing and LastTweenTarget and (LastTweenTarget - targetCFrame.Position).Magnitude <= 4 then
+        return false
+    end
+
+    cancelTween()
+    LastTweenTarget = targetCFrame.Position
+    local duration = math.max(dist / Config.TweenSpeed, 0.06)
+    CurrentTween = TweenService:Create(hrp, TweenInfo.new(duration, Enum.EasingStyle.Linear), {
+        CFrame = targetCFrame
+    })
+    CurrentTween:Play()
+    return false
+end
+
+local function useExitPortal(hrp, portalPart, fallbackPos)
+    local targetPos = (portalPart and portalPart.Position) or fallbackPos
+    if (hrp.Position - targetPos).Magnitude > 14 then
+        tweenToCFrame(hrp, CFrame.new(targetPos + Vector3.new(0, 2, 0)), false)
+        return
+    end
+
+    cancelTween()
+    local t = os.clock()
+    local offset = Vector3.new(math.cos(t * 6) * 2.5, math.sin(t * 8) * 2, math.sin(t * 6) * 2.5)
+    hrp.CFrame = CFrame.new(targetPos + offset)
+    hrp.AssemblyLinearVelocity = Vector3.zero
+
+    if (t - LastPortalTouch) >= 0.3 then
+        LastPortalTouch = t
+        if portalPart and firetouchinterest then
+            pcall(function()
+                firetouchinterest(hrp, portalPart, 0)
+                task.wait(0.03)
+                firetouchinterest(hrp, portalPart, 1)
+            end)
+        end
+    end
+end
+
+local function moveToCFrame(hrp, targetCFrame, snapAtEnd)
+    local map = workspace:FindFirstChild("Map")
+
+    if hrp.Position.Y > 4000 then
+        local skyArea2 = map and map:FindFirstChild("SkyArea2")
+        local exitPart = skyArea2 and skyArea2:FindFirstChild("Exit")
+        useExitPortal(hrp, exitPart, Config.SkyArea2ExitPos)
+        return false
+    end
+
+    if hrp.Position.X > 50000 then
+        local tpSpawn = map and map:FindFirstChild("TeleportSpawn")
+        local exitPart = tpSpawn and tpSpawn:FindFirstChild("Exit")
+        useExitPortal(hrp, exitPart, Config.UnderwaterExitPos)
+        return false
+    end
+
+    return tweenToCFrame(hrp, targetCFrame, snapAtEnd)
+end
+
+local function getIceAdmiralSpawnPos()
+    local worldOrigin = workspace:FindFirstChild("_WorldOrigin")
+    local enemySpawns = worldOrigin and worldOrigin:FindFirstChild("EnemySpawns")
+    if enemySpawns then
+        for _, sp in ipairs(enemySpawns:GetChildren()) do
+            if sp:IsA("BasePart") and string.find(string.lower(sp.Name), "ice admiral", 1, true) then
+                return sp.Position
+            end
+        end
+    end
+    return Config.IceAdmiralFallback
+end
+
+local function getActiveIceAdmiral()
+    local enemies = workspace:FindFirstChild("Enemies")
+    if not enemies then return nil end
+
+    for _, mob in ipairs(enemies:GetChildren()) do
+        if mob.Name == "Ice Admiral" then
+            local hum = mob:FindFirstChildOfClass("Humanoid")
+            local hrp = mob:FindFirstChild("HumanoidRootPart")
+            if hum and hrp and hum.Health > 0 then
+                return mob
+            end
+        end
+    end
+
+    return nil
+end
+
+local function isIceAdmiralStoredAlive()
+    local stored = ReplicatedStorage:FindFirstChild("Ice Admiral")
+    if stored then
+        local hum = stored:FindFirstChildOfClass("Humanoid")
+        if not hum or hum.Health > 0 then
+            return true
+        end
+    end
+    return false
+end
+
+local noclipConn = RunService.Stepped:Connect(function()
+    if not _G.OmegaSea2_Missao3_Boss then return end
+    local char = LocalPlayer.Character
+    if char then
+        for _, p in ipairs(char:GetDescendants()) do
+            if p:IsA("BasePart") and p
