@@ -1,4 +1,4 @@
-_G.AutoFarmFountainCity = true
+_G.AutoUnlockSea2 = true
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
@@ -14,16 +14,19 @@ local RegisterAttack = NetFolder and NetFolder:FindFirstChild("RE/RegisterAttack
 local RegisterHit = NetFolder and NetFolder:FindFirstChild("RE/RegisterHit")
 
 local Config = {
-    -- Coordenadas reais extraidas do scanner (Update 30)
-    FountainIslandPos = Vector3.new(5657.13, 26.22, 4418.73),
-    QuestNpcPos = Vector3.new(5263.49, 74.91, 4087.62),
+    -- Coordenadas de referencia (atualizadas dinamicamente via _WorldOrigin e NPCs)
+    PrisonFallbackPos = Vector3.new(4854.17, 5.65, 740.19),
+    FrozenCaveDoorFallback = Vector3.new(1347.70, 37.30, -1325.00),
+    IceAdmiralFallbackPos = Vector3.new(1347.70, 37.30, -1385.00),
+    MiddleTownFallbackPos = Vector3.new(-651.00, 7.30, 1581.00),
+
+    -- Portais de saida caso execute vindo de Upper Yard ou Underwater City
     SkyArea2ExitPos = Vector3.new(-6022.24, 5470.50, 2217.33),
     UnderwaterExitPos = Vector3.new(61170.05, -2.00, 1952.83),
 
-    MaxLevel = 700,
+    MinLevel = 700,
     TweenSpeed = 225,
     DistanceFarm = 8,
-    BringMobRadius = 250,
     AttackDelay = 0.08
 }
 
@@ -32,16 +35,17 @@ local LastTweenTargetPos = nil
 local NoClipConnection = nil
 local LastAuraCheck = 0
 local LastPortalTouch = 0
+local LastDoorTouch = 0
 
-local QuestInProgress = false
-local ActiveTask = nil
-local MobsKilledInQuest = 0
-local CountedDeadMobs = setmetatable({}, { __mode = "k" })
+-- Flags locais de seguranca combinadas com o progresso do servidor
+local LocalDoorOpened = false
+local LocalAdmiralKilled = false
+local LocalDetectiveReported = false
 
 local function GetLevel()
     local data = LocalPlayer:FindFirstChild("Data")
     local level = data and data:FindFirstChild("Level")
-    return level and level.Value or 625
+    return level and level.Value or 1
 end
 
 local function EnableAura()
@@ -64,92 +68,6 @@ local function CancelTween()
         CurrentTween = nil
     end
     LastTweenTargetPos = nil
-end
-
-local function MatchesMobName(actualName, mobNames)
-    for _, name in ipairs(mobNames) do
-        if actualName == name then
-            return true
-        end
-    end
-    return false
-end
-
-local function IsInFountainArea(pos)
-    if not pos then return false end
-    return (pos - Config.FountainIslandPos).Magnitude <= 1600
-end
-
-local function IsBossAvailable(taskInfo)
-    local enemies = workspace:FindFirstChild("Enemies")
-    if enemies then
-        for _, mob in ipairs(enemies:GetChildren()) do
-            if MatchesMobName(mob.Name, taskInfo.MobNames) then
-                local hum = mob:FindFirstChildOfClass("Humanoid")
-                local hrp = mob:FindFirstChild("HumanoidRootPart")
-                if hum and hum.Health > 0 and hrp and IsInFountainArea(hrp.Position) then
-                    return true
-                end
-            end
-        end
-    end
-
-    for _, name in ipairs(taskInfo.MobNames) do
-        local storedBoss = ReplicatedStorage:FindFirstChild(name)
-        if storedBoss then
-            local hum = storedBoss:FindFirstChildOfClass("Humanoid")
-            if not hum or hum.Health > 0 then
-                return true
-            end
-        end
-    end
-
-    return false
-end
-
-local function GetAllFountainTasks()
-    return {
-        Cyborg = {
-            QuestName = "FountainQuest",
-            QuestLevel = 3,
-            MobNames = { "Cyborg" },
-            SpawnPrefix = "Cyborg",
-            DefaultRequiredKills = 1,
-            IsBoss = true,
-            WaitPos = Vector3.new(6252.39, 24.00, 4941.39)
-        },
-        GalleyCaptain = {
-            QuestName = "FountainQuest",
-            QuestLevel = 2,
-            MobNames = { "Galley Captain" },
-            SpawnPrefix = "Galley Captain",
-            DefaultRequiredKills = 9,
-            IsBoss = false,
-            WaitPos = Vector3.new(5634.36, 92.00, 4789.08)
-        },
-        GalleyPirate = {
-            QuestName = "FountainQuest",
-            QuestLevel = 1,
-            MobNames = { "Galley Pirate" },
-            SpawnPrefix = "Galley Pirate",
-            DefaultRequiredKills = 8,
-            IsBoss = false,
-            WaitPos = Vector3.new(5571.64, 92.00, 4009.80)
-        }
-    }
-end
-
-local function GetFountainTaskForLevel()
-    local level = GetLevel()
-    local tasks = GetAllFountainTasks()
-
-    if level >= 675 and IsBossAvailable(tasks.Cyborg) then
-        return tasks.Cyborg
-    elseif level >= 650 then
-        return tasks.GalleyCaptain
-    else
-        return tasks.GalleyPirate
-    end
 end
 
 local function SetPhysicsState(character, enabled)
@@ -187,7 +105,7 @@ local function SetPhysicsState(character, enabled)
 end
 
 NoClipConnection = RunService.Stepped:Connect(function()
-    if not _G.AutoFarmFountainCity then
+    if not _G.AutoUnlockSea2 then
         if NoClipConnection then
             NoClipConnection:Disconnect()
             NoClipConnection = nil
@@ -204,231 +122,6 @@ NoClipConnection = RunService.Stepped:Connect(function()
         end
     end
 end)
-
-local function HasAnyActiveQuest()
-    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
-    local main = playerGui and playerGui:FindFirstChild("Main")
-    local questGui = main and main:FindFirstChild("Quest")
-    return questGui and questGui.Visible or false
-end
-
-local function CheckGuiQuestProgress(taskInfo)
-    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
-    local main = playerGui and playerGui:FindFirstChild("Main")
-    if not main or not taskInfo then return "Unknown", taskInfo.DefaultRequiredKills end
-
-    for _, obj in ipairs(main:GetDescendants()) do
-        if obj:IsA("TextLabel") and obj.Visible then
-            local isDialogue = false
-            local parent = obj.Parent
-            while parent and parent ~= main do
-                local pName = string.lower(parent.Name)
-                if string.find(pName, "dialogue") or string.find(pName, "questc") then
-                    isDialogue = true
-                    break
-                end
-                parent = parent.Parent
-            end
-
-            if not isDialogue then
-                local txt = string.lower((obj.Text or "") .. " " .. (obj.ContentText or ""))
-                local matchesMob = false
-
-                if taskInfo.SpawnPrefix == "Galley Pirate" then
-                    matchesMob = string.find(txt, "galley") ~= nil and (string.find(txt, "pirate") ~= nil or string.find(txt, "pirata") ~= nil)
-                elseif taskInfo.SpawnPrefix == "Galley Captain" then
-                    matchesMob = string.find(txt, "galley") ~= nil and (string.find(txt, "captain") ~= nil or string.find(txt, "capit") ~= nil)
-                elseif taskInfo.SpawnPrefix == "Cyborg" then
-                    matchesMob = string.find(txt, "cyborg") ~= nil or string.find(txt, "ciborgue") ~= nil
-                end
-
-                if matchesMob then
-                    local curStr, reqStr = string.match(txt, "(%d+)%s*/%s*(%d+)")
-                    local cur = tonumber(curStr)
-                    local req = tonumber(reqStr) or taskInfo.DefaultRequiredKills
-                    if cur and req then
-                        if cur >= req then
-                            return "Completed", req
-                        else
-                            return "Active", req
-                        end
-                    end
-                end
-            end
-        end
-    end
-
-    return "Unknown", taskInfo.DefaultRequiredKills
-end
-
-local function GetQuestNpcPos()
-    local npcs = workspace:FindFirstChild("NPCs")
-    if npcs then
-        local npc = npcs:FindFirstChild("Freezeburg Quest Giver") or npcs:FindFirstChild("Freestep Quest Giver")
-        if npc and npc:FindFirstChild("HumanoidRootPart") then
-            return npc.HumanoidRootPart.Position + Vector3.new(0, 2, 3.5), true
-        end
-
-        for _, obj in ipairs(npcs:GetChildren()) do
-            if obj:FindFirstChild("HumanoidRootPart") then
-                local pos = obj.HumanoidRootPart.Position
-                if (pos - Config.QuestNpcPos).Magnitude <= 80 then
-                    return pos + Vector3.new(0, 2, 3.5), true
-                end
-            end
-        end
-    end
-
-    return Config.QuestNpcPos + Vector3.new(0, 2, 3.5), false
-end
-
-local function GetMobWaitPos(taskInfo)
-    local worldOrigin = workspace:FindFirstChild("_WorldOrigin")
-    local enemySpawns = worldOrigin and worldOrigin:FindFirstChild("EnemySpawns")
-    if enemySpawns then
-        local sum = Vector3.zero
-        local count = 0
-        for _, spawnPart in ipairs(enemySpawns:GetChildren()) do
-            if spawnPart:IsA("BasePart") and string.find(spawnPart.Name, taskInfo.SpawnPrefix, 1, true) then
-                if IsInFountainArea(spawnPart.Position) then
-                    sum += spawnPart.Position
-                    count += 1
-                end
-            end
-        end
-        if count > 0 then
-            return (sum / count) + Vector3.new(0, 14, 0)
-        end
-    end
-
-    return taskInfo.WaitPos
-end
-
-local function EquipWeapon()
-    local character = LocalPlayer.Character
-    local backpack = LocalPlayer:FindFirstChild("Backpack")
-    local hum = character and character:FindFirstChildOfClass("Humanoid")
-    if not character or not backpack or not hum then return nil end
-
-    local equipped = character:FindFirstChildOfClass("Tool")
-    if equipped and (equipped.ToolTip == "Melee" or equipped.ToolTip == "Sword" or equipped.Name == "Combat") then
-        return equipped
-    end
-
-    for _, tool in ipairs(backpack:GetChildren()) do
-        if tool:IsA("Tool") and (tool.ToolTip == "Melee" or tool.ToolTip == "Sword" or tool.Name == "Combat") then
-            hum:EquipTool(tool)
-            return tool
-        end
-    end
-
-    return nil
-end
-
-local function UpdateKillCounter(taskInfo)
-    local enemies = workspace:FindFirstChild("Enemies")
-    if not enemies then return end
-
-    for _, mob in ipairs(enemies:GetChildren()) do
-        if MatchesMobName(mob.Name, taskInfo.MobNames) and not CountedDeadMobs[mob] then
-            local mobHum = mob:FindFirstChildOfClass("Humanoid")
-            if mobHum and mobHum.Health <= 0 then
-                CountedDeadMobs[mob] = true
-                if QuestInProgress then
-                    MobsKilledInQuest += 1
-                end
-            end
-        end
-    end
-end
-
-local function GetClosestTargetMob(taskInfo)
-    local character = LocalPlayer.Character
-    local hrp = character and character:FindFirstChild("HumanoidRootPart")
-    local enemies = workspace:FindFirstChild("Enemies")
-    if not hrp or not enemies then return nil end
-
-    local closestMob = nil
-    local shortestDist = 2500
-
-    for _, mob in ipairs(enemies:GetChildren()) do
-        if MatchesMobName(mob.Name, taskInfo.MobNames) then
-            local mobHum = mob:FindFirstChildOfClass("Humanoid")
-            local mobHrp = mob:FindFirstChild("HumanoidRootPart")
-            if mobHum and mobHrp and mobHum.Health > 0 and IsInFountainArea(mobHrp.Position) then
-                local dist = (hrp.Position - mobHrp.Position).Magnitude
-                if dist < shortestDist then
-                    shortestDist = dist
-                    closestMob = mob
-                end
-            end
-        end
-    end
-
-    return closestMob
-end
-
-local function BringMobs(anchorMob, taskInfo)
-    local enemies = workspace:FindFirstChild("Enemies")
-    local anchorHrp = anchorMob and anchorMob:FindFirstChild("HumanoidRootPart")
-    if not enemies or not anchorHrp then return end
-
-    pcall(function()
-        sethiddenproperty(LocalPlayer, "SimulationRadius", math.huge)
-    end)
-
-    local anchorCFrame = anchorHrp.CFrame
-    anchorHrp.AssemblyLinearVelocity = Vector3.zero
-
-    for _, mob in ipairs(enemies:GetChildren()) do
-        if MatchesMobName(mob.Name, taskInfo.MobNames) then
-            local mobHum = mob:FindFirstChildOfClass("Humanoid")
-            local mobHrp = mob:FindFirstChild("HumanoidRootPart")
-            if mobHum and mobHrp and mobHum.Health > 0 and IsInFountainArea(mobHrp.Position) then
-                local dist = (mobHrp.Position - anchorCFrame.Position).Magnitude
-                local heightDiff = math.abs(mobHrp.Position.Y - anchorCFrame.Position.Y)
-                if dist <= Config.BringMobRadius and heightDiff <= 60 then
-                    for _, part in ipairs(mob:GetDescendants()) do
-                        if part:IsA("BasePart") then
-                            part.CanCollide = false
-                        end
-                    end
-
-                    if mob ~= anchorMob then
-                        mobHrp.CFrame = anchorCFrame
-                    end
-
-                    mobHrp.AssemblyLinearVelocity = Vector3.zero
-                    mobHrp.AssemblyAngularVelocity = Vector3.zero
-                    mobHum.WalkSpeed = 0
-                    mobHum.JumpPower = 0
-                end
-            end
-        end
-    end
-end
-
-local function GetTargetsInRange(taskInfo, maxRange)
-    local character = LocalPlayer.Character
-    local hrp = character and character:FindFirstChild("HumanoidRootPart")
-    local enemies = workspace:FindFirstChild("Enemies")
-    local targets = {}
-    if not hrp or not enemies or not taskInfo then return targets end
-
-    for _, mob in ipairs(enemies:GetChildren()) do
-        if MatchesMobName(mob.Name, taskInfo.MobNames) then
-            local mobHum = mob:FindFirstChildOfClass("Humanoid")
-            local mobHrp = mob:FindFirstChild("HumanoidRootPart")
-            if mobHum and mobHrp and mobHum.Health > 0 then
-                if (hrp.Position - mobHrp.Position).Magnitude <= maxRange then
-                    table.insert(targets, { mob, mobHrp })
-                end
-            end
-        end
-    end
-
-    return targets
-end
 
 local function TweenToCFrame(targetCFrame, snapAtEnd)
     local character = LocalPlayer.Character
@@ -496,7 +189,7 @@ local function MoveToCFrame(targetCFrame, snapAtEnd)
 
     local map = workspace:FindFirstChild("Map")
 
-    -- Se ainda estiver em Upper Yard (Y > 4000), desce pelo portal SkyArea2.Exit antes de voar ate Fountain City
+    -- Sai de Upper Yard se o jogador iniciar o script la em cima
     if hrp.Position.Y > 4000 then
         local skyArea2 = map and map:FindFirstChild("SkyArea2")
         local exitPart = skyArea2 and skyArea2:FindFirstChild("Exit")
@@ -504,7 +197,7 @@ local function MoveToCFrame(targetCFrame, snapAtEnd)
         return
     end
 
-    -- Se estiver em Underwater City (X > 50000), sai pelo TeleportSpawn.Exit
+    -- Sai de Underwater City se o jogador iniciar o script la dentro
     if hrp.Position.X > 50000 then
         local tpSpawn = map and map:FindFirstChild("TeleportSpawn")
         local exitPart = tpSpawn and tpSpawn:FindFirstChild("Exit")
@@ -515,149 +208,40 @@ local function MoveToCFrame(targetCFrame, snapAtEnd)
     TweenToCFrame(targetCFrame, snapAtEnd)
 end
 
--- Continua direto se ja houver missao de Fountain City ativa
-local allTasks = GetAllFountainTasks()
-for _, taskCandidate in pairs(allTasks) do
-    if CheckGuiQuestProgress(taskCandidate) == "Active" then
-        ActiveTask = taskCandidate
-        QuestInProgress = true
-        break
+-- Consulta o estado oficial da quest do Sea 2 no servidor
+local function GetQuestProgress()
+    local state = {
+        UsedKey = LocalDoorOpened,
+        KilledIceAdmiral = LocalAdmiralKilled,
+        TalkedDetective = LocalDetectiveReported
+    }
+
+    if not CommF then return state end
+
+    local ok, res = pcall(function()
+        return CommF:InvokeServer("DressrosaQuestProgress")
+    end)
+
+    if ok and type(res) == "table" then
+        if res.UsedKey then
+            state.UsedKey = true
+            LocalDoorOpened = true
+        end
+        if res.KilledIceAdmiral then
+            state.KilledIceAdmiral = true
+            LocalAdmiralKilled = true
+        end
+        if res.TalkedDetective and state.KilledIceAdmiral then
+            state.TalkedDetective = true
+            LocalDetectiveReported = true
+        end
     end
+
+    return state
 end
 
--- Thread do Fast Attack
-task.spawn(function()
-    while _G.AutoFarmFountainCity and GetLevel() < Config.MaxLevel do
-        local character = LocalPlayer.Character
-        local hum = character and character:FindFirstChildOfClass("Humanoid")
-
-        if character and hum and hum.Health > 0 and QuestInProgress and ActiveTask then
-            local tool = EquipWeapon()
-            local targets = GetTargetsInRange(ActiveTask, 25)
-
-            if tool and #targets > 0 then
-                pcall(function()
-                    local cam = workspace.CurrentCamera
-                    local cx = cam and (cam.ViewportSize.X / 2) or 500
-                    local cy = cam and (cam.ViewportSize.Y / 2) or 300
-
-                    VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, true, game, 1)
-                    VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, false, game, 1)
-                    tool:Activate()
-
-                    if RegisterAttack and RegisterHit then
-                        RegisterAttack:FireServer(0)
-                        RegisterHit:FireServer(targets[1][2], targets)
-                    end
-                end)
-            end
-        end
-
-        task.wait(Config.AttackDelay)
-    end
-end)
-
--- Loop principal sequencial (Lv. 625 ao Lv. 700 em Fountain City)
-task.spawn(function()
-    while _G.AutoFarmFountainCity and GetLevel() < Config.MaxLevel do
-        local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-        local hrp = character:WaitForChild("HumanoidRootPart")
-        local hum = character:WaitForChild("Humanoid")
-
-        if hum.Health <= 0 then
-            CancelTween()
-            task.wait(0.5)
-        elseif not QuestInProgress then
-            EnableAura()
-            local nextTask = GetFountainTaskForLevel()
-            local npcPos, foundNpc = GetQuestNpcPos()
-            local distToNpc = (hrp.Position - npcPos).Magnitude
-
-            SetPhysicsState(character, true)
-
-            if not foundNpc or distToNpc > 7 then
-                MoveToCFrame(CFrame.new(npcPos), false)
-                if not foundNpc and distToNpc <= 40 then
-                    pcall(function()
-                        LocalPlayer:RequestStreamAroundAsync(Config.QuestNpcPos)
-                    end)
-                end
-                RunService.Heartbeat:Wait()
-            else
-                CancelTween()
-                hrp.AssemblyLinearVelocity = Vector3.zero
-                task.wait(0.2)
-
-                if CommF then
-                    local curState = CheckGuiQuestProgress(nextTask)
-                    if HasAnyActiveQuest() and curState ~= "Active" then
-                        pcall(function()
-                            CommF:InvokeServer("AbandonQuest")
-                        end)
-                        task.wait(0.2)
-                    end
-
-                    for _ = 1, 3 do
-                        if CheckGuiQuestProgress(nextTask) == "Active" then
-                            break
-                        end
-                        pcall(function()
-                            CommF:InvokeServer("StartQuest", nextTask.QuestName, nextTask.QuestLevel)
-                        end)
-                        task.wait(0.25)
-                    end
-                end
-
-                ActiveTask = nextTask
-                MobsKilledInQuest = 0
-                QuestInProgress = true
-            end
-        else
-            EnableAura()
-            UpdateKillCounter(ActiveTask)
-            local guiState, requiredKills = CheckGuiQuestProgress(ActiveTask)
-            local waitPos = GetMobWaitPos(ActiveTask)
-            local nearBossArena = (hrp.Position - waitPos).Magnitude <= 150
-            local bossDisappeared = ActiveTask.IsBoss and nearBossArena and not IsBossAvailable(ActiveTask)
-
-            if guiState == "Completed" or MobsKilledInQuest >= requiredKills or bossDisappeared then
-                if bossDisappeared and CommF and HasAnyActiveQuest() then
-                    pcall(function()
-                        CommF:InvokeServer("AbandonQuest")
-                    end)
-                end
-                QuestInProgress = false
-                ActiveTask = nil
-                MobsKilledInQuest = 0
-                CancelTween()
-            else
-                SetPhysicsState(character, true)
-                local targetMob = GetClosestTargetMob(ActiveTask)
-
-                if targetMob and targetMob:FindFirstChild("HumanoidRootPart") then
-                    local mobHrp = targetMob.HumanoidRootPart
-                    local farmPos = mobHrp.Position + Vector3.new(0, Config.DistanceFarm, 0)
-                    local farmCFrame = CFrame.new(farmPos) * CFrame.Angles(math.rad(-90), 0, 0)
-
-                    MoveToCFrame(farmCFrame, true)
-
-                    if not ActiveTask.IsBoss and (hrp.Position - mobHrp.Position).Magnitude <= 65 then
-                        BringMobs(targetMob, ActiveTask)
-                    end
-                else
-                    MoveToCFrame(CFrame.new(waitPos), false)
-                end
-
-                RunService.Heartbeat:Wait()
-            end
-        end
-    end
-
-    _G.AutoFarmFountainCity = false
-    if NoClipConnection then
-        NoClipConnection:Disconnect()
-        NoClipConnection = nil
-    end
-    CancelTween()
-    SetPhysicsState(LocalPlayer.Character, false)
-end)
+-- Verifica e equipa a Key para abrir a porta de Frozen Village
+local function FindAndEquipKey()
+    local character = LocalPlayer.Character
+    local backpack = LocalPlayer:FindFirstChild("Backpack")
+    local hum = character
