@@ -1,339 +1,3 @@
-_G.OmegaSea2_Missao1_Key = true
-
-local Players = game:GetService("Players")
-local TweenService = game:GetService("TweenService")
-local RunService = game:GetService("RunService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-
-local LocalPlayer = Players.LocalPlayer
-local Remotes = ReplicatedStorage:FindFirstChild("Remotes")
-local CommF = Remotes and Remotes:FindFirstChild("CommF_")
-
-local Config = {
-    PrisonFallbackPos = Vector3.new(4854.17, 25.00, 740.19),
-    SkyArea2ExitPos = Vector3.new(-6022.24, 5470.50, 2217.33),
-    UnderwaterExitPos = Vector3.new(61170.05, -2.00, 1952.83),
-    TweenSpeed = 225
-}
-
-local CurrentTween = nil
-local LastTweenTarget = nil
-local LastPortalTouch = 0
-
--- Barra compacta de status na tela
-local parentGui = (gethui and gethui()) or game:GetService("CoreGui")
-if parentGui:FindFirstChild("OmegaSea2Missao1UI") then
-    parentGui.OmegaSea2Missao1UI:Destroy()
-end
-
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "OmegaSea2Missao1UI"
-ScreenGui.ResetOnSpawn = false
-ScreenGui.Parent = parentGui
-
-local StatusBox = Instance.new("TextLabel")
-StatusBox.Size = UDim2.new(0, 350, 0, 48)
-StatusBox.Position = UDim2.new(0.5, -175, 0, 12)
-StatusBox.BackgroundColor3 = Color3.fromRGB(18, 20, 26)
-StatusBox.TextColor3 = Color3.fromRGB(120, 255, 160)
-StatusBox.Font = Enum.Font.GothamBold
-StatusBox.TextSize = 12
-StatusBox.TextWrapped = true
-StatusBox.BorderSizePixel = 0
-StatusBox.Text = "[Missao 1 - Key] Iniciando..."
-StatusBox.Parent = ScreenGui
-
-local function setStatus(msg, color)
-    StatusBox.Text = "[Missao 1 - Key] " .. msg
-    if color then
-        StatusBox.TextColor3 = color
-    end
-end
-
-local function hasKey()
-    local char = LocalPlayer.Character
-    local backpack = LocalPlayer:FindFirstChild("Backpack")
-    for _, container in ipairs({ char, backpack }) do
-        if container then
-            for _, item in ipairs(container:GetChildren()) do
-                if item:IsA("Tool") and string.find(string.lower(item.Name), "key", 1, true) then
-                    return true, item.Name
-                end
-            end
-        end
-    end
-    return false, nil
-end
-
-local function getLevel()
-    local data = LocalPlayer:FindFirstChild("Data")
-    local level = data and data:FindFirstChild("Level")
-    return level and level.Value or 0
-end
-
-local function cancelTween()
-    if CurrentTween then
-        CurrentTween:Cancel()
-        CurrentTween = nil
-    end
-    LastTweenTarget = nil
-end
-
-local function setPhysics(character, enabled)
-    if not character then return end
-    local hrp = character:FindFirstChild("HumanoidRootPart")
-    local hum = character:FindFirstChildOfClass("Humanoid")
-
-    if hum and enabled then
-        hum.Sit = false
-    end
-
-    if hrp then
-        local bv = hrp:FindFirstChild("OmegaKeyBV")
-        if enabled then
-            if not bv then
-                bv = Instance.new("BodyVelocity")
-                bv.Name = "OmegaKeyBV"
-                bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-                bv.Velocity = Vector3.zero
-                bv.Parent = hrp
-            end
-        elseif bv then
-            bv:Destroy()
-        end
-    end
-
-    for _, part in ipairs(character:GetDescendants()) do
-        if part:IsA("BasePart") then
-            part.CanCollide = not enabled
-        end
-    end
-end
-
-local function tweenTo(hrp, targetPos)
-    local dist = (hrp.Position - targetPos).Magnitude
-    if dist <= 3.5 then
-        cancelTween()
-        return true
-    end
-
-    if CurrentTween and CurrentTween.PlaybackState == Enum.PlaybackState.Playing and LastTweenTarget and (LastTweenTarget - targetPos).Magnitude <= 4 then
-        return false
-    end
-
-    cancelTween()
-    LastTweenTarget = targetPos
-    local duration = math.max(dist / Config.TweenSpeed, 0.1)
-    CurrentTween = TweenService:Create(hrp, TweenInfo.new(duration, Enum.EasingStyle.Linear), {
-        CFrame = CFrame.new(targetPos)
-    })
-    CurrentTween:Play()
-    return false
-end
-
-local function useExitPortal(hrp, portalPart, fallbackPos)
-    local targetPos = (portalPart and portalPart.Position) or fallbackPos
-    if (hrp.Position - targetPos).Magnitude > 14 then
-        tweenTo(hrp, targetPos + Vector3.new(0, 2, 0))
-        return
-    end
-
-    cancelTween()
-    local t = os.clock()
-    local offset = Vector3.new(math.cos(t * 6) * 2.5, math.sin(t * 8) * 2, math.sin(t * 6) * 2.5)
-    hrp.CFrame = CFrame.new(targetPos + offset)
-    hrp.AssemblyLinearVelocity = Vector3.zero
-
-    if (t - LastPortalTouch) >= 0.3 then
-        LastPortalTouch = t
-        if portalPart and firetouchinterest then
-            pcall(function()
-                firetouchinterest(hrp, portalPart, 0)
-                task.wait(0.03)
-                firetouchinterest(hrp, portalPart, 1)
-            end)
-        end
-    end
-end
-
-local function moveTo(hrp, targetPos)
-    local map = workspace:FindFirstChild("Map")
-
-    -- Sai de Upper Yard se estiver la em cima
-    if hrp.Position.Y > 4000 then
-        local skyArea2 = map and map:FindFirstChild("SkyArea2")
-        local exitPart = skyArea2 and skyArea2:FindFirstChild("Exit")
-        useExitPortal(hrp, exitPart, Config.SkyArea2ExitPos)
-        return false
-    end
-
-    -- Sai de Underwater City se estiver la dentro
-    if hrp.Position.X > 50000 then
-        local tpSpawn = map and map:FindFirstChild("TeleportSpawn")
-        local exitPart = tpSpawn and tpSpawn:FindFirstChild("Exit")
-        useExitPortal(hrp, exitPart, Config.UnderwaterExitPos)
-        return false
-    end
-
-    return tweenTo(hrp, targetPos)
-end
-
-local function getPrisonPos()
-    local worldOrigin = workspace:FindFirstChild("_WorldOrigin")
-    local locations = worldOrigin and worldOrigin:FindFirstChild("Locations")
-    if locations then
-        for _, loc in ipairs(locations:GetChildren()) do
-            if loc:IsA("BasePart") then
-                local low = string.lower(loc.Name)
-                if string.find(low, "prison", 1, true) or string.find(low, "impel", 1, true) then
-                    return loc.Position + Vector3.new(0, 25, 0)
-                end
-            end
-        end
-    end
-    return Config.PrisonFallbackPos
-end
-
-local function findMilitaryDetective()
-    local npcs = workspace:FindFirstChild("NPCs")
-    if not npcs then return nil end
-
-    local exact = npcs:FindFirstChild("Military Detective")
-    if exact and exact:FindFirstChild("HumanoidRootPart") then
-        return exact
-    end
-
-    for _, npc in ipairs(npcs:GetChildren()) do
-        local low = string.lower(npc.Name)
-        if (string.find(low, "detective", 1, true) or string.find(low, "military", 1, true)) and npc:FindFirstChild("HumanoidRootPart") then
-            return npc
-        end
-    end
-
-    return nil
-end
-
-local noclipConn = RunService.Stepped:Connect(function()
-    if not _G.OmegaSea2_Missao1_Key then return end
-    local char = LocalPlayer.Character
-    if char then
-        for _, p in ipairs(char:GetDescendants()) do
-            if p:IsA("BasePart") and p.CanCollide then
-                p.CanCollide = false
-            end
-        end
-    end
-end)
-
-task.spawn(function()
-    if getLevel() < 700 then
-        setStatus("Requer Lv. 700+ (Atual: " .. getLevel() .. ")", Color3.fromRGB(255, 100, 100))
-        _G.OmegaSea2_Missao1_Key = false
-        noclipConn:Disconnect()
-        return
-    end
-
-    local gotKey, keyName = hasKey()
-    if gotKey then
-        setStatus("Chave ja esta na mochila (" .. keyName .. ")! Pronto para a Parte 2.", Color3.fromRGB(120, 255, 160))
-        _G.OmegaSea2_Missao1_Key = false
-        noclipConn:Disconnect()
-        return
-    end
-
-    if CommF then
-        local ok, prog = pcall(function()
-            return CommF:InvokeServer("DressrosaQuestProgress")
-        end)
-        if ok and type(prog) == "table" and prog.UsedKey then
-            setStatus("Voce ja usou a Key antes! Pode ir direto para o Ice Admiral (Parte 3).", Color3.fromRGB(120, 255, 160))
-            _G.OmegaSea2_Missao1_Key = false
-            noclipConn:Disconnect()
-            return
-        end
-    end
-
-    local prisonPos = getPrisonPos()
-    local talkedAttempts = 0
-
-    while _G.OmegaSea2_Missao1_Key do
-        local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-        local hrp = char:WaitForChild("HumanoidRootPart")
-        local hum = char:WaitForChild("Humanoid")
-
-        if hum.Health <= 0 then
-            cancelTween()
-            task.wait(0.5)
-        else
-            setPhysics(char, true)
-
-            local success, newKey = hasKey()
-            if success then
-                cancelTween()
-                setStatus("SUCESSO! Voce pegou a " .. newKey .. ". Avise para a Parte 2!", Color3.fromRGB(120, 255, 160))
-                break
-            end
-
-            local detective = findMilitaryDetective()
-            if not detective then
-                setStatus("Indo ate a Prison...", Color3.fromRGB(255, 215, 90))
-                moveTo(hrp, prisonPos)
-
-                if (hrp.Position - prisonPos).Magnitude <= 80 then
-                    pcall(function()
-                        LocalPlayer:RequestStreamAroundAsync(prisonPos)
-                    end)
-                end
-                RunService.Heartbeat:Wait()
-            else
-                local npcPos = detective.HumanoidRootPart.Position + Vector3.new(0, 2, 3.5)
-                if (hrp.Position - npcPos).Magnitude > 6 then
-                    setStatus("Indo ate " .. detective.Name .. "...", Color3.fromRGB(255, 215, 90))
-                    moveTo(hrp, npcPos)
-                    RunService.Heartbeat:Wait()
-                else
-                    cancelTween()
-                    hrp.AssemblyLinearVelocity = Vector3.zero
-                    talkedAttempts += 1
-                    setStatus("Conversando com " .. detective.Name .. " (" .. talkedAttempts .. ")...", Color3.fromRGB(120, 200, 255))
-
-                    if CommF then
-                        pcall(function()
-                            CommF:InvokeServer("DressrosaQuestProgress")
-                        end)
-                        task.wait(0.15)
-                        pcall(function()
-                            CommF:InvokeServer("DressrosaQuestProgress", "Detective")
-                        end)
-                    end
-
-                    local prompt = detective:FindFirstChildWhichIsA("ProximityPrompt", true)
-                    if prompt and fireproximityprompt then
-                        pcall(fireproximityprompt, prompt)
-                    end
-
-                    local click = detective:FindFirstChildWhichIsA("ClickDetector", true)
-                    if click and fireclickdetector then
-                        pcall(fireclickdetector, click)
-                    end
-
-                    task.wait(0.7)
-
-                    if talkedAttempts >= 8 then
-                        setStatus("Chegou no NPC, mas a Key nao veio. Me diga o que apareceu na tela!", Color3.fromRGB(255, 130, 100))
-                        break
-                    end
-                end
-            end
-        end
-    end
-_G.OmegaSea2_Missao1_Key = false
-    if noclipConn then
-        noclipConn:Disconnect()
-    end
-    cancelTween()
-    setPhysics(LocalPlayer.Character, false)
-end)
 _G.OmegaSea2_Missao3_Boss = true
 
 local Players = game:GetService("Players")
@@ -354,14 +18,17 @@ local Config = {
     SkyArea2ExitPos = Vector3.new(-6022.24, 5470.50, 2217.33),
     UnderwaterExitPos = Vector3.new(61170.05, -2.00, 1952.83),
     TweenSpeed = 225,
-    DistanceFarm = 8,
-    AttackDelay = 0.08
+    HeightOffset = 3.5, -- Bem perto do tronco para a hitbox pegar 100%
+    AttackDelay = 0.12
 }
 
 local CurrentTween = nil
 local LastTweenTarget = nil
 local LastPortalTouch = 0
 local LastAuraCheck = 0
+local LastSkillTime = 0
+local SkillIndex = 1
+local SkillKeys = { Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C }
 
 -- Barra compacta de status na tela
 local parentGui = (gethui and gethui()) or game:GetService("CoreGui")
@@ -429,10 +96,13 @@ local function equipCombatWeapon()
         return equipped
     end
 
-    for _, tool in ipairs(backpack:GetChildren()) do
-        if tool:IsA("Tool") and (tool.ToolTip == "Melee" or tool.ToolTip == "Sword" or tool.Name == "Combat") then
-            hum:EquipTool(tool)
-            return tool
+    -- Prioriza estilo de luta (Melee / Combat) e depois espada (Sword)
+    for _, tip in ipairs({ "Melee", "Sword" }) do
+        for _, tool in ipairs(backpack:GetChildren()) do
+            if tool:IsA("Tool") and (tool.ToolTip == tip or (tip == "Melee" and tool.Name == "Combat")) then
+                hum:EquipTool(tool)
+                return tool
+            end
         end
     end
 
@@ -483,7 +153,7 @@ end
 
 local function tweenToCFrame(hrp, targetCFrame, snapAtEnd)
     local dist = (hrp.Position - targetCFrame.Position).Magnitude
-    if dist <= 3.5 then
+    if dist <= 4 then
         cancelTween()
         if snapAtEnd then
             hrp.CFrame = targetCFrame
@@ -568,7 +238,7 @@ local function getActiveIceAdmiral()
     if not enemies then return nil end
 
     for _, mob in ipairs(enemies:GetChildren()) do
-        if mob.Name == "Ice Admiral" then
+        if string.find(string.lower(mob.Name), "ice admiral", 1, true) then
             local hum = mob:FindFirstChildOfClass("Humanoid")
             local hrp = mob:FindFirstChild("HumanoidRootPart")
             if hum and hrp and hum.Health > 0 then
@@ -603,7 +273,7 @@ local noclipConn = RunService.Stepped:Connect(function()
     end
 end)
 
--- Thread dedicada para o Fast Attack no Ice Admiral
+-- Thread dedicada para Ataque Basico + Skills (Z/X/C)
 task.spawn(function()
     while _G.OmegaSea2_Missao3_Boss do
         local char = LocalPlayer.Character
@@ -613,21 +283,43 @@ task.spawn(function()
 
         if char and hrp and hum and hum.Health > 0 and boss and boss:FindFirstChild("HumanoidRootPart") then
             local bossHrp = boss.HumanoidRootPart
-            if (hrp.Position - bossHrp.Position).Magnitude <= 28 then
+            if (hrp.Position - bossHrp.Position).Magnitude <= 20 then
                 local tool = equipCombatWeapon()
                 if tool then
+                    -- Mantem a camera apontada para o boss para skills e M1 acertarem
+                    local cam = workspace.CurrentCamera
+                    if cam then
+                        cam.CFrame = CFrame.new(cam.CFrame.Position, bossHrp.Position)
+                    end
+
                     pcall(function()
-                        local cam = workspace.CurrentCamera
+                        -- 1. Ataque basico nativo (funciona em qualquer executor mobile)
+                        tool:Activate()
+                        local leftClick = tool:FindFirstChild("LeftClick")
+                        if leftClick and leftClick:IsA("RemoteEvent") then
+                            leftClick:FireServer(Vector3.new(0, -1, 0), 1)
+                        end
+
+                        -- 2. Toque/Clique na tela
                         local cx = cam and (cam.ViewportSize.X / 2) or 500
                         local cy = cam and (cam.ViewportSize.Y / 2) or 300
-
                         VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, true, game, 1)
                         VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, false, game, 1)
-                        tool:Activate()
 
+                        -- 3. Net Fast Attack
                         if RegisterAttack and RegisterHit then
                             RegisterAttack:FireServer(0)
                             RegisterHit:FireServer(bossHrp, { { boss, bossHrp } })
+                        end
+
+                        -- 4. Dispara skills Z, X, C a cada 1.2s para garantir dano alto
+                        if (os.clock() - LastSkillTime) >= 1.2 then
+                            LastSkillTime = os.clock()
+                            local key = SkillKeys[SkillIndex]
+                            SkillIndex = (SkillIndex % #SkillKeys) + 1
+                            VirtualInputManager:SendKeyEvent(true, key, false, game)
+                            task.wait(0.05)
+                            VirtualInputManager:SendKeyEvent(false, key, false, game)
                         end
                     end)
                 end
@@ -670,7 +362,6 @@ task.spawn(function()
             setPhysics(char, true)
             enableAura()
 
-            -- Checa periodicamente o status oficial no servidor
             if (os.clock() - lastStateCheck) >= 2 then
                 lastStateCheck = os.clock()
                 local prog = getQuestState()
@@ -682,7 +373,7 @@ task.spawn(function()
             end
 
             local boss = getActiveIceAdmiral()
-            local chamberPos = getIceAdmiralSpawnPos() + Vector3.new(0, 14, 0)
+            local chamberPos = getIceAdmiralSpawnPos() + Vector3.new(0, 12, 0)
 
             if boss and boss:FindFirstChild("HumanoidRootPart") and boss:FindFirstChildOfClass("Humanoid") then
                 sawAdmiralAlive = true
@@ -692,8 +383,9 @@ task.spawn(function()
 
                 setStatus("Atacando Ice Admiral (" .. hpPct .. "% HP)...", Color3.fromRGB(120, 200, 255))
 
-                local farmPos = bossHrp.Position + Vector3.new(0, Config.DistanceFarm, 0)
-                local farmCFrame = CFrame.new(farmPos) * CFrame.Angles(math.rad(-90), 0, 0)
+                -- Posiciona colado acima das costas/tronco e olhando diretamente para o boss
+                local farmPos = bossHrp.Position + Vector3.new(0, Config.HeightOffset, 2.2)
+                local farmCFrame = CFrame.lookAt(farmPos, bossHrp.Position)
                 moveToCFrame(hrp, farmCFrame, true)
             else
                 local distChamber = (hrp.Position - chamberPos).Magnitude
