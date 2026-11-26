@@ -5,6 +5,7 @@ local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local VirtualInputManager = game:GetService("VirtualInputManager")
+local GuiService = game:GetService("GuiService")
 
 local LocalPlayer = Players.LocalPlayer
 local Remotes = ReplicatedStorage:FindFirstChild("Remotes")
@@ -13,15 +14,16 @@ local CommF = Remotes and Remotes:FindFirstChild("CommF_")
 local Config = {
     IceAdmiralPos = Vector3.new(1347.70, 37.30, -1385.00),
     TweenSpeed = 225,
-    HoverHeight = 7.5,
-    RetreatHeight = 26.0
+    HoverHeight = 6.5,
+    RetreatHeight = 25.0,
+    SkillInterval = 0.75
 }
 
 local CurrentTween = nil
 local LastTweenTarget = nil
-local LastSkillTap = 0
+local LastSkillTime = 0
 local SkillIndex = 1
-local SkillLetters = { "Z", "X", "C" }
+local SkillOrder = { "Z", "X", "C", "V" }
 
 local parentGui = (gethui and gethui()) or game:GetService("CoreGui")
 if parentGui:FindFirstChild("OmegaSea2Missao3UI") then
@@ -34,7 +36,7 @@ ScreenGui.ResetOnSpawn = false
 ScreenGui.Parent = parentGui
 
 local StatusBox = Instance.new("TextLabel")
-StatusBox.Size = UDim2.new(0, 370, 0, 52)
+StatusBox.Size = UDim2.new(0, 370, 0, 54)
 StatusBox.Position = UDim2.new(0.5, -185, 0, 12)
 StatusBox.BackgroundColor3 = Color3.fromRGB(18, 20, 26)
 StatusBox.TextColor3 = Color3.fromRGB(120, 255, 160)
@@ -42,11 +44,11 @@ StatusBox.Font = Enum.Font.GothamBold
 StatusBox.TextSize = 11
 StatusBox.TextWrapped = true
 StatusBox.BorderSizePixel = 0
-StatusBox.Text = "[Missao 3 - Boss] Iniciando..."
+StatusBox.Text = "[Missao 3 - Skills] Iniciando..."
 StatusBox.Parent = ScreenGui
 
 local function setStatus(msg, color)
-    StatusBox.Text = "[Missao 3 - Boss] " .. msg
+    StatusBox.Text = "[Missao 3 - Skills] " .. msg
     if color then StatusBox.TextColor3 = color end
 end
 
@@ -60,49 +62,103 @@ local function ensureAura()
     return char:FindFirstChild("HasBuso") ~= nil
 end
 
-local function equipFightingStyle()
+local function equipWeapon()
     local char = LocalPlayer.Character
     local bp = LocalPlayer:FindFirstChild("Backpack")
     local hum = char and char:FindFirstChildOfClass("Humanoid")
     if not char or not bp or not hum then return nil end
 
     local eq = char:FindFirstChildOfClass("Tool")
-    if eq and (eq.ToolTip == "Melee" or string.find(string.lower(eq.Name), "kung fu", 1, true) or eq.Name == "Combat") then
+    if eq and (eq.ToolTip == "Melee" or eq.ToolTip == "Blox Fruit" or eq.ToolTip == "Sword" or eq.Name == "Combat") then
         return eq
     end
-    for _, tool in ipairs(bp:GetChildren()) do
-        if tool:IsA("Tool") and (tool.ToolTip == "Melee" or string.find(string.lower(tool.Name), "kung fu", 1, true) or tool.Name == "Combat") then
-            hum:EquipTool(tool)
-            return tool
+
+    for _, tip in ipairs({ "Melee", "Blox Fruit", "Sword" }) do
+        for _, tool in ipairs(bp:GetChildren()) do
+            if tool:IsA("Tool") and (tool.ToolTip == tip or (tip == "Melee" and tool.Name == "Combat")) then
+                hum:EquipTool(tool)
+                return tool
+            end
         end
     end
+
     return eq
 end
 
--- Tenta clicar no botao de skill na HUD mobile se existir
-local function tapMobileSkill(letter)
+-- Dispara evento de clique/ativacao em um botao da HUD mobile
+local function fireGuiButton(obj)
+    local fired = false
+    pcall(function()
+        if getconnections then
+            for _, conn in ipairs(getconnections(obj.MouseButton1Click)) do
+                conn:Fire()
+                fired = true
+            end
+            for _, conn in ipairs(getconnections(obj.Activated)) do
+                conn:Fire()
+                fired = true
+            end
+        end
+    end)
+
+    local pos = obj.AbsolutePosition
+    local size = obj.AbsoluteSize
+    if size.X > 0 and size.Y > 0 then
+        local inset = GuiService:GetGuiInset()
+        local x = pos.X + size.X * 0.5
+        local y = pos.Y + size.Y * 0.5 + inset.Y
+        pcall(function()
+            VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 1)
+            task.wait(0.04)
+            VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 1)
+            fired = true
+        end)
+    end
+
+    return fired
+end
+
+-- Procura e aciona o botao correspondente a skill (Z, X, C, V) na tela mobile
+local function triggerSkill(letter)
     local pg = LocalPlayer:FindFirstChild("PlayerGui")
-    if not pg then return false end
-    for _, guiObj in ipairs(pg:GetDescendants()) do
-        if (guiObj:IsA("TextButton") or guiObj:IsA("ImageButton")) and guiObj.Visible then
-            local txt = guiObj:IsA("TextButton") and guiObj.Text or ""
-            if string.find(txt, "[" .. letter .. "]", 1, true) or string.find(string.upper(guiObj.Name), letter, 1, true) then
-                local pos = guiObj.AbsolutePosition
-                local size = guiObj.AbsoluteSize
-                if size.X > 0 and size.Y > 0 then
-                    local x = pos.X + size.X * 0.5
-                    local y = pos.Y + size.Y * 0.5
-                    pcall(function()
-                        VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 1)
-                        task.wait(0.03)
-                        VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 1)
-                    end)
-                    return true
+    local targets = {}
+
+    if pg then
+        for _, guiObj in ipairs(pg:GetDescendants()) do
+            if (guiObj:IsA("TextButton") or guiObj:IsA("ImageButton")) and guiObj.Visible then
+                local txt = guiObj:IsA("TextButton") and string.upper(guiObj.Text or "") or ""
+                local objName = string.upper(guiObj.Name or "")
+                if string.find(txt, "[" .. letter .. "]", 1, true)
+                    or string.find(txt, letter, 1, true)
+                    or objName == letter
+                    or string.find(objName, "SKILL" .. letter, 1, true)
+                then
+                    table.insert(targets, guiObj)
                 end
             end
         end
     end
-    return false
+
+    local anyFired = false
+    for _, btn in ipairs(targets) do
+        if fireGuiButton(btn) then
+            anyFired = true
+        end
+    end
+
+    -- Fallback via tecla caso o botao nao esteja visivel ou tenha outro nome
+    if not anyFired then
+        local keyCode = Enum.KeyCode[letter]
+        if keyCode then
+            pcall(function()
+                VirtualInputManager:SendKeyEvent(true, keyCode, false, game)
+                task.wait(0.05)
+                VirtualInputManager:SendKeyEvent(false, keyCode, false, game)
+            end)
+        end
+    end
+
+    return anyFired
 end
 
 local function cancelTween()
@@ -205,14 +261,13 @@ task.spawn(function()
                 local bHrp = boss.HumanoidRootPart
                 local bHum = boss:FindFirstChildOfClass("Humanoid")
 
-                -- Recua para cima se a vida do jogador estiver baixa
                 local lowHp = hum.Health < (hum.MaxHealth * 0.35)
                 local height = lowHp and Config.RetreatHeight or Config.HoverHeight
                 local hoverPos = bHrp.Position + Vector3.new(0, height, 0)
                 local arrived = tweenToCFrame(hrp, CFrame.lookAt(hoverPos, bHrp.Position), not lowHp)
 
                 if not lowHp and (arrived or (hrp.Position - bHrp.Position).Magnitude <= 14) then
-                    local tool = equipFightingStyle()
+                    local tool = equipWeapon()
                     local cam = workspace.CurrentCamera
                     if cam then
                         cam.CFrame = CFrame.new(cam.CFrame.Position, bHrp.Position)
@@ -222,31 +277,18 @@ task.spawn(function()
                         pcall(function() tool:Activate() end)
                     end
 
-                    pcall(function()
-                        local cx = cam and (cam.ViewportSize.X * 0.75) or 600
-                        local cy = cam and (cam.ViewportSize.Y * 0.65) or 400
-                        VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, true, game, 1)
-                        task.wait(0.02)
-                        VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, false, game, 1)
-                    end)
-
-                    if (os.clock() - LastSkillTap) >= 1.1 then
-                        LastSkillTap = os.clock()
-                        local letter = SkillLetters[SkillIndex]
-                        SkillIndex = (SkillIndex % #SkillLetters) + 1
-                        if not tapMobileSkill(letter) then
-                            pcall(function()
-                                VirtualInputManager:SendKeyEvent(true, Enum.KeyCode[letter], false, game)
-                                task.wait(0.05)
-                                VirtualInputManager:SendKeyEvent(false, Enum.KeyCode[letter], false, game)
-                            end)
-                        end
+                    local currentLetter = SkillOrder[SkillIndex]
+                    if (os.clock() - LastSkillTime) >= Config.SkillInterval then
+                        LastSkillTime = os.clock()
+                        SkillIndex = (SkillIndex % #SkillOrder) + 1
+                        triggerSkill(currentLetter)
                     end
 
                     setStatus(
-                        string.format("Boss HP: %d/%d | Sua Vida: %d/%d",
+                        string.format("Boss: %d/%d | Vida: %d/%d | Skill: [%s]",
                             math.floor(bHum.Health), math.floor(bHum.MaxHealth),
-                            math.floor(hum.Health), math.floor(hum.MaxHealth)),
+                            math.floor(hum.Health), math.floor(hum.MaxHealth),
+                            currentLetter),
                         Color3.fromRGB(120, 200, 255)
                     )
                 elseif lowHp then
