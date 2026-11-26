@@ -1,4 +1,4 @@
-_G.OmegaSea2_AbrirPorta = true
+_G.OmegaCore_BuyAbilities = true
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
@@ -10,22 +10,21 @@ local Remotes = ReplicatedStorage:FindFirstChild("Remotes")
 local CommF = Remotes and Remotes:FindFirstChild("CommF_")
 
 local Config = {
-    PrisonPos = Vector3.new(4854.17, 25.00, 740.19),
-    IceAdmiralPos = Vector3.new(1347.70, 37.30, -1385.00),
+    AbilityTeacherPos = Vector3.new(1347.70, 37.30, -1325.00),
     TweenSpeed = 225
 }
 
 local CurrentTween = nil
 local LastTweenTarget = nil
 
--- Barra de status no topo
+-- Barra compacta de status na tela
 local parentGui = (gethui and gethui()) or game:GetService("CoreGui")
-if parentGui:FindFirstChild("OmegaDoorUnlockUI") then
-    parentGui.OmegaDoorUnlockUI:Destroy()
+if parentGui:FindFirstChild("OmegaAbilitiesUI") then
+    parentGui.OmegaAbilitiesUI:Destroy()
 end
 
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "OmegaDoorUnlockUI"
+ScreenGui.Name = "OmegaAbilitiesUI"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.Parent = parentGui
 
@@ -38,35 +37,14 @@ StatusBox.Font = Enum.Font.GothamBold
 StatusBox.TextSize = 11
 StatusBox.TextWrapped = true
 StatusBox.BorderSizePixel = 0
-StatusBox.Text = "[Chave + Porta] Verificando..."
+StatusBox.Text = "[Ability Teacher] Iniciando..."
 StatusBox.Parent = ScreenGui
 
 local function setStatus(msg, color)
-    StatusBox.Text = "[Chave + Porta] " .. msg
-    if color then StatusBox.TextColor3 = color end
-end
-
-local function findKey()
-    local char = LocalPlayer.Character
-    local bp = LocalPlayer:FindFirstChild("Backpack")
-    for _, c in ipairs({ char, bp }) do
-        if c then
-            for _, item in ipairs(c:GetChildren()) do
-                if item:IsA("Tool") and string.find(string.lower(item.Name), "key", 1, true) then
-                    return item
-                end
-            end
-        end
+    StatusBox.Text = "[Ability Teacher] " .. msg
+    if color then
+        StatusBox.TextColor3 = color
     end
-    return nil
-end
-
-local function getProgress()
-    if not CommF then return nil end
-    local ok, res = pcall(function()
-        return CommF:InvokeServer("DressrosaQuestProgress")
-    end)
-    return (ok and type(res) == "table") and res or nil
 end
 
 local function cancelTween()
@@ -84,11 +62,11 @@ local function setPhysics(char, enabled)
     if hum and enabled then hum.Sit = false end
 
     if hrp then
-        local bv = hrp:FindFirstChild("OmegaDoorBV")
+        local bv = hrp:FindFirstChild("OmegaAbilityBV")
         if enabled then
             if not bv then
                 bv = Instance.new("BodyVelocity")
-                bv.Name = "OmegaDoorBV"
+                bv.Name = "OmegaAbilityBV"
                 bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
                 bv.Velocity = Vector3.zero
                 bv.Parent = hrp
@@ -107,7 +85,7 @@ end
 
 local function tweenTo(hrp, targetPos)
     local dist = (hrp.Position - targetPos).Magnitude
-    if dist <= 4 then
+    if dist <= 5 then
         cancelTween()
         return true
     end
@@ -123,24 +101,27 @@ local function tweenTo(hrp, targetPos)
     return false
 end
 
-local function findCaveDoor()
-    local map = workspace:FindFirstChild("Map")
-    if not map then return nil end
-    local best, bestDist = nil, 250
-    for _, obj in ipairs(map:GetDescendants()) do
-        if obj:IsA("BasePart") and string.find(string.lower(obj.Name), "door", 1, true) then
-            local d = (obj.Position - Config.IceAdmiralPos).Magnitude
-            if d < bestDist then
-                bestDist = d
-                best = obj
-            end
+local function findAbilityTeacher()
+    local npcs = workspace:FindFirstChild("NPCs")
+    if not npcs then return nil end
+
+    local exact = npcs:FindFirstChild("Ability Teacher")
+    if exact and exact:FindFirstChild("HumanoidRootPart") then
+        return exact.HumanoidRootPart.Position
+    end
+
+    for _, npc in ipairs(npcs:GetChildren()) do
+        local low = string.lower(npc.Name)
+        if (string.find(low, "ability", 1, true) or string.find(low, "teacher", 1, true)) and npc:FindFirstChild("HumanoidRootPart") then
+            return npc.HumanoidRootPart.Position
         end
     end
-    return best
+
+    return nil
 end
 
 local noclipConn = RunService.Stepped:Connect(function()
-    if not _G.OmegaSea2_AbrirPorta then return end
+    if not _G.OmegaCore_BuyAbilities then return end
     local char = LocalPlayer.Character
     if char then
         for _, p in ipairs(char:GetDescendants()) do
@@ -152,86 +133,61 @@ local noclipConn = RunService.Stepped:Connect(function()
 end)
 
 task.spawn(function()
-    while _G.OmegaSea2_AbrirPorta do
-        local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-        local hrp = char:WaitForChild("HumanoidRootPart")
-        local hum = char:WaitForChild("Humanoid")
+    local data = LocalPlayer:FindFirstChild("Data")
+    local beli = data and data:FindFirstChild("Beli") and data.Beli.Value or 0
+    if beli < 135000 then
+        setStatus("Aviso: Beli atual ($" .. beli .. ") menor que $135.000. Comprando o que der...", Color3.fromRGB(255, 200, 80))
+        task.wait(1.5)
+    end
 
-        if hum.Health <= 0 then
-            cancelTween()
-            task.wait(0.5)
-        else
-            setPhysics(char, true)
+    local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+    local hrp = char:WaitForChild("HumanoidRootPart")
+    setPhysics(char, true)
 
-            local prog = getProgress()
-            local door = findCaveDoor()
+    -- 1. Voa ate o Ability Teacher em Frozen Village
+    local targetPos = findAbilityTeacher() or Config.AbilityTeacherPos
+    while _G.OmegaCore_BuyAbilities and not tweenTo(hrp, targetPos + Vector3.new(0, 2, 4)) do
+        setStatus("Indo ate o Ability Teacher em Frozen Village...", Color3.fromRGB(255, 215, 90))
+        local updatedNpcPos = findAbilityTeacher()
+        if updatedNpcPos then
+            targetPos = updatedNpcPos
+        end
+        RunService.Heartbeat:Wait()
+    end
 
-            -- Verifica se a porta ja sumiu ou o servidor confirmou UsedKey
-            if (prog and prog.UsedKey) or (door and door.Transparency >= 0.9 and not door.CanCollide) then
-                cancelTween()
-                setStatus("PORTA ABERTA! Agora o Ice Admiral toma dano normalmente. Rode a Missao 3!", Color3.fromRGB(120, 255, 160))
-                break
-            end
+    -- 2. Compra as 3 habilidades via Remote oficial
+    local abilities = {
+        { id = "Geppo", label = "Air Jump ($10.000)" },
+        { id = "Buso", label = "Aura / Haki ($25.000)" },
+        { id = "Soru", label = "Flash Step ($100.000)" }
+    }
 
-            local keyTool = findKey()
-            if not keyTool then
-                -- ETAPA A: Ir ate a Prison pegar a Key com o Military Detective
-                local npcs = workspace:FindFirstChild("NPCs")
-                local detective = npcs and npcs:FindFirstChild("Military Detective")
-                local detHrp = detective and detective:FindFirstChild("HumanoidRootPart")
+    if CommF then
+        for _, ab in ipairs(abilities) do
+            setStatus("Comprando " .. ab.label .. "...", Color3.fromRGB(120, 200, 255))
+            pcall(function()
+                CommF:InvokeServer("BuyHaki", ab.id)
+            end)
+            task.wait(0.45)
+        end
 
-                if not detHrp then
-                    setStatus("Indo ate a Prison buscar a Key...", Color3.fromRGB(255, 215, 90))
-                    tweenTo(hrp, Config.PrisonPos)
-                    if (hrp.Position - Config.PrisonPos).Magnitude <= 90 then
-                        pcall(function() LocalPlayer:RequestStreamAroundAsync(Config.PrisonPos) end)
-                    end
-                else
-                    local talkPos = detHrp.Position + Vector3.new(0, 2, 3.5)
-                    if not tweenTo(hrp, talkPos) then
-                        setStatus("Aproximando do Military Detective...", Color3.fromRGB(255, 215, 90))
-                    else
-                        setStatus("Falando com Military Detective...", Color3.fromRGB(120, 200, 255))
-                        if CommF then
-                            pcall(function() CommF:InvokeServer("DressrosaQuestProgress") end)
-                            task.wait(0.15)
-                            pcall(function() CommF:InvokeServer("DressrosaQuestProgress", "Detective") end)
-                        end
-                        task.wait(0.6)
-                    end
-                end
-            else
-                -- ETAPA B: Levar a Key ate a porta de madeira em Frozen Village
-                local doorPos = door and door.Position or (Config.IceAdmiralPos + Vector3.new(0, 0, 55))
-                if not tweenTo(hrp, doorPos + Vector3.new(0, 1, 3)) then
-                    setStatus("Levando a Key ate a porta de madeira em Frozen Village...", Color3.fromRGB(255, 215, 90))
-                else
-                    setStatus("Equipando Key e abrindo a porta...", Color3.fromRGB(120, 200, 255))
-                    if keyTool.Parent ~= char then
-                        hum:EquipTool(keyTool)
-                        task.wait(0.15)
-                    end
-                    hrp.CFrame = CFrame.new(doorPos)
-                    pcall(function() keyTool:Activate() end)
-                    if door and firetouchinterest then
-                        pcall(function()
-                            firetouchinterest(hrp, door, 0)
-                            task.wait(0.05)
-                            firetouchinterest(hrp, door, 1)
-                        end)
-                    end
-                    if CommF then
-                        pcall(function() CommF:InvokeServer("DressrosaQuestProgress", "UseKey") end)
-                    end
-                    task.wait(0.5)
-                end
-            end
-
-            RunService.Heartbeat:Wait()
+        -- 3. Ativa a Aura (Buso Haki) automaticamente
+        if not char:FindFirstChild("HasBuso") then
+            pcall(function()
+                CommF:InvokeServer("Buso")
+            end)
+            task.wait(0.3)
         end
     end
 
-    _G.OmegaSea2_AbrirPorta = false
+    local auraAtiva = char:FindFirstChild("HasBuso") ~= nil
+    if auraAtiva then
+        setStatus("CONCLUIDO! Air Jump, Aura (ATIVA) e Flash Step comprados! Pode rodar a Missao 3.", Color3.fromRGB(120, 255, 160))
+    else
+        setStatus("CONCLUIDO! Compras enviadas (Air Jump, Aura, Flash Step). Ative a Aura (J) e rode a Missao 3!", Color3.fromRGB(120, 255, 160))
+    end
+
+    _G.OmegaCore_BuyAbilities = false
     if noclipConn then noclipConn:Disconnect() end
     cancelTween()
     setPhysics(LocalPlayer.Character, false)
