@@ -1,40 +1,36 @@
-_G.OmegaSea2_Missao3_Boss = true
+_G.OmegaSea2_AbrirPorta = true
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local LocalPlayer = Players.LocalPlayer
 local Remotes = ReplicatedStorage:FindFirstChild("Remotes")
 local CommF = Remotes and Remotes:FindFirstChild("CommF_")
 
 local Config = {
-    IceAdmiralFallback = Vector3.new(1347.70, 37.30, -1385.00),
-    TweenSpeed = 225,
-    SafeHoverHeight = 7.5 -- Alto o suficiente para nao tomar dano e perto para skills acertarem
+    PrisonPos = Vector3.new(4854.17, 25.00, 740.19),
+    IceAdmiralPos = Vector3.new(1347.70, 37.30, -1385.00),
+    TweenSpeed = 225
 }
 
 local CurrentTween = nil
 local LastTweenTarget = nil
-local LastSkillTime = 0
-local SkillIndex = 1
-local SkillKeys = { Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C, Enum.KeyCode.V }
 
 -- Barra de status no topo
 local parentGui = (gethui and gethui()) or game:GetService("CoreGui")
-if parentGui:FindFirstChild("OmegaSea2Missao3UI") then
-    parentGui.OmegaSea2Missao3UI:Destroy()
+if parentGui:FindFirstChild("OmegaDoorUnlockUI") then
+    parentGui.OmegaDoorUnlockUI:Destroy()
 end
 
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "OmegaSea2Missao3UI"
+ScreenGui.Name = "OmegaDoorUnlockUI"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.Parent = parentGui
 
 local StatusBox = Instance.new("TextLabel")
-StatusBox.Size = UDim2.new(0, 370, 0, 56)
+StatusBox.Size = UDim2.new(0, 370, 0, 52)
 StatusBox.Position = UDim2.new(0.5, -185, 0, 12)
 StatusBox.BackgroundColor3 = Color3.fromRGB(18, 20, 26)
 StatusBox.TextColor3 = Color3.fromRGB(120, 255, 160)
@@ -42,48 +38,35 @@ StatusBox.Font = Enum.Font.GothamBold
 StatusBox.TextSize = 11
 StatusBox.TextWrapped = true
 StatusBox.BorderSizePixel = 0
-StatusBox.Text = "[Missao 3] Iniciando..."
+StatusBox.Text = "[Chave + Porta] Verificando..."
 StatusBox.Parent = ScreenGui
 
 local function setStatus(msg, color)
-    StatusBox.Text = msg
-    if color then
-        StatusBox.TextColor3 = color
-    end
+    StatusBox.Text = "[Chave + Porta] " .. msg
+    if color then StatusBox.TextColor3 = color end
 end
 
-local function checkAndEnableAura()
-    local char = LocalPlayer.Character
-    if not char then return false end
-    if char:FindFirstChild("HasBuso") then
-        return true
-    end
-    if CommF then
-        pcall(function()
-            CommF:InvokeServer("Buso")
-        end)
-        task.wait(0.25)
-    end
-    return char:FindFirstChild("HasBuso") ~= nil
-end
-
-local function getToolsByCategory()
+local function findKey()
     local char = LocalPlayer.Character
     local bp = LocalPlayer:FindFirstChild("Backpack")
-    local list = {}
-    for _, container in ipairs({ char, bp }) do
-        if container then
-            for _, item in ipairs(container:GetChildren()) do
-                if item:IsA("Tool") then
-                    list[item.ToolTip] = item
-                    if item.Name == "Combat" then
-                        list["Melee"] = item
-                    end
+    for _, c in ipairs({ char, bp }) do
+        if c then
+            for _, item in ipairs(c:GetChildren()) do
+                if item:IsA("Tool") and string.find(string.lower(item.Name), "key", 1, true) then
+                    return item
                 end
             end
         end
     end
-    return list
+    return nil
+end
+
+local function getProgress()
+    if not CommF then return nil end
+    local ok, res = pcall(function()
+        return CommF:InvokeServer("DressrosaQuestProgress")
+    end)
+    return (ok and type(res) == "table") and res or nil
 end
 
 local function cancelTween()
@@ -94,18 +77,18 @@ local function cancelTween()
     LastTweenTarget = nil
 end
 
-local function setPhysics(character, enabled)
-    if not character then return end
-    local hrp = character:FindFirstChild("HumanoidRootPart")
-    local hum = character:FindFirstChildOfClass("Humanoid")
+local function setPhysics(char, enabled)
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    local hum = char:FindFirstChildOfClass("Humanoid")
     if hum and enabled then hum.Sit = false end
 
     if hrp then
-        local bv = hrp:FindFirstChild("OmegaBossBV")
+        local bv = hrp:FindFirstChild("OmegaDoorBV")
         if enabled then
             if not bv then
                 bv = Instance.new("BodyVelocity")
-                bv.Name = "OmegaBossBV"
+                bv.Name = "OmegaDoorBV"
                 bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
                 bv.Velocity = Vector3.zero
                 bv.Parent = hrp
@@ -115,49 +98,49 @@ local function setPhysics(character, enabled)
         end
     end
 
-    for _, part in ipairs(character:GetDescendants()) do
-        if part:IsA("BasePart") then
-            part.CanCollide = not enabled
+    for _, p in ipairs(char:GetDescendants()) do
+        if p:IsA("BasePart") then
+            p.CanCollide = not enabled
         end
     end
 end
 
-local function tweenToCFrame(hrp, targetCFrame, snapAtEnd)
-    local dist = (hrp.Position - targetCFrame.Position).Magnitude
+local function tweenTo(hrp, targetPos)
+    local dist = (hrp.Position - targetPos).Magnitude
     if dist <= 4 then
         cancelTween()
-        if snapAtEnd then hrp.CFrame = targetCFrame end
         return true
     end
-    if CurrentTween and CurrentTween.PlaybackState == Enum.PlaybackState.Playing and LastTweenTarget and (LastTweenTarget - targetCFrame.Position).Magnitude <= 4 then
+    if CurrentTween and CurrentTween.PlaybackState == Enum.PlaybackState.Playing and LastTweenTarget and (LastTweenTarget - targetPos).Magnitude <= 4 then
         return false
     end
     cancelTween()
-    LastTweenTarget = targetCFrame.Position
-    CurrentTween = TweenService:Create(hrp, TweenInfo.new(math.max(dist / Config.TweenSpeed, 0.06), Enum.EasingStyle.Linear), {
-        CFrame = targetCFrame
+    LastTweenTarget = targetPos
+    CurrentTween = TweenService:Create(hrp, TweenInfo.new(math.max(dist / Config.TweenSpeed, 0.1), Enum.EasingStyle.Linear), {
+        CFrame = CFrame.new(targetPos)
     })
     CurrentTween:Play()
     return false
 end
 
-local function getActiveIceAdmiral()
-    local enemies = workspace:FindFirstChild("Enemies")
-    if not enemies then return nil end
-    for _, mob in ipairs(enemies:GetChildren()) do
-        if string.find(string.lower(mob.Name), "ice admiral", 1, true) then
-            local hum = mob:FindFirstChildOfClass("Humanoid")
-            local hrp = mob:FindFirstChild("HumanoidRootPart")
-            if hum and hrp and hum.Health > 0 then
-                return mob
+local function findCaveDoor()
+    local map = workspace:FindFirstChild("Map")
+    if not map then return nil end
+    local best, bestDist = nil, 250
+    for _, obj in ipairs(map:GetDescendants()) do
+        if obj:IsA("BasePart") and string.find(string.lower(obj.Name), "door", 1, true) then
+            local d = (obj.Position - Config.IceAdmiralPos).Magnitude
+            if d < bestDist then
+                bestDist = d
+                best = obj
             end
         end
     end
-    return nil
+    return best
 end
 
 local noclipConn = RunService.Stepped:Connect(function()
-    if not _G.OmegaSea2_Missao3_Boss then return end
+    if not _G.OmegaSea2_AbrirPorta then return end
     local char = LocalPlayer.Character
     if char then
         for _, p in ipairs(char:GetDescendants()) do
@@ -169,20 +152,7 @@ local noclipConn = RunService.Stepped:Connect(function()
 end)
 
 task.spawn(function()
-    local hasAura = checkAndEnableAura()
-    local tools = getToolsByCategory()
-
-    -- Se nao tiver Haki (Aura), prioriza Fruta (que acerta Logia) ou avisa para comprar Aura
-    if not hasAura and not tools["Blox Fruit"] then
-        setStatus("VOCE NAO TEM HAKI (AURA)! Compre Aura por $25.000 no Ability Teacher da caverna de gelo para acertar o Ice Admiral.", Color3.fromRGB(255, 110, 90))
-        _G.OmegaSea2_Missao3_Boss = false
-        noclipConn:Disconnect()
-        return
-    end
-
-    local preferredTool = (not hasAura and tools["Blox Fruit"]) or tools["Melee"] or tools["Sword"] or tools["Blox Fruit"]
-
-    while _G.OmegaSea2_Missao3_Boss do
+    while _G.OmegaSea2_AbrirPorta do
         local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
         local hrp = char:WaitForChild("HumanoidRootPart")
         local hum = char:WaitForChild("Humanoid")
@@ -192,77 +162,68 @@ task.spawn(function()
             task.wait(0.5)
         else
             setPhysics(char, true)
-            if hasAura and not char:FindFirstChild("HasBuso") then
-                checkAndEnableAura()
+
+            local prog = getProgress()
+            local door = findCaveDoor()
+
+            -- Verifica se a porta ja sumiu ou o servidor confirmou UsedKey
+            if (prog and prog.UsedKey) or (door and door.Transparency >= 0.9 and not door.CanCollide) then
+                cancelTween()
+                setStatus("PORTA ABERTA! Agora o Ice Admiral toma dano normalmente. Rode a Missao 3!", Color3.fromRGB(120, 255, 160))
+                break
             end
 
-            local boss = getActiveIceAdmiral()
-            if boss and boss:FindFirstChild("HumanoidRootPart") and boss:FindFirstChildOfClass("Humanoid") then
-                local bossHrp = boss.HumanoidRootPart
-                local bossHum = boss:FindFirstChildOfClass("Humanoid")
+            local keyTool = findKey()
+            if not keyTool then
+                -- ETAPA A: Ir ate a Prison pegar a Key com o Military Detective
+                local npcs = workspace:FindFirstChild("NPCs")
+                local detective = npcs and npcs:FindFirstChild("Military Detective")
+                local detHrp = detective and detective:FindFirstChild("HumanoidRootPart")
 
-                -- Posicao segura acima do boss para evitar os golpes dele
-                local hoverPos = bossHrp.Position + Vector3.new(0, Config.SafeHoverHeight, 0)
-                local arrived = tweenToCFrame(hrp, CFrame.lookAt(hoverPos, bossHrp.Position), true)
-
-                if arrived or (hrp.Position - bossHrp.Position).Magnitude <= 14 then
-                    if preferredTool and preferredTool.Parent ~= char then
-                        hum:EquipTool(preferredTool)
+                if not detHrp then
+                    setStatus("Indo ate a Prison buscar a Key...", Color3.fromRGB(255, 215, 90))
+                    tweenTo(hrp, Config.PrisonPos)
+                    if (hrp.Position - Config.PrisonPos).Magnitude <= 90 then
+                        pcall(function() LocalPlayer:RequestStreamAroundAsync(Config.PrisonPos) end)
                     end
-
-                    local cam = workspace.CurrentCamera
-                    if cam then
-                        cam.CFrame = CFrame.new(cam.CFrame.Position, bossHrp.Position)
+                else
+                    local talkPos = detHrp.Position + Vector3.new(0, 2, 3.5)
+                    if not tweenTo(hrp, talkPos) then
+                        setStatus("Aproximando do Military Detective...", Color3.fromRGB(255, 215, 90))
+                    else
+                        setStatus("Falando com Military Detective...", Color3.fromRGB(120, 200, 255))
+                        if CommF then
+                            pcall(function() CommF:InvokeServer("DressrosaQuestProgress") end)
+                            task.wait(0.15)
+                            pcall(function() CommF:InvokeServer("DressrosaQuestProgress", "Detective") end)
+                        end
+                        task.wait(0.6)
                     end
-
-                    -- Ataque basico nativo da Tool (se tiver Aura)
-                    if hasAura and preferredTool then
-                        pcall(function()
-                            preferredTool:Activate()
-                        end)
-                    end
-
-                    -- Dispara skills Z, X, C, V
-                    if (os.clock() - LastSkillTime) >= 0.9 then
-                        LastSkillTime = os.clock()
-                        local key = SkillKeys[SkillIndex]
-                        SkillIndex = (SkillIndex % #SkillKeys) + 1
-                        pcall(function()
-                            VirtualInputManager:SendKeyEvent(true, key, false, game)
-                            task.wait(0.05)
-                            VirtualInputManager:SendKeyEvent(false, key, false, game)
-                        end)
-                    end
-
-                    setStatus(
-                        string.format("Atacando Ice Admiral | HP: %d/%d | Aura: %s | Item: %s",
-                            math.floor(bossHum.Health), math.floor(bossHum.MaxHealth),
-                            hasAura and "ATIVA" or "SEM AURA (Usando Fruta)",
-                            preferredTool and preferredTool.Name or "Nenhum"),
-                        Color3.fromRGB(120, 200, 255)
-                    )
                 end
             else
-                if CommF then
-                    local ok, prog = pcall(function()
-                        return CommF:InvokeServer("DressrosaQuestProgress")
-                    end)
-                    if ok and type(prog) == "table" and prog.KilledIceAdmiral then
-                        cancelTween()
-                        setStatus("SUCESSO! Ice Admiral derrotado. Me avise para a Parte 4!", Color3.fromRGB(120, 255, 160))
-                        break
-                    end
-                end
-
-                local waitPos = Config.IceAdmiralFallback + Vector3.new(0, 12, 0)
-                if (hrp.Position - waitPos).Magnitude > 10 then
-                    setStatus("Indo ate a caverna de Frozen Village...", Color3.fromRGB(255, 215, 90))
-                    tweenToCFrame(hrp, CFrame.new(waitPos), false)
+                -- ETAPA B: Levar a Key ate a porta de madeira em Frozen Village
+                local doorPos = door and door.Position or (Config.IceAdmiralPos + Vector3.new(0, 0, 55))
+                if not tweenTo(hrp, doorPos + Vector3.new(0, 1, 3)) then
+                    setStatus("Levando a Key ate a porta de madeira em Frozen Village...", Color3.fromRGB(255, 215, 90))
                 else
-                    cancelTween()
-                    hrp.CFrame = CFrame.new(waitPos)
-                    hrp.AssemblyLinearVelocity = Vector3.zero
-                    setStatus("Na caverna. Aguardando respawn do Ice Admiral...", Color3.fromRGB(255, 215, 90))
+                    setStatus("Equipando Key e abrindo a porta...", Color3.fromRGB(120, 200, 255))
+                    if keyTool.Parent ~= char then
+                        hum:EquipTool(keyTool)
+                        task.wait(0.15)
+                    end
+                    hrp.CFrame = CFrame.new(doorPos)
+                    pcall(function() keyTool:Activate() end)
+                    if door and firetouchinterest then
+                        pcall(function()
+                            firetouchinterest(hrp, door, 0)
+                            task.wait(0.05)
+                            firetouchinterest(hrp, door, 1)
+                        end)
+                    end
+                    if CommF then
+                        pcall(function() CommF:InvokeServer("DressrosaQuestProgress", "UseKey") end)
+                    end
+                    task.wait(0.5)
                 end
             end
 
@@ -270,7 +231,7 @@ task.spawn(function()
         end
     end
 
-    _G.OmegaSea2_Missao3_Boss = false
+    _G.OmegaSea2_AbrirPorta = false
     if noclipConn then noclipConn:Disconnect() end
     cancelTween()
     setPhysics(LocalPlayer.Character, false)
