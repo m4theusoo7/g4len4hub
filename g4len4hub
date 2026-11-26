@@ -1,194 +1,147 @@
-_G.OmegaCore_BuyAbilities = true
+_G.OmegaCore_FreeIceAdmiral = true
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local LocalPlayer = Players.LocalPlayer
 local Remotes = ReplicatedStorage:FindFirstChild("Remotes")
 local CommF = Remotes and Remotes:FindFirstChild("CommF_")
 
 local Config = {
-    AbilityTeacherPos = Vector3.new(1347.70, 37.30, -1325.00),
+    IceAdmiralPos = Vector3.new(1347.70, 37.30, -1385.00),
     TweenSpeed = 225
 }
 
-local CurrentTween = nil
-local LastTweenTarget = nil
-
--- Barra compacta de status na tela
 local parentGui = (gethui and gethui()) or game:GetService("CoreGui")
-if parentGui:FindFirstChild("OmegaAbilitiesUI") then
-    parentGui.OmegaAbilitiesUI:Destroy()
+if parentGui:FindFirstChild("OmegaIcePrisonUI") then
+    parentGui.OmegaIcePrisonUI:Destroy()
 end
 
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "OmegaAbilitiesUI"
+ScreenGui.Name = "OmegaIcePrisonUI"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.Parent = parentGui
 
-local StatusBox = Instance.new("TextLabel")
-StatusBox.Size = UDim2.new(0, 370, 0, 52)
-StatusBox.Position = UDim2.new(0.5, -185, 0, 12)
-StatusBox.BackgroundColor3 = Color3.fromRGB(18, 20, 26)
-StatusBox.TextColor3 = Color3.fromRGB(120, 255, 160)
-StatusBox.Font = Enum.Font.GothamBold
-StatusBox.TextSize = 11
-StatusBox.TextWrapped = true
-StatusBox.BorderSizePixel = 0
-StatusBox.Text = "[Ability Teacher] Iniciando..."
-StatusBox.Parent = ScreenGui
+local Frame = Instance.new("Frame")
+Frame.Size = UDim2.new(0, 380, 0, 210)
+Frame.Position = UDim2.new(0.5, -190, 0.5, -105)
+Frame.BackgroundColor3 = Color3.fromRGB(18, 20, 26)
+Frame.BorderSizePixel = 0
+Frame.Active = true
+Frame.Draggable = true
+Frame.Parent = ScreenGui
 
-local function setStatus(msg, color)
-    StatusBox.Text = "[Ability Teacher] " .. msg
-    if color then
-        StatusBox.TextColor3 = color
-    end
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, -60, 0, 24)
+Title.Position = UDim2.new(0, 8, 0, 4)
+Title.BackgroundTransparency = 1
+Title.Text = "OmegaCore - Libertar Ice Admiral (Update 30)"
+Title.TextColor3 = Color3.fromRGB(120, 255, 160)
+Title.Font = Enum.Font.GothamBold
+Title.TextSize = 11
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = Frame
+
+local CloseBtn = Instance.new("TextButton")
+CloseBtn.Size = UDim2.new(0, 50, 0, 22)
+CloseBtn.Position = UDim2.new(1, -54, 0, 4)
+CloseBtn.BackgroundColor3 = Color3.fromRGB(185, 50, 50)
+CloseBtn.Text = "FECHAR"
+CloseBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+CloseBtn.Font = Enum.Font.GothamBold
+CloseBtn.TextSize = 10
+CloseBtn.BorderSizePixel = 0
+CloseBtn.Parent = Frame
+CloseBtn.MouseButton1Click:Connect(function()
+    _G.OmegaCore_FreeIceAdmiral = false
+    ScreenGui:Destroy()
+end)
+
+local LogBox = Instance.new("TextBox")
+LogBox.Size = UDim2.new(1, -16, 1, -36)
+LogBox.Position = UDim2.new(0, 8, 0, 30)
+LogBox.BackgroundColor3 = Color3.fromRGB(12, 14, 18)
+LogBox.TextColor3 = Color3.fromRGB(220, 245, 255)
+LogBox.Font = Enum.Font.Code
+LogBox.TextSize = 11
+LogBox.TextXAlignment = Enum.TextXAlignment.Left
+LogBox.TextYAlignment = Enum.TextYAlignment.Top
+LogBox.MultiLine = true
+LogBox.TextWrapped = true
+LogBox.ClearTextOnFocus = false
+LogBox.Text = "Iniciando busca pela prisao de gelo..."
+LogBox.Parent = Frame
+
+local function setLog(txt)
+    LogBox.Text = txt
+    print(txt)
 end
 
-local function cancelTween()
-    if CurrentTween then
-        CurrentTween:Cancel()
-        CurrentTween = nil
-    end
-    LastTweenTarget = nil
-end
-
-local function setPhysics(char, enabled)
-    if not char then return end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    if hum and enabled then hum.Sit = false end
-
-    if hrp then
-        local bv = hrp:FindFirstChild("OmegaAbilityBV")
-        if enabled then
-            if not bv then
-                bv = Instance.new("BodyVelocity")
-                bv.Name = "OmegaAbilityBV"
-                bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-                bv.Velocity = Vector3.zero
-                bv.Parent = hrp
-            end
-        elseif bv then
-            bv:Destroy()
+local function getIceAdmiral()
+    local enemies = workspace:FindFirstChild("Enemies")
+    if not enemies then return nil end
+    for _, mob in ipairs(enemies:GetChildren()) do
+        if string.find(string.lower(mob.Name), "ice admiral", 1, true) and mob:FindFirstChild("HumanoidRootPart") then
+            return mob
         end
     end
-
-    for _, p in ipairs(char:GetDescendants()) do
-        if p:IsA("BasePart") then
-            p.CanCollide = not enabled
-        end
-    end
-end
-
-local function tweenTo(hrp, targetPos)
-    local dist = (hrp.Position - targetPos).Magnitude
-    if dist <= 5 then
-        cancelTween()
-        return true
-    end
-    if CurrentTween and CurrentTween.PlaybackState == Enum.PlaybackState.Playing and LastTweenTarget and (LastTweenTarget - targetPos).Magnitude <= 4 then
-        return false
-    end
-    cancelTween()
-    LastTweenTarget = targetPos
-    CurrentTween = TweenService:Create(hrp, TweenInfo.new(math.max(dist / Config.TweenSpeed, 0.1), Enum.EasingStyle.Linear), {
-        CFrame = CFrame.new(targetPos)
-    })
-    CurrentTween:Play()
-    return false
-end
-
-local function findAbilityTeacher()
-    local npcs = workspace:FindFirstChild("NPCs")
-    if not npcs then return nil end
-
-    local exact = npcs:FindFirstChild("Ability Teacher")
-    if exact and exact:FindFirstChild("HumanoidRootPart") then
-        return exact.HumanoidRootPart.Position
-    end
-
-    for _, npc in ipairs(npcs:GetChildren()) do
-        local low = string.lower(npc.Name)
-        if (string.find(low, "ability", 1, true) or string.find(low, "teacher", 1, true)) and npc:FindFirstChild("HumanoidRootPart") then
-            return npc.HumanoidRootPart.Position
-        end
-    end
-
     return nil
 end
 
-local noclipConn = RunService.Stepped:Connect(function()
-    if not _G.OmegaCore_BuyAbilities then return end
-    local char = LocalPlayer.Character
-    if char then
-        for _, p in ipairs(char:GetDescendants()) do
-            if p:IsA("BasePart") and p.CanCollide then
-                p.CanCollide = false
+task.spawn(function()
+    local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+    local hrp = char:WaitForChild("HumanoidRootPart")
+
+    local boss = getIceAdmiral()
+    local centerPos = boss and boss.HumanoidRootPart.Position or Config.IceAdmiralPos
+
+    -- Voa ate a frente do Ice Admiral
+    local dist = (hrp.Position - centerPos).Magnitude
+    if dist > 10 then
+        setLog("Voando ate a camara do Ice Admiral...")
+        local tween = TweenService:Create(hrp, TweenInfo.new(math.max(dist / Config.TweenSpeed, 0.2), Enum.EasingStyle.Linear), {
+            CFrame = CFrame.new(centerPos + Vector3.new(0, 2, 7))
+        })
+        tween:Play()
+        tween.Completed:Wait()
+    end
+
+    boss = getIceAdmiral()
+    if boss and boss:FindFirstChild("HumanoidRootPart") then
+        centerPos = boss.HumanoidRootPart.Position
+    end
+
+    local lines = {}
+    table.insert(lines, string.format("Centro Ice Admiral: %.1f, %.1f, %.1f", centerPos.X, centerPos.Y, centerPos.Z))
+
+    -- 1. Procura qualquer objeto/cupula/gelo num raio de 35 studs ao redor do boss
+    local nearbyParts = {}
+    local map = workspace:FindFirstChild("Map")
+    local searchRoots = { map, workspace:FindFirstChild("Enemies"), workspace:FindFirstChild("_WorldOrigin") }
+
+    for _, root in ipairs(searchRoots) do
+        if root then
+            for _, obj in ipairs(root:GetDescendants()) do
+                if obj:IsA("BasePart") then
+                    local d = (obj.Position - centerPos).Magnitude
+                    if d <= 35 and not obj:IsDescendantOf(char) then
+                        local info = string.format("- %s (%.1f studs) | Mat:%s | Transp:%.2f | Col:%s",
+                            obj:GetFullName():gsub("Workspace%.", ""),
+                            d,
+                            obj.Material.Name,
+                            obj.Transparency,
+                            tostring(obj.CanCollide)
+                        )
+                        table.insert(nearbyParts, { part = obj, dist = d, info = info })
+                    end
+                end
             end
         end
     end
-end)
 
-task.spawn(function()
-    local data = LocalPlayer:FindFirstChild("Data")
-    local beli = data and data:FindFirstChild("Beli") and data.Beli.Value or 0
-    if beli < 135000 then
-        setStatus("Aviso: Beli atual ($" .. beli .. ") menor que $135.000. Comprando o que der...", Color3.fromRGB(255, 200, 80))
-        task.wait(1.5)
-    end
+    table.sort(nearbyParts, function(a, b) return a.dist < b.dist end)
 
-    local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-    local hrp = char:WaitForChild("HumanoidRootPart")
-    setPhysics(char, true)
-
-    -- 1. Voa ate o Ability Teacher em Frozen Village
-    local targetPos = findAbilityTeacher() or Config.AbilityTeacherPos
-    while _G.OmegaCore_BuyAbilities and not tweenTo(hrp, targetPos + Vector3.new(0, 2, 4)) do
-        setStatus("Indo ate o Ability Teacher em Frozen Village...", Color3.fromRGB(255, 215, 90))
-        local updatedNpcPos = findAbilityTeacher()
-        if updatedNpcPos then
-            targetPos = updatedNpcPos
-        end
-        RunService.Heartbeat:Wait()
-    end
-
-    -- 2. Compra as 3 habilidades via Remote oficial
-    local abilities = {
-        { id = "Geppo", label = "Air Jump ($10.000)" },
-        { id = "Buso", label = "Aura / Haki ($25.000)" },
-        { id = "Soru", label = "Flash Step ($100.000)" }
-    }
-
-    if CommF then
-        for _, ab in ipairs(abilities) do
-            setStatus("Comprando " .. ab.label .. "...", Color3.fromRGB(120, 200, 255))
-            pcall(function()
-                CommF:InvokeServer("BuyHaki", ab.id)
-            end)
-            task.wait(0.45)
-        end
-
-        -- 3. Ativa a Aura (Buso Haki) automaticamente
-        if not char:FindFirstChild("HasBuso") then
-            pcall(function()
-                CommF:InvokeServer("Buso")
-            end)
-            task.wait(0.3)
-        end
-    end
-
-    local auraAtiva = char:FindFirstChild("HasBuso") ~= nil
-    if auraAtiva then
-        setStatus("CONCLUIDO! Air Jump, Aura (ATIVA) e Flash Step comprados! Pode rodar a Missao 3.", Color3.fromRGB(120, 255, 160))
-    else
-        setStatus("CONCLUIDO! Compras enviadas (Air Jump, Aura, Flash Step). Ative a Aura (J) e rode a Missao 3!", Color3.fromRGB(120, 255, 160))
-    end
-
-    _G.OmegaCore_BuyAbilities = false
-    if noclipConn then noclipConn:Disconnect() end
-    cancelTween()
-    setPhysics(LocalPlayer.Character, false)
-end)
+    table.insert(lines,
