@@ -327,3 +327,1232 @@ task.spawn(function()
             end
         end
     end
+ _G.OmegaSea2_Missao1_Key = false
+    if noclipConn then
+        noclipConn:Disconnect()
+    end
+    cancelTween()
+    setPhysics(LocalPlayer.Character, false)
+end)
+_G.OmegaSea2_Missao2_Porta = true
+
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local LocalPlayer = Players.LocalPlayer
+local Remotes = ReplicatedStorage:FindFirstChild("Remotes")
+local CommF = Remotes and Remotes:FindFirstChild("CommF_")
+
+local Config = {
+    FrozenIslandFallback = Vector3.new(1140.00, 25.00, -1220.00),
+    CaveDoorFallback = Vector3.new(1347.70, 37.30, -1325.00),
+    IceAdmiralFallback = Vector3.new(1347.70, 37.30, -1385.00),
+    SkyArea2ExitPos = Vector3.new(-6022.24, 5470.50, 2217.33),
+    UnderwaterExitPos = Vector3.new(61170.05, -2.00, 1952.83),
+    TweenSpeed = 225
+}
+
+local CurrentTween = nil
+local LastTweenTarget = nil
+local LastPortalTouch = 0
+local LastDoorInteract = 0
+
+-- Barra compacta de status na tela
+local parentGui = (gethui and gethui()) or game:GetService("CoreGui")
+if parentGui:FindFirstChild("OmegaSea2Missao2UI") then
+    parentGui.OmegaSea2Missao2UI:Destroy()
+end
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "OmegaSea2Missao2UI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = parentGui
+
+local StatusBox = Instance.new("TextLabel")
+StatusBox.Size = UDim2.new(0, 360, 0, 50)
+StatusBox.Position = UDim2.new(0.5, -180, 0, 12)
+StatusBox.BackgroundColor3 = Color3.fromRGB(18, 20, 26)
+StatusBox.TextColor3 = Color3.fromRGB(120, 255, 160)
+StatusBox.Font = Enum.Font.GothamBold
+StatusBox.TextSize = 12
+StatusBox.TextWrapped = true
+StatusBox.BorderSizePixel = 0
+StatusBox.Text = "[Missao 2 - Porta] Iniciando..."
+StatusBox.Parent = ScreenGui
+
+local function setStatus(msg, color)
+    StatusBox.Text = "[Missao 2 - Porta] " .. msg
+    if color then
+        StatusBox.TextColor3 = color
+    end
+end
+
+local function findKeyTool()
+    local char = LocalPlayer.Character
+    local backpack = LocalPlayer:FindFirstChild("Backpack")
+
+    if char then
+        for _, item in ipairs(char:GetChildren()) do
+            if item:IsA("Tool") and string.find(string.lower(item.Name), "key", 1, true) then
+                return item, true
+            end
+        end
+    end
+
+    if backpack then
+        for _, item in ipairs(backpack:GetChildren()) do
+            if item:IsA("Tool") and string.find(string.lower(item.Name), "key", 1, true) then
+                return item, false
+            end
+        end
+    end
+
+    return nil, false
+end
+
+local function equipKey()
+    local char = LocalPlayer.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    local keyTool, isEquipped = findKeyTool()
+    if keyTool and not isEquipped and hum then
+        hum:EquipTool(keyTool)
+    end
+    return keyTool
+end
+
+local function isDoorAlreadyUsed()
+    if not CommF then return false end
+    local ok, prog = pcall(function()
+        return CommF:InvokeServer("DressrosaQuestProgress")
+    end)
+    if ok and type(prog) == "table" and prog.UsedKey then
+        return true
+    end
+    return false
+end
+
+local function cancelTween()
+    if CurrentTween then
+        CurrentTween:Cancel()
+        CurrentTween = nil
+    end
+    LastTweenTarget = nil
+end
+
+local function setPhysics(character, enabled)
+    if not character then return end
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    local hum = character:FindFirstChildOfClass("Humanoid")
+
+    if hum and enabled then
+        hum.Sit = false
+    end
+
+    if hrp then
+        local bv = hrp:FindFirstChild("OmegaDoorBV")
+        if enabled then
+            if not bv then
+                bv = Instance.new("BodyVelocity")
+                bv.Name = "OmegaDoorBV"
+                bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+                bv.Velocity = Vector3.zero
+                bv.Parent = hrp
+            end
+        elseif bv then
+            bv:Destroy()
+        end
+    end
+
+    for _, part in ipairs(character:GetDescendants()) do
+        if part:IsA("BasePart") then
+            part.CanCollide = not enabled
+            if not enabled then
+                part.CanTouch = true
+            end
+        end
+    end
+end
+
+local function tweenTo(hrp, targetPos)
+    local dist = (hrp.Position - targetPos).Magnitude
+    if dist <= 3.5 then
+        cancelTween()
+        return true
+    end
+
+    if CurrentTween and CurrentTween.PlaybackState == Enum.PlaybackState.Playing and LastTweenTarget and (LastTweenTarget - targetPos).Magnitude <= 4 then
+        return false
+    end
+
+    cancelTween()
+    LastTweenTarget = targetPos
+    local duration = math.max(dist / Config.TweenSpeed, 0.1)
+    CurrentTween = TweenService:Create(hrp, TweenInfo.new(duration, Enum.EasingStyle.Linear), {
+        CFrame = CFrame.new(targetPos)
+    })
+    CurrentTween:Play()
+    return false
+end
+
+local function useExitPortal(hrp, portalPart, fallbackPos)
+    local targetPos = (portalPart and portalPart.Position) or fallbackPos
+    if (hrp.Position - targetPos).Magnitude > 14 then
+        tweenTo(hrp, targetPos + Vector3.new(0, 2, 0))
+        return
+    end
+
+    cancelTween()
+    local t = os.clock()
+    local offset = Vector3.new(math.cos(t * 6) * 2.5, math.sin(t * 8) * 2, math.sin(t * 6) * 2.5)
+    hrp.CFrame = CFrame.new(targetPos + offset)
+    hrp.AssemblyLinearVelocity = Vector3.zero
+
+    if (t - LastPortalTouch) >= 0.3 then
+        LastPortalTouch = t
+        if portalPart and firetouchinterest then
+            pcall(function()
+                firetouchinterest(hrp, portalPart, 0)
+                task.wait(0.03)
+                firetouchinterest(hrp, portalPart, 1)
+            end)
+        end
+    end
+end
+
+local function moveTo(hrp, targetPos)
+    local map = workspace:FindFirstChild("Map")
+
+    if hrp.Position.Y > 4000 then
+        local skyArea2 = map and map:FindFirstChild("SkyArea2")
+        local exitPart = skyArea2 and skyArea2:FindFirstChild("Exit")
+        useExitPortal(hrp, exitPart, Config.SkyArea2ExitPos)
+        return false
+    end
+
+    if hrp.Position.X > 50000 then
+        local tpSpawn = map and map:FindFirstChild("TeleportSpawn")
+        local exitPart = tpSpawn and tpSpawn:FindFirstChild("Exit")
+        useExitPortal(hrp, exitPart, Config.UnderwaterExitPos)
+        return false
+    end
+
+    return tweenTo(hrp, targetPos)
+end
+
+-- Localiza a ancora da caverna usando o spawn do Ice Admiral ou Frozen Village
+local function getCaveAnchorPos()
+    local worldOrigin = workspace:FindFirstChild("_WorldOrigin")
+
+    local enemySpawns = worldOrigin and worldOrigin:FindFirstChild("EnemySpawns")
+    if enemySpawns then
+        for _, sp in ipairs(enemySpawns:GetChildren()) do
+            if sp:IsA("BasePart") and string.find(string.lower(sp.Name), "ice admiral", 1, true) then
+                return sp.Position
+            end
+        end
+    end
+
+    local locations = worldOrigin and worldOrigin:FindFirstChild("Locations")
+    if locations then
+        for _, loc in ipairs(locations:GetChildren()) do
+            if loc:IsA("BasePart") then
+                local low = string.lower(loc.Name)
+                if string.find(low, "frozen", 1, true) or string.find(low, "ice", 1, true) then
+                    return loc.Position + Vector3.new(0, 20, 0)
+                end
+            end
+        end
+    end
+
+    return Config.CaveDoorFallback
+end
+
+-- Procura dinamicamente a porta de madeira na caverna de Frozen Village
+local function findCaveDoor(anchorPos)
+    local map = workspace:FindFirstChild("Map")
+    if not map then return nil end
+
+    -- 1. Busca direta em pastas da ilha de gelo
+    for _, folder in ipairs(map:GetChildren()) do
+        local low = string.lower(folder.Name)
+        if string.find(low, "ice", 1, true) or string.find(low, "frozen", 1, true) then
+            for _, obj in ipairs(folder:GetDescendants()) do
+                if obj:IsA("BasePart") then
+                    local objLow = string.lower(obj.Name)
+                    if objLow == "door" or string.find(objLow, "door", 1, true) then
+                        return obj
+                    end
+                end
+            end
+        end
+    end
+
+    -- 2. Busca por proximidade ao spawn do Ice Admiral (ignora baus)
+    local bestDoor = nil
+    local bestDist = 180
+
+    for _, folder in ipairs(map:GetChildren()) do
+        for _, obj in ipairs(folder:GetDescendants()) do
+            if obj:IsA("BasePart") then
+                local fullLow = string.lower(obj:GetFullName())
+                local isChest = string.find(fullLow, "chest", 1, true)
+                local hasInteract = obj:FindFirstChildOfClass("TouchTransmitter") or obj:FindFirstChildOfClass("ProximityPrompt") or obj:FindFirstChildOfClass("ClickDetector")
+                local isDoorName = string.find(string.lower(obj.Name), "door", 1, true)
+
+                if not isChest and (isDoorName or hasInteract) then
+                    local d = (obj.Position - anchorPos).Magnitude
+                    if d < bestDist then
+                        bestDist = d
+                        bestDoor = obj
+                    end
+                end
+            end
+        end
+    end
+
+    return bestDoor
+end
+
+local noclipConn = RunService.Stepped:Connect(function()
+    if not _G.OmegaSea2_Missao2_Porta then return end
+    local char = LocalPlayer.Character
+    if char then
+        for _, p in ipairs(char:GetDescendants()) do
+            if p:IsA("BasePart") and p.CanCollide then
+                p.CanCollide = false
+            end
+        end
+    end
+end)
+
+task.spawn(function()
+    if isDoorAlreadyUsed() then
+        setStatus("A porta secreta ja esta aberta! Pode ir para a Parte 3 (Ice Admiral).", Color3.fromRGB(120, 255, 160))
+        _G.OmegaSea2_Missao2_Porta = false
+        noclipConn:Disconnect()
+        return
+    end
+
+    local initialKey = findKeyTool()
+    if not initialKey then
+        setStatus("Key nao encontrada! Rode a Missao 1 na Prison primeiro.", Color3.fromRGB(255, 100, 100))
+        _G.OmegaSea2_Missao2_Porta = false
+        noclipConn:Disconnect()
+        return
+    end
+
+    local anchorPos = getCaveAnchorPos()
+    local interactAttempts = 0
+
+    while _G.OmegaSea2_Missao2_Porta do
+        local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+        local hrp = char:WaitForChild("HumanoidRootPart")
+        local hum = char:WaitForChild("Humanoid")
+
+        if hum.Health <= 0 then
+            cancelTween()
+            task.wait(0.5)
+        else
+            setPhysics(char, true)
+
+            -- Checa se a porta ja abriu ou se a Key foi consumida
+            if isDoorAlreadyUsed() or not findKeyTool() then
+                cancelTween()
+                setStatus("SUCESSO! Porta secreta aberta. Avise para a Parte 3 (Ice Admiral)!", Color3.fromRGB(120, 255, 160))
+                break
+            end
+
+            local doorPart = findCaveDoor(anchorPos)
+            local targetPos = (doorPart and doorPart.Position) or anchorPos
+            local dist = (hrp.Position - targetPos).Magnitude
+
+            if dist > 8 then
+                setStatus("Voando ate Frozen Village...", Color3.fromRGB(255, 215, 90))
+                moveTo(hrp, targetPos + Vector3.new(0, 1.5, 0))
+
+                if dist <= 120 then
+                    pcall(function()
+                        LocalPlayer:RequestStreamAroundAsync(targetPos)
+                    end)
+                end
+                RunService.Heartbeat:Wait()
+            else
+                cancelTween()
+                local keyTool = equipKey()
+                interactAttempts += 1
+                setStatus("Usando Key na porta (" .. interactAttempts .. ")...", Color3.fromRGB(120, 200, 255))
+
+                -- Encosta levemente na porta com a Key equipada
+                local t = os.clock()
+                local wiggle = Vector3.new(math.cos(t * 6) * 2, 0.5, math.sin(t * 6) * 2)
+                hrp.CFrame = CFrame.new(targetPos + wiggle)
+                hrp.AssemblyLinearVelocity = Vector3.zero
+
+                if (t - LastDoorInteract) >= 0.35 then
+                    LastDoorInteract = t
+
+                    if keyTool then
+                        pcall(function()
+                            keyTool:Activate()
+                        end)
+                    end
+
+                    if doorPart then
+                        if firetouchinterest then
+                            pcall(function()
+                                firetouchinterest(hrp, doorPart, 0)
+                                task.wait(0.03)
+                                firetouchinterest(hrp, doorPart, 1)
+                            end)
+                        end
+
+                        local prompt = doorPart:FindFirstChildWhichIsA("ProximityPrompt", true)
+                        if prompt and fireproximityprompt then
+                            pcall(fireproximityprompt, prompt)
+                        end
+
+                        local click = doorPart:FindFirstChildWhichIsA("ClickDetector", true)
+                        if click and fireclickdetector then
+                            pcall(fireclickdetector, click)
+                        end
+                    end
+
+                    if CommF then
+                        pcall(function()
+                            CommF:InvokeServer("DressrosaQuestProgress", "UseKey")
+                        end)
+                    end
+                end
+
+                task.wait(0.4)
+
+                -- Se a porta perdeu colisao/ficou transparente, conclui
+                if doorPart and (not doorPart.CanCollide or doorPart.Transparency >= 0.8) then
+                    setStatus("SUCESSO! Porta secreta aberta. Avise para a Parte 3 (Ice Admiral)!", Color3.fromRGB(120, 255, 160))
+                    break
+                end
+
+                if interactAttempts >= 25 then
+                    setStatus("Chegou na caverna, mas a porta nao abriu. Me diga o que apareceu na tela!", Color3.fromRGB(255, 130, 100))
+                    break
+                end
+            end
+        end
+    end
+_G.OmegaSea2_Missao2_Porta = true
+
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local LocalPlayer = Players.LocalPlayer
+local Remotes = ReplicatedStorage:FindFirstChild("Remotes")
+local CommF = Remotes and Remotes:FindFirstChild("CommF_")
+
+local Config = {
+    FrozenIslandFallback = Vector3.new(1140.00, 25.00, -1220.00),
+    CaveDoorFallback = Vector3.new(1347.70, 37.30, -1325.00),
+    IceAdmiralFallback = Vector3.new(1347.70, 37.30, -1385.00),
+    SkyArea2ExitPos = Vector3.new(-6022.24, 5470.50, 2217.33),
+    UnderwaterExitPos = Vector3.new(61170.05, -2.00, 1952.83),
+    TweenSpeed = 225
+}
+
+local CurrentTween = nil
+local LastTweenTarget = nil
+local LastPortalTouch = 0
+local LastDoorInteract = 0
+
+-- Barra compacta de status na tela
+local parentGui = (gethui and gethui()) or game:GetService("CoreGui")
+if parentGui:FindFirstChild("OmegaSea2Missao2UI") then
+    parentGui.OmegaSea2Missao2UI:Destroy()
+end
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "OmegaSea2Missao2UI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = parentGui
+
+local StatusBox = Instance.new("TextLabel")
+StatusBox.Size = UDim2.new(0, 360, 0, 50)
+StatusBox.Position = UDim2.new(0.5, -180, 0, 12)
+StatusBox.BackgroundColor3 = Color3.fromRGB(18, 20, 26)
+StatusBox.TextColor3 = Color3.fromRGB(120, 255, 160)
+StatusBox.Font = Enum.Font.GothamBold
+StatusBox.TextSize = 12
+StatusBox.TextWrapped = true
+StatusBox.BorderSizePixel = 0
+StatusBox.Text = "[Missao 2 - Porta] Iniciando..."
+StatusBox.Parent = ScreenGui
+
+local function setStatus(msg, color)
+    StatusBox.Text = "[Missao 2 - Porta] " .. msg
+    if color then
+        StatusBox.TextColor3 = color
+    end
+end
+
+local function findKeyTool()
+    local char = LocalPlayer.Character
+    local backpack = LocalPlayer:FindFirstChild("Backpack")
+
+    if char then
+        for _, item in ipairs(char:GetChildren()) do
+            if item:IsA("Tool") and string.find(string.lower(item.Name), "key", 1, true) then
+                return item, true
+            end
+        end
+    end
+
+    if backpack then
+        for _, item in ipairs(backpack:GetChildren()) do
+            if item:IsA("Tool") and string.find(string.lower(item.Name), "key", 1, true) then
+                return item, false
+            end
+        end
+    end
+
+    return nil, false
+end
+
+local function equipKey()
+    local char = LocalPlayer.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    local keyTool, isEquipped = findKeyTool()
+    if keyTool and not isEquipped and hum then
+        hum:EquipTool(keyTool)
+    end
+    return keyTool
+end
+
+local function isDoorAlreadyUsed()
+    if not CommF then return false end
+    local ok, prog = pcall(function()
+        return CommF:InvokeServer("DressrosaQuestProgress")
+    end)
+    if ok and type(prog) == "table" and prog.UsedKey then
+        return true
+    end
+    return false
+end
+
+local function cancelTween()
+    if CurrentTween then
+        CurrentTween:Cancel()
+        CurrentTween = nil
+    end
+    LastTweenTarget = nil
+end
+
+local function setPhysics(character, enabled)
+    if not character then return end
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    local hum = character:FindFirstChildOfClass("Humanoid")
+
+    if hum and enabled then
+        hum.Sit = false
+    end
+
+    if hrp then
+        local bv = hrp:FindFirstChild("OmegaDoorBV")
+        if enabled then
+            if not bv then
+                bv = Instance.new("BodyVelocity")
+                bv.Name = "OmegaDoorBV"
+                bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+                bv.Velocity = Vector3.zero
+                bv.Parent = hrp
+            end
+        elseif bv then
+            bv:Destroy()
+        end
+    end
+
+    for _, part in ipairs(character:GetDescendants()) do
+        if part:IsA("BasePart") then
+            part.CanCollide = not enabled
+            if not enabled then
+                part.CanTouch = true
+            end
+        end
+    end
+end
+
+local function tweenTo(hrp, targetPos)
+    local dist = (hrp.Position - targetPos).Magnitude
+    if dist <= 3.5 then
+        cancelTween()
+        return true
+    end
+
+    if CurrentTween and CurrentTween.PlaybackState == Enum.PlaybackState.Playing and LastTweenTarget and (LastTweenTarget - targetPos).Magnitude <= 4 then
+        return false
+    end
+
+    cancelTween()
+    LastTweenTarget = targetPos
+    local duration = math.max(dist / Config.TweenSpeed, 0.1)
+    CurrentTween = TweenService:Create(hrp, TweenInfo.new(duration, Enum.EasingStyle.Linear), {
+        CFrame = CFrame.new(targetPos)
+    })
+    CurrentTween:Play()
+    return false
+end
+
+local function useExitPortal(hrp, portalPart, fallbackPos)
+    local targetPos = (portalPart and portalPart.Position) or fallbackPos
+    if (hrp.Position - targetPos).Magnitude > 14 then
+        tweenTo(hrp, targetPos + Vector3.new(0, 2, 0))
+        return
+    end
+
+    cancelTween()
+    local t = os.clock()
+    local offset = Vector3.new(math.cos(t * 6) * 2.5, math.sin(t * 8) * 2, math.sin(t * 6) * 2.5)
+    hrp.CFrame = CFrame.new(targetPos + offset)
+    hrp.AssemblyLinearVelocity = Vector3.zero
+
+    if (t - LastPortalTouch) >= 0.3 then
+        LastPortalTouch = t
+        if portalPart and firetouchinterest then
+            pcall(function()
+                firetouchinterest(hrp, portalPart, 0)
+                task.wait(0.03)
+                firetouchinterest(hrp, portalPart, 1)
+            end)
+        end
+    end
+end
+
+local function moveTo(hrp, targetPos)
+    local map = workspace:FindFirstChild("Map")
+
+    if hrp.Position.Y > 4000 then
+        local skyArea2 = map and map:FindFirstChild("SkyArea2")
+        local exitPart = skyArea2 and skyArea2:FindFirstChild("Exit")
+        useExitPortal(hrp, exitPart, Config.SkyArea2ExitPos)
+        return false
+    end
+
+    if hrp.Position.X > 50000 then
+        local tpSpawn = map and map:FindFirstChild("TeleportSpawn")
+        local exitPart = tpSpawn and tpSpawn:FindFirstChild("Exit")
+        useExitPortal(hrp, exitPart, Config.UnderwaterExitPos)
+        return false
+    end
+
+    return tweenTo(hrp, targetPos)
+end
+
+-- Localiza a ancora da caverna usando o spawn do Ice Admiral ou Frozen Village
+local function getCaveAnchorPos()
+    local worldOrigin = workspace:FindFirstChild("_WorldOrigin")
+
+    local enemySpawns = worldOrigin and worldOrigin:FindFirstChild("EnemySpawns")
+    if enemySpawns then
+        for _, sp in ipairs(enemySpawns:GetChildren()) do
+            if sp:IsA("BasePart") and string.find(string.lower(sp.Name), "ice admiral", 1, true) then
+                return sp.Position
+            end
+        end
+    end
+
+    local locations = worldOrigin and worldOrigin:FindFirstChild("Locations")
+    if locations then
+        for _, loc in ipairs(locations:GetChildren()) do
+            if loc:IsA("BasePart") then
+                local low = string.lower(loc.Name)
+                if string.find(low, "frozen", 1, true) or string.find(low, "ice", 1, true) then
+                    return loc.Position + Vector3.new(0, 20, 0)
+                end
+            end
+        end
+    end
+
+    return Config.CaveDoorFallback
+end
+
+-- Procura dinamicamente a porta de madeira na caverna de Frozen Village
+local function findCaveDoor(anchorPos)
+    local map = workspace:FindFirstChild("Map")
+    if not map then return nil end
+
+    -- 1. Busca direta em pastas da ilha de gelo
+    for _, folder in ipairs(map:GetChildren()) do
+        local low = string.lower(folder.Name)
+        if string.find(low, "ice", 1, true) or string.find(low, "frozen", 1, true) then
+            for _, obj in ipairs(folder:GetDescendants()) do
+                if obj:IsA("BasePart") then
+                    local objLow = string.lower(obj.Name)
+                    if objLow == "door" or string.find(objLow, "door", 1, true) then
+                        return obj
+                    end
+                end
+            end
+        end
+    end
+
+    -- 2. Busca por proximidade ao spawn do Ice Admiral (ignora baus)
+    local bestDoor = nil
+    local bestDist = 180
+
+    for _, folder in ipairs(map:GetChildren()) do
+        for _, obj in ipairs(folder:GetDescendants()) do
+            if obj:IsA("BasePart") then
+                local fullLow = string.lower(obj:GetFullName())
+                local isChest = string.find(fullLow, "chest", 1, true)
+                local hasInteract = obj:FindFirstChildOfClass("TouchTransmitter") or obj:FindFirstChildOfClass("ProximityPrompt") or obj:FindFirstChildOfClass("ClickDetector")
+                local isDoorName = string.find(string.lower(obj.Name), "door", 1, true)
+
+                if not isChest and (isDoorName or hasInteract) then
+                    local d = (obj.Position - anchorPos).Magnitude
+                    if d < bestDist then
+                        bestDist = d
+                        bestDoor = obj
+                    end
+                end
+            end
+        end
+    end
+
+    return bestDoor
+end
+
+local noclipConn = RunService.Stepped:Connect(function()
+    if not _G.OmegaSea2_Missao2_Porta then return end
+    local char = LocalPlayer.Character
+    if char then
+        for _, p in ipairs(char:GetDescendants()) do
+            if p:IsA("BasePart") and p.CanCollide then
+                p.CanCollide = false
+            end
+        end
+    end
+end)
+
+task.spawn(function()
+    if isDoorAlreadyUsed() then
+        setStatus("A porta secreta ja esta aberta! Pode ir para a Parte 3 (Ice Admiral).", Color3.fromRGB(120, 255, 160))
+        _G.OmegaSea2_Missao2_Porta = false
+        noclipConn:Disconnect()
+        return
+    end
+
+    local initialKey = findKeyTool()
+    if not initialKey then
+        setStatus("Key nao encontrada! Rode a Missao 1 na Prison primeiro.", Color3.fromRGB(255, 100, 100))
+        _G.OmegaSea2_Missao2_Porta = false
+        noclipConn:Disconnect()
+        return
+    end
+
+    local anchorPos = getCaveAnchorPos()
+    local interactAttempts = 0
+
+    while _G.OmegaSea2_Missao2_Porta do
+        local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+        local hrp = char:WaitForChild("HumanoidRootPart")
+        local hum = char:WaitForChild("Humanoid")
+
+        if hum.Health <= 0 then
+            cancelTween()
+            task.wait(0.5)
+        else
+            setPhysics(char, true)
+
+            -- Checa se a porta ja abriu ou se a Key foi consumida
+            if isDoorAlreadyUsed() or not findKeyTool() then
+                cancelTween()
+                setStatus("SUCESSO! Porta secreta aberta. Avise para a Parte 3 (Ice Admiral)!", Color3.fromRGB(120, 255, 160))
+                break
+            end
+
+            local doorPart = findCaveDoor(anchorPos)
+            local targetPos = (doorPart and doorPart.Position) or anchorPos
+            local dist = (hrp.Position - targetPos).Magnitude
+
+            if dist > 8 then
+                setStatus("Voando ate Frozen Village...", Color3.fromRGB(255, 215, 90))
+                moveTo(hrp, targetPos + Vector3.new(0, 1.5, 0))
+
+                if dist <= 120 then
+                    pcall(function()
+                        LocalPlayer:RequestStreamAroundAsync(targetPos)
+                    end)
+                end
+                RunService.Heartbeat:Wait()
+            else
+                cancelTween()
+                local keyTool = equipKey()
+                interactAttempts += 1
+                setStatus("Usando Key na porta (" .. interactAttempts .. ")...", Color3.fromRGB(120, 200, 255))
+
+                -- Encosta levemente na porta com a Key equipada
+                local t = os.clock()
+                local wiggle = Vector3.new(math.cos(t * 6) * 2, 0.5, math.sin(t * 6) * 2)
+                hrp.CFrame = CFrame.new(targetPos + wiggle)
+                hrp.AssemblyLinearVelocity = Vector3.zero
+
+                if (t - LastDoorInteract) >= 0.35 then
+                    LastDoorInteract = t
+
+                    if keyTool then
+                        pcall(function()
+                            keyTool:Activate()
+                        end)
+                    end
+
+                    if doorPart then
+                        if firetouchinterest then
+                            pcall(function()
+                                firetouchinterest(hrp, doorPart, 0)
+                                task.wait(0.03)
+                                firetouchinterest(hrp, doorPart, 1)
+                            end)
+                        end
+
+                        local prompt = doorPart:FindFirstChildWhichIsA("ProximityPrompt", true)
+                        if prompt and fireproximityprompt then
+                            pcall(fireproximityprompt, prompt)
+                        end
+
+                        local click = doorPart:FindFirstChildWhichIsA("ClickDetector", true)
+                        if click and fireclickdetector then
+                            pcall(fireclickdetector, click)
+                        end
+                    end
+
+                    if CommF then
+                        pcall(function()
+                            CommF:InvokeServer("DressrosaQuestProgress", "UseKey")
+                        end)
+                    end
+                end
+
+                task.wait(0.4)
+
+                -- Se a porta perdeu colisao/ficou transparente, conclui
+                if doorPart and (not doorPart.CanCollide or doorPart.Transparency >= 0.8) then
+                    setStatus("SUCESSO! Porta secreta aberta. Avise para a Parte 3 (Ice Admiral)!", Color3.fromRGB(120, 255, 160))
+                    break
+                end
+
+                if interactAttempts >= 25 then
+                    setStatus("Chegou na caverna, mas a porta nao abriu. Me diga o que apareceu na tela!", Color3.fromRGB(255, 130, 100))
+                    break
+                end
+            end
+        end
+    end
+
+    _G.OmegaSea2_Missao2_Porta = false
+    if noclipConn then
+        noclipConn:Disconnect()
+    end
+    cancelTween()
+    setPhysics(LocalPlayer.Character, false)
+end)
+_G.OmegaSea2_Missao3_Boss = true
+
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+
+local LocalPlayer = Players.LocalPlayer
+local Remotes = ReplicatedStorage:FindFirstChild("Remotes")
+local CommF = Remotes and Remotes:FindFirstChild("CommF_")
+local NetFolder = ReplicatedStorage:FindFirstChild("Modules") and ReplicatedStorage.Modules:FindFirstChild("Net")
+local RegisterAttack = NetFolder and NetFolder:FindFirstChild("RE/RegisterAttack")
+local RegisterHit = NetFolder and NetFolder:FindFirstChild("RE/RegisterHit")
+
+local Config = {
+    IceAdmiralFallback = Vector3.new(1347.70, 37.30, -1385.00),
+    SkyArea2ExitPos = Vector3.new(-6022.24, 5470.50, 2217.33),
+    UnderwaterExitPos = Vector3.new(61170.05, -2.00, 1952.83),
+    TweenSpeed = 225,
+    DistanceFarm = 8,
+    AttackDelay = 0.08
+}
+
+local CurrentTween = nil
+local LastTweenTarget = nil
+local LastPortalTouch = 0
+local LastAuraCheck = 0
+
+-- Barra compacta de status na tela
+local parentGui = (gethui and gethui()) or game:GetService("CoreGui")
+if parentGui:FindFirstChild("OmegaSea2Missao3UI") then
+    parentGui.OmegaSea2Missao3UI:Destroy()
+end
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "OmegaSea2Missao3UI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = parentGui
+
+local StatusBox = Instance.new("TextLabel")
+StatusBox.Size = UDim2.new(0, 360, 0, 50)
+StatusBox.Position = UDim2.new(0.5, -180, 0, 12)
+StatusBox.BackgroundColor3 = Color3.fromRGB(18, 20, 26)
+StatusBox.TextColor3 = Color3.fromRGB(120, 255, 160)
+StatusBox.Font = Enum.Font.GothamBold
+StatusBox.TextSize = 12
+StatusBox.TextWrapped = true
+StatusBox.BorderSizePixel = 0
+StatusBox.Text = "[Missao 3 - Ice Admiral] Iniciando..."
+StatusBox.Parent = ScreenGui
+
+local function setStatus(msg, color)
+    StatusBox.Text = "[Missao 3 - Ice Admiral] " .. msg
+    if color then
+        StatusBox.TextColor3 = color
+    end
+end
+
+local function getQuestState()
+    if not CommF then return nil end
+    local ok, prog = pcall(function()
+        return CommF:InvokeServer("DressrosaQuestProgress")
+    end)
+    if ok and type(prog) == "table" then
+        return prog
+    end
+    return nil
+end
+
+local function enableAura()
+    if not CommF then return end
+    local char = LocalPlayer.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if not char or not hum or hum.Health <= 0 then return end
+
+    if not char:FindFirstChild("HasBuso") and (os.clock() - LastAuraCheck) >= 3 then
+        LastAuraCheck = os.clock()
+        pcall(function()
+            CommF:InvokeServer("Buso")
+        end)
+    end
+end
+
+local function equipCombatWeapon()
+    local char = LocalPlayer.Character
+    local backpack = LocalPlayer:FindFirstChild("Backpack")
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if not char or not backpack or not hum then return nil end
+
+    local equipped = char:FindFirstChildOfClass("Tool")
+    if equipped and (equipped.ToolTip == "Melee" or equipped.ToolTip == "Sword" or equipped.Name == "Combat") then
+        return equipped
+    end
+
+    for _, tool in ipairs(backpack:GetChildren()) do
+        if tool:IsA("Tool") and (tool.ToolTip == "Melee" or tool.ToolTip == "Sword" or tool.Name == "Combat") then
+            hum:EquipTool(tool)
+            return tool
+        end
+    end
+
+    return nil
+end
+
+local function cancelTween()
+    if CurrentTween then
+        CurrentTween:Cancel()
+        CurrentTween = nil
+    end
+    LastTweenTarget = nil
+end
+
+local function setPhysics(character, enabled)
+    if not character then return end
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    local hum = character:FindFirstChildOfClass("Humanoid")
+
+    if hum and enabled then
+        hum.Sit = false
+    end
+
+    if hrp then
+        local bv = hrp:FindFirstChild("OmegaBossBV")
+        if enabled then
+            if not bv then
+                bv = Instance.new("BodyVelocity")
+                bv.Name = "OmegaBossBV"
+                bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+                bv.Velocity = Vector3.zero
+                bv.Parent = hrp
+            end
+        elseif bv then
+            bv:Destroy()
+        end
+    end
+
+    for _, part in ipairs(character:GetDescendants()) do
+        if part:IsA("BasePart") then
+            part.CanCollide = not enabled
+            if not enabled then
+                part.CanTouch = true
+            end
+        end
+    end
+end
+
+local function tweenToCFrame(hrp, targetCFrame, snapAtEnd)
+    local dist = (hrp.Position - targetCFrame.Position).Magnitude
+    if dist <= 3.5 then
+        cancelTween()
+        if snapAtEnd then
+            hrp.CFrame = targetCFrame
+        end
+        return true
+    end
+
+    if CurrentTween and CurrentTween.PlaybackState == Enum.PlaybackState.Playing and LastTweenTarget and (LastTweenTarget - targetCFrame.Position).Magnitude <= 4 then
+        return false
+    end
+
+    cancelTween()
+    LastTweenTarget = targetCFrame.Position
+    local duration = math.max(dist / Config.TweenSpeed, 0.06)
+    CurrentTween = TweenService:Create(hrp, TweenInfo.new(duration, Enum.EasingStyle.Linear), {
+        CFrame = targetCFrame
+    })
+    CurrentTween:Play()
+    return false
+end
+
+local function useExitPortal(hrp, portalPart, fallbackPos)
+    local targetPos = (portalPart and portalPart.Position) or fallbackPos
+    if (hrp.Position - targetPos).Magnitude > 14 then
+        tweenToCFrame(hrp, CFrame.new(targetPos + Vector3.new(0, 2, 0)), false)
+        return
+    end
+
+    cancelTween()
+    local t = os.clock()
+    local offset = Vector3.new(math.cos(t * 6) * 2.5, math.sin(t * 8) * 2, math.sin(t * 6) * 2.5)
+    hrp.CFrame = CFrame.new(targetPos + offset)
+    hrp.AssemblyLinearVelocity = Vector3.zero
+
+    if (t - LastPortalTouch) >= 0.3 then
+        LastPortalTouch = t
+        if portalPart and firetouchinterest then
+            pcall(function()
+                firetouchinterest(hrp, portalPart, 0)
+                task.wait(0.03)
+                firetouchinterest(hrp, portalPart, 1)
+            end)
+        end
+    end
+end
+
+local function moveToCFrame(hrp, targetCFrame, snapAtEnd)
+    local map = workspace:FindFirstChild("Map")
+
+    if hrp.Position.Y > 4000 then
+        local skyArea2 = map and map:FindFirstChild("SkyArea2")
+        local exitPart = skyArea2 and skyArea2:FindFirstChild("Exit")
+        useExitPortal(hrp, exitPart, Config.SkyArea2ExitPos)
+        return false
+    end
+
+    if hrp.Position.X > 50000 then
+        local tpSpawn = map and map:FindFirstChild("TeleportSpawn")
+        local exitPart = tpSpawn and tpSpawn:FindFirstChild("Exit")
+        useExitPortal(hrp, exitPart, Config.UnderwaterExitPos)
+        return false
+    end
+
+    return tweenToCFrame(hrp, targetCFrame, snapAtEnd)
+end
+
+local function getIceAdmiralSpawnPos()
+    local worldOrigin = workspace:FindFirstChild("_WorldOrigin")
+    local enemySpawns = worldOrigin and worldOrigin:FindFirstChild("EnemySpawns")
+    if enemySpawns then
+        for _, sp in ipairs(enemySpawns:GetChildren()) do
+            if sp:IsA("BasePart") and string.find(string.lower(sp.Name), "ice admiral", 1, true) then
+                return sp.Position
+            end
+        end
+    end
+    return Config.IceAdmiralFallback
+end
+
+local function getActiveIceAdmiral()
+    local enemies = workspace:FindFirstChild("Enemies")
+    if not enemies then return nil end
+
+    for _, mob in ipairs(enemies:GetChildren()) do
+        if mob.Name == "Ice Admiral" then
+            local hum = mob:FindFirstChildOfClass("Humanoid")
+            local hrp = mob:FindFirstChild("HumanoidRootPart")
+            if hum and hrp and hum.Health > 0 then
+                return mob
+            end
+        end
+    end
+
+    return nil
+end
+
+local function isIceAdmiralStoredAlive()
+    local stored = ReplicatedStorage:FindFirstChild("Ice Admiral")
+    if stored then
+        local hum = stored:FindFirstChildOfClass("Humanoid")
+        if not hum or hum.Health > 0 then
+            return true
+        end
+    end
+    return false
+end
+
+local noclipConn = RunService.Stepped:Connect(function()
+    if not _G.OmegaSea2_Missao3_Boss then return end
+    local char = LocalPlayer.Character
+    if char then
+        for _, p in ipairs(char:GetDescendants()) do
+            if p:IsA("BasePart") and p.CanCollide then
+                p.CanCollide = false
+            end
+        end
+    end
+end)
+
+-- Thread dedicada para o Fast Attack no Ice Admiral
+task.spawn(function()
+    while _G.OmegaSea2_Missao3_Boss do
+        local char = LocalPlayer.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        local boss = getActiveIceAdmiral()
+
+        if char and hrp and hum and hum.Health > 0 and boss and boss:FindFirstChild("HumanoidRootPart") then
+            local bossHrp = boss.HumanoidRootPart
+            if (hrp.Position - bossHrp.Position).Magnitude <= 28 then
+                local tool = equipCombatWeapon()
+                if tool then
+                    pcall(function()
+                        local cam = workspace.CurrentCamera
+                        local cx = cam and (cam.ViewportSize.X / 2) or 500
+                        local cy = cam and (cam.ViewportSize.Y / 2) or 300
+
+                        VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, true, game, 1)
+                        VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, false, game, 1)
+                        tool:Activate()
+
+                        if RegisterAttack and RegisterHit then
+                            RegisterAttack:FireServer(0)
+                            RegisterHit:FireServer(bossHrp, { { boss, bossHrp } })
+                        end
+                    end)
+                end
+            end
+        end
+
+        task.wait(Config.AttackDelay)
+    end
+end)
+
+-- Loop principal da Missao 3
+task.spawn(function()
+    local initialState = getQuestState()
+    if initialState then
+        if initialState.KilledIceAdmiral then
+            setStatus("SUCESSO! Ice Admiral ja derrotado. Avise para a Parte 4!", Color3.fromRGB(120, 255, 160))
+            _G.OmegaSea2_Missao3_Boss = false
+            noclipConn:Disconnect()
+            return
+        elseif initialState.UsedKey == false then
+            setStatus("Porta de Frozen ainda fechada! Rode a Missao 2 primeiro.", Color3.fromRGB(255, 100, 100))
+            _G.OmegaSea2_Missao3_Boss = false
+            noclipConn:Disconnect()
+            return
+        end
+    end
+
+    local sawAdmiralAlive = false
+    local lastStateCheck = 0
+
+    while _G.OmegaSea2_Missao3_Boss do
+        local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+        local hrp = char:WaitForChild("HumanoidRootPart")
+        local hum = char:WaitForChild("Humanoid")
+
+        if hum.Health <= 0 then
+            cancelTween()
+            task.wait(0.5)
+        else
+            setPhysics(char, true)
+            enableAura()
+
+            -- Checa periodicamente o status oficial no servidor
+            if (os.clock() - lastStateCheck) >= 2 then
+                lastStateCheck = os.clock()
+                local prog = getQuestState()
+                if prog and prog.KilledIceAdmiral then
+                    cancelTween()
+                    setStatus("SUCESSO! Ice Admiral derrotado. Avise para a Parte 4!", Color3.fromRGB(120, 255, 160))
+                    break
+                end
+            end
+
+            local boss = getActiveIceAdmiral()
+            local chamberPos = getIceAdmiralSpawnPos() + Vector3.new(0, 14, 0)
+
+            if boss and boss:FindFirstChild("HumanoidRootPart") and boss:FindFirstChildOfClass("Humanoid") then
+                sawAdmiralAlive = true
+                local bossHrp = boss.HumanoidRootPart
+                local bossHum = boss:FindFirstChildOfClass("Humanoid")
+                local hpPct = math.max(0, math.floor((bossHum.Health / math.max(bossHum.MaxHealth, 1)) * 100))
+
+                setStatus("Atacando Ice Admiral (" .. hpPct .. "% HP)...", Color3.fromRGB(120, 200, 255))
+
+                local farmPos = bossHrp.Position + Vector3.new(0, Config.DistanceFarm, 0)
+                local farmCFrame = CFrame.new(farmPos) * CFrame.Angles(math.rad(-90), 0, 0)
+                moveToCFrame(hrp, farmCFrame, true)
+            else
+                local distChamber = (hrp.Position - chamberPos).Magnitude
+                if distChamber > 10 then
+                    setStatus("Indo ate a caverna de Frozen Village...", Color3.fromRGB(255, 215, 90))
+                    moveToCFrame(hrp, CFrame.new(chamberPos), false)
+
+                    if distChamber <= 120 then
+                        pcall(function()
+                            LocalPlayer:RequestStreamAroundAsync(chamberPos)
+                        end)
+                    end
+                else
+                    cancelTween()
+                    hrp.CFrame = CFrame.new(chamberPos)
+                    hrp.AssemblyLinearVelocity = Vector3.zero
+
+                    if sawAdmiralAlive and not isIceAdmiralStoredAlive() then
+                        task.wait(0.6)
+                        local prog = getQuestState()
+                        if not prog or prog.KilledIceAdmiral then
+                            setStatus("SUCESSO! Ice Admiral derrotado. Avise para a Parte 4!", Color3.fromRGB(120, 255, 160))
+                            break
+                        end
+                    end
+
+                    setStatus("Na caverna. Aguardando respawn do Ice Admiral...", Color3.fromRGB(255, 215, 90))
+                end
+            end
+
+            RunService.Heartbeat:Wait()
+        end
+    end
+    _G.OmegaSea2_Missao3_Boss = false
+    if noclipConn then
+        noclipConn:Disconnect()
+    end
+    cancelTween()
+    setPhysics(LocalPlayer.Character, false)
+end)
