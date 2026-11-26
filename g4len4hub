@@ -12,9 +12,12 @@ local CommF = Remotes and Remotes:FindFirstChild("CommF_")
 
 local Config = {
     IceAdmiralPos = Vector3.new(1347.70, 37.30, -1385.00),
-    TweenSpeed = 230,
-    AttackOffset = Vector3.new(0, 4.0, 6.0),
-    SafeOffset = Vector3.new(0, 45, 0),
+    TweenSpeed = 240,
+    AttackHeight = 11.5,
+    AttackRadius = 7.5,
+    SafeHeight = 55.0,
+    RetreatAtRatio = 0.45,
+    ResumeAtRatio = 0.75,
     SkillCooldown = 0.85
 }
 
@@ -23,6 +26,7 @@ local LastTweenTarget = nil
 local LastSkillClock = 0
 local SkillIdx = 1
 local TouchCounter = 500
+local IsRetreating = false
 local AutoSkills = {
     { key = Enum.KeyCode.Z, label = "Z", hold = 0.20 },
     { key = Enum.KeyCode.X, label = "X", hold = 0.10 },
@@ -83,7 +87,6 @@ local function equipMelee()
     return eq
 end
 
--- Dispara a skill automaticamente via KeyCode + toque na area de acao
 local function autoCastSkill(skillInfo)
     pcall(function()
         VirtualInputManager:SendKeyEvent(true, skillInfo.key, false, game)
@@ -197,6 +200,7 @@ task.spawn(function()
         local hum = char:WaitForChild("Humanoid")
 
         if hum.Health <= 0 then
+            IsRetreating = false
             cancelTween()
             task.wait(0.8)
         else
@@ -208,16 +212,33 @@ task.spawn(function()
                 local bHrp = boss.HumanoidRootPart
                 local bHum = boss:FindFirstChildOfClass("Humanoid")
 
-                local lowHp = hum.Health < (hum.MaxHealth * 0.40)
-                if lowHp then
-                    local safePos = bHrp.Position + Config.SafeOffset
+                local hpRatio = hum.Health / math.max(hum.MaxHealth, 1)
+                if hpRatio <= Config.RetreatAtRatio then
+                    IsRetreating = true
+                elseif hpRatio >= Config.ResumeAtRatio then
+                    IsRetreating = false
+                end
+
+                if IsRetreating then
+                    local safePos = bHrp.Position + Vector3.new(0, Config.SafeHeight, 0)
                     moveToPos(hrp, safePos)
-                    setStatus(string.format("Recuando (%d/%d)...", math.floor(hum.Health), math.floor(hum.MaxHealth)), Color3.fromRGB(255, 210, 90))
+                    setStatus(
+                        string.format("Escudo alto (%d/%d) | Boss: %d/%d",
+                            math.floor(hum.Health), math.floor(hum.MaxHealth),
+                            math.floor(bHum.Health), math.floor(bHum.MaxHealth)),
+                        Color3.fromRGB(255, 210, 90)
+                    )
                 else
-                    local targetPos = bHrp.Position + Config.AttackOffset
+                    local angle = os.clock() * 1.4
+                    local orbitOffset = Vector3.new(
+                        math.cos(angle) * Config.AttackRadius,
+                        Config.AttackHeight,
+                        math.sin(angle) * Config.AttackRadius
+                    )
+                    local targetPos = bHrp.Position + orbitOffset
                     local near = moveToPos(hrp, targetPos)
 
-                    if near or (hrp.Position - bHrp.Position).Magnitude <= 14 then
+                    if near or (hrp.Position - bHrp.Position).Magnitude <= 18 then
                         hrp.CFrame = CFrame.lookAt(hrp.Position, Vector3.new(bHrp.Position.X, hrp.Position.Y, bHrp.Position.Z))
                         local tool = equipMelee()
                         if tool then
@@ -233,7 +254,7 @@ task.spawn(function()
                         end
 
                         setStatus(
-                            string.format("Boss: %d/%d | Vida: %d/%d | Skill Auto: [%s]",
+                            string.format("Boss: %d/%d | Vida: %d/%d | Skill: [%s]",
                                 math.floor(bHum.Health), math.floor(bHum.MaxHealth),
                                 math.floor(hum.Health), math.floor(hum.MaxHealth),
                                 activeSkillLabel),
@@ -251,7 +272,7 @@ task.spawn(function()
                     end
                 end
 
-                local waitPos = Config.IceAdmiralPos + Vector3.new(0, 12, 0)
+                local waitPos = Config.IceAdmiralPos + Vector3.new(0, 14, 0)
                 if not moveToPos(hrp, waitPos) then
                     setStatus("Indo ate o Almirante de Gelo...", Color3.fromRGB(255, 215, 90))
                 else
