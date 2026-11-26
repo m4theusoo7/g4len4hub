@@ -12,20 +12,17 @@ local CommF = Remotes and Remotes:FindFirstChild("CommF_")
 
 local Config = {
     IceAdmiralFallback = Vector3.new(1347.70, 37.30, -1385.00),
-    SkyArea2ExitPos = Vector3.new(-6022.24, 5470.50, 2217.33),
-    UnderwaterExitPos = Vector3.new(61170.05, -2.00, 1952.83),
     TweenSpeed = 225,
-    HeightOffset = 4.0
+    SafeHoverHeight = 7.5 -- Alto o suficiente para nao tomar dano e perto para skills acertarem
 }
 
 local CurrentTween = nil
 local LastTweenTarget = nil
-local LastPortalTouch = 0
 local LastSkillTime = 0
 local SkillIndex = 1
-local SkillKeys = { Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C }
+local SkillKeys = { Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C, Enum.KeyCode.V }
 
--- Barra de diagnostico na tela
+-- Barra de status no topo
 local parentGui = (gethui and gethui()) or game:GetService("CoreGui")
 if parentGui:FindFirstChild("OmegaSea2Missao3UI") then
     parentGui.OmegaSea2Missao3UI:Destroy()
@@ -37,7 +34,7 @@ ScreenGui.ResetOnSpawn = false
 ScreenGui.Parent = parentGui
 
 local StatusBox = Instance.new("TextLabel")
-StatusBox.Size = UDim2.new(0, 370, 0, 58)
+StatusBox.Size = UDim2.new(0, 370, 0, 56)
 StatusBox.Position = UDim2.new(0.5, -185, 0, 12)
 StatusBox.BackgroundColor3 = Color3.fromRGB(18, 20, 26)
 StatusBox.TextColor3 = Color3.fromRGB(120, 255, 160)
@@ -45,7 +42,7 @@ StatusBox.Font = Enum.Font.GothamBold
 StatusBox.TextSize = 11
 StatusBox.TextWrapped = true
 StatusBox.BorderSizePixel = 0
-StatusBox.Text = "[Diagnostico Boss] Verificando requisitos..."
+StatusBox.Text = "[Missao 3] Iniciando..."
 StatusBox.Parent = ScreenGui
 
 local function setStatus(msg, color)
@@ -55,83 +52,38 @@ local function setStatus(msg, color)
     end
 end
 
-local function getQuestState()
-    if not CommF then return nil end
-    local ok, prog = pcall(function()
-        return CommF:InvokeServer("DressrosaQuestProgress")
-    end)
-    if ok and type(prog) == "table" then
-        return prog
-    end
-    return nil
-end
-
--- Tenta ativar Aura; se o jogador nao tiver comprado, retorna false
-local function ensureBusoAura()
+local function checkAndEnableAura()
     local char = LocalPlayer.Character
     if not char then return false end
     if char:FindFirstChild("HasBuso") then
         return true
     end
-
     if CommF then
         pcall(function()
             CommF:InvokeServer("Buso")
         end)
         task.wait(0.25)
     end
-
     return char:FindFirstChild("HasBuso") ~= nil
 end
 
--- Descobre onde o jogador tem mais pontos (Melee, Sword ou Blox Fruit)
-local function getBestWeaponType()
-    local data = LocalPlayer:FindFirstChild("Data")
-    local stats = data and data:FindFirstChild("Stats")
-    if not stats then return "Melee" end
-
-    local bestType = "Melee"
-    local bestVal = -1
-
-    local map = {
-        { stat = "Melee", tip = "Melee" },
-        { stat = "Sword", tip = "Sword" },
-        { stat = "Demon Fruit", tip = "Blox Fruit" }
-    }
-
-    for _, entry in ipairs(map) do
-        local folder = stats:FindFirstChild(entry.stat)
-        local lvl = folder and folder:FindFirstChild("Level") and folder.Level.Value or 0
-        if lvl > bestVal then
-            bestVal = lvl
-            bestType = entry.tip
-        end
-    end
-
-    return bestType
-end
-
-local function equipBestTool(preferredTip)
+local function getToolsByCategory()
     local char = LocalPlayer.Character
-    local backpack = LocalPlayer:FindFirstChild("Backpack")
-    local hum = char and char:FindFirstChildOfClass("Humanoid")
-    if not char or not backpack or not hum then return nil end
-
-    local order = { preferredTip, "Melee", "Blox Fruit", "Sword" }
-    for _, tip in ipairs(order) do
-        local current = char:FindFirstChildOfClass("Tool")
-        if current and (current.ToolTip == tip or (tip == "Melee" and current.Name == "Combat")) then
-            return current
-        end
-        for _, tool in ipairs(backpack:GetChildren()) do
-            if tool:IsA("Tool") and (tool.ToolTip == tip or (tip == "Melee" and tool.Name == "Combat")) then
-                hum:EquipTool(tool)
-                return tool
+    local bp = LocalPlayer:FindFirstChild("Backpack")
+    local list = {}
+    for _, container in ipairs({ char, bp }) do
+        if container then
+            for _, item in ipairs(container:GetChildren()) do
+                if item:IsA("Tool") then
+                    list[item.ToolTip] = item
+                    if item.Name == "Combat" then
+                        list["Melee"] = item
+                    end
+                end
             end
         end
     end
-
-    return char:FindFirstChildOfClass("Tool")
+    return list
 end
 
 local function cancelTween()
@@ -146,10 +98,7 @@ local function setPhysics(character, enabled)
     if not character then return end
     local hrp = character:FindFirstChild("HumanoidRootPart")
     local hum = character:FindFirstChildOfClass("Humanoid")
-
-    if hum and enabled then
-        hum.Sit = false
-    end
+    if hum and enabled then hum.Sit = false end
 
     if hrp then
         local bv = hrp:FindFirstChild("OmegaBossBV")
@@ -169,9 +118,6 @@ local function setPhysics(character, enabled)
     for _, part in ipairs(character:GetDescendants()) do
         if part:IsA("BasePart") then
             part.CanCollide = not enabled
-            if not enabled then
-                part.CanTouch = true
-            end
         end
     end
 end
@@ -180,88 +126,24 @@ local function tweenToCFrame(hrp, targetCFrame, snapAtEnd)
     local dist = (hrp.Position - targetCFrame.Position).Magnitude
     if dist <= 4 then
         cancelTween()
-        if snapAtEnd then
-            hrp.CFrame = targetCFrame
-        end
+        if snapAtEnd then hrp.CFrame = targetCFrame end
         return true
     end
-
     if CurrentTween and CurrentTween.PlaybackState == Enum.PlaybackState.Playing and LastTweenTarget and (LastTweenTarget - targetCFrame.Position).Magnitude <= 4 then
         return false
     end
-
     cancelTween()
     LastTweenTarget = targetCFrame.Position
-    local duration = math.max(dist / Config.TweenSpeed, 0.06)
-    CurrentTween = TweenService:Create(hrp, TweenInfo.new(duration, Enum.EasingStyle.Linear), {
+    CurrentTween = TweenService:Create(hrp, TweenInfo.new(math.max(dist / Config.TweenSpeed, 0.06), Enum.EasingStyle.Linear), {
         CFrame = targetCFrame
     })
     CurrentTween:Play()
     return false
 end
 
-local function useExitPortal(hrp, portalPart, fallbackPos)
-    local targetPos = (portalPart and portalPart.Position) or fallbackPos
-    if (hrp.Position - targetPos).Magnitude > 14 then
-        tweenToCFrame(hrp, CFrame.new(targetPos + Vector3.new(0, 2, 0)), false)
-        return
-    end
-
-    cancelTween()
-    local t = os.clock()
-    local offset = Vector3.new(math.cos(t * 6) * 2.5, math.sin(t * 8) * 2, math.sin(t * 6) * 2.5)
-    hrp.CFrame = CFrame.new(targetPos + offset)
-    hrp.AssemblyLinearVelocity = Vector3.zero
-
-    if (t - LastPortalTouch) >= 0.3 then
-        LastPortalTouch = t
-        if portalPart and firetouchinterest then
-            pcall(function()
-                firetouchinterest(hrp, portalPart, 0)
-                task.wait(0.03)
-                firetouchinterest(hrp, portalPart, 1)
-            end)
-        end
-    end
-end
-
-local function moveToCFrame(hrp, targetCFrame, snapAtEnd)
-    local map = workspace:FindFirstChild("Map")
-
-    if hrp.Position.Y > 4000 then
-        local skyArea2 = map and map:FindFirstChild("SkyArea2")
-        local exitPart = skyArea2 and skyArea2:FindFirstChild("Exit")
-        useExitPortal(hrp, exitPart, Config.SkyArea2ExitPos)
-        return false
-    end
-
-    if hrp.Position.X > 50000 then
-        local tpSpawn = map and map:FindFirstChild("TeleportSpawn")
-        local exitPart = tpSpawn and tpSpawn:FindFirstChild("Exit")
-        useExitPortal(hrp, exitPart, Config.UnderwaterExitPos)
-        return false
-    end
-
-    return tweenToCFrame(hrp, targetCFrame, snapAtEnd)
-end
-
-local function getIceAdmiralSpawnPos()
-    local worldOrigin = workspace:FindFirstChild("_WorldOrigin")
-    local enemySpawns = worldOrigin and worldOrigin:FindFirstChild("EnemySpawns")
-    if enemySpawns then
-        for _, sp in ipairs(enemySpawns:GetChildren()) do
-            if sp:IsA("BasePart") and string.find(string.lower(sp.Name), "ice admiral", 1, true) then
-                return sp.Position
-            end
-        end
-    end
-    return Config.IceAdmiralFallback
-end
-
 local function getActiveIceAdmiral()
     local enemies = workspace:FindFirstChild("Enemies")
     if not enemies then return nil end
-
     for _, mob in ipairs(enemies:GetChildren()) do
         if string.find(string.lower(mob.Name), "ice admiral", 1, true) then
             local hum = mob:FindFirstChildOfClass("Humanoid")
@@ -271,7 +153,6 @@ local function getActiveIceAdmiral()
             end
         end
     end
-
     return nil
 end
 
@@ -288,33 +169,18 @@ local noclipConn = RunService.Stepped:Connect(function()
 end)
 
 task.spawn(function()
-    local prog = getQuestState()
-    if prog then
-        if prog.KilledIceAdmiral then
-            setStatus("SUCESSO! Ice Admiral ja esta derrotado. Podemos ir para a Parte 4!", Color3.fromRGB(120, 255, 160))
-            _G.OmegaSea2_Missao3_Boss = false
-            noclipConn:Disconnect()
-            return
-        elseif prog.UsedKey == false then
-            setStatus("ERRO: O servidor diz que a porta NAO foi aberta com a Key! Refaca a Missao 2.", Color3.fromRGB(255, 95, 95))
-            _G.OmegaSea2_Missao3_Boss = false
-            noclipConn:Disconnect()
-            return
-        end
+    local hasAura = checkAndEnableAura()
+    local tools = getToolsByCategory()
+
+    -- Se nao tiver Haki (Aura), prioriza Fruta (que acerta Logia) ou avisa para comprar Aura
+    if not hasAura and not tools["Blox Fruit"] then
+        setStatus("VOCE NAO TEM HAKI (AURA)! Compre Aura por $25.000 no Ability Teacher da caverna de gelo para acertar o Ice Admiral.", Color3.fromRGB(255, 110, 90))
+        _G.OmegaSea2_Missao3_Boss = false
+        noclipConn:Disconnect()
+        return
     end
 
-    local hasAura = ensureBusoAura()
-    local bestTip = getBestWeaponType()
-
-    -- Se nao tiver Haki do Armamento (Aura) e nao estiver usando Fruta, avisa imediatamente
-    if not hasAura and bestTip ~= "Blox Fruit" then
-        setStatus("AVISO: Voce nao tem Haki (Aura)! O Ice Admiral e Logia (Gelo) e nao toma dano fisico sem Aura.", Color3.fromRGB(255, 190, 70))
-        task.wait(3)
-    end
-
-    local startHp = nil
-    local combatStartTime = nil
-    local warnedNoDamage = false
+    local preferredTool = (not hasAura and tools["Blox Fruit"]) or tools["Melee"] or tools["Sword"] or tools["Blox Fruit"]
 
     while _G.OmegaSea2_Missao3_Boss do
         local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
@@ -327,53 +193,37 @@ task.spawn(function()
         else
             setPhysics(char, true)
             if hasAura and not char:FindFirstChild("HasBuso") then
-                ensureBusoAura()
+                checkAndEnableAura()
             end
 
             local boss = getActiveIceAdmiral()
-            local chamberPos = getIceAdmiralSpawnPos() + Vector3.new(0, 12, 0)
-
             if boss and boss:FindFirstChild("HumanoidRootPart") and boss:FindFirstChildOfClass("Humanoid") then
                 local bossHrp = boss.HumanoidRootPart
                 local bossHum = boss:FindFirstChildOfClass("Humanoid")
 
-                if not startHp then
-                    startHp = bossHum.Health
-                end
-
-                local farmPos = bossHrp.Position + Vector3.new(0, Config.HeightOffset, 2.5)
-                local farmCFrame = CFrame.lookAt(farmPos, bossHrp.Position)
-                local arrived = moveToCFrame(hrp, farmCFrame, true)
+                -- Posicao segura acima do boss para evitar os golpes dele
+                local hoverPos = bossHrp.Position + Vector3.new(0, Config.SafeHoverHeight, 0)
+                local arrived = tweenToCFrame(hrp, CFrame.lookAt(hoverPos, bossHrp.Position), true)
 
                 if arrived or (hrp.Position - bossHrp.Position).Magnitude <= 14 then
-                    if not combatStartTime then
-                        combatStartTime = os.clock()
+                    if preferredTool and preferredTool.Parent ~= char then
+                        hum:EquipTool(preferredTool)
                     end
 
-                    local tool = equipBestTool(bestTip)
                     local cam = workspace.CurrentCamera
                     if cam then
                         cam.CFrame = CFrame.new(cam.CFrame.Position, bossHrp.Position)
                     end
 
-                    -- Ataque real da ferramenta (sem remotes invalidos que causam anti-cheat)
-                    if tool then
+                    -- Ataque basico nativo da Tool (se tiver Aura)
+                    if hasAura and preferredTool then
                         pcall(function()
-                            tool:Activate()
+                            preferredTool:Activate()
                         end)
                     end
 
-                    -- Clique/Toque real no centro da tela
-                    pcall(function()
-                        local cx = cam and (cam.ViewportSize.X / 2) or 500
-                        local cy = cam and (cam.ViewportSize.Y / 2) or 300
-                        VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, true, game, 1)
-                        task.wait(0.02)
-                        VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, false, game, 1)
-                    end)
-
-                    -- Usa skills Z, X, C (passam por Logia mesmo sem Aura)
-                    if (os.clock() - LastSkillTime) >= 1.1 then
+                    -- Dispara skills Z, X, C, V
+                    if (os.clock() - LastSkillTime) >= 0.9 then
                         LastSkillTime = os.clock()
                         local key = SkillKeys[SkillIndex]
                         SkillIndex = (SkillIndex % #SkillKeys) + 1
@@ -384,41 +234,33 @@ task.spawn(function()
                         end)
                     end
 
-                    local hpNow = math.floor(bossHum.Health)
-                    local hpMax = math.floor(bossHum.MaxHealth)
-
-                    -- Verifica apos 6 segundos se o HP realmente desceu
-                    if not warnedNoDamage and (os.clock() - combatStartTime) >= 6 and bossHum.Health >= startHp then
-                        warnedNoDamage = true
-                        setStatus(
-                            string.format("HP travado em %d/%d | Aura:%s | Arma:%s | Porta:%s",
-                                hpNow, hpMax, tostring(hasAura), tool and tool.Name or "Nenhuma", tostring(prog and prog.UsedKey)),
-                            Color3.fromRGB(255, 110, 90)
-                        )
-                    elseif not warnedNoDamage then
-                        setStatus(
-                            string.format("Atacando Ice Admiral | HP: %d/%d | Aura: %s", hpNow, hpMax, hasAura and "ON" or "OFF"),
-                            Color3.fromRGB(120, 200, 255)
-                        )
-                    end
-                else
-                    setStatus("Aproximando do Ice Admiral...", Color3.fromRGB(255, 215, 90))
+                    setStatus(
+                        string.format("Atacando Ice Admiral | HP: %d/%d | Aura: %s | Item: %s",
+                            math.floor(bossHum.Health), math.floor(bossHum.MaxHealth),
+                            hasAura and "ATIVA" or "SEM AURA (Usando Fruta)",
+                            preferredTool and preferredTool.Name or "Nenhum"),
+                        Color3.fromRGB(120, 200, 255)
+                    )
                 end
             else
-                local currentProg = getQuestState()
-                if currentProg and currentProg.KilledIceAdmiral then
-                    cancelTween()
-                    setStatus("SUCESSO! Ice Admiral derrotado. Avise para a Parte 4!", Color3.fromRGB(120, 255, 160))
-                    break
+                if CommF then
+                    local ok, prog = pcall(function()
+                        return CommF:InvokeServer("DressrosaQuestProgress")
+                    end)
+                    if ok and type(prog) == "table" and prog.KilledIceAdmiral then
+                        cancelTween()
+                        setStatus("SUCESSO! Ice Admiral derrotado. Me avise para a Parte 4!", Color3.fromRGB(120, 255, 160))
+                        break
+                    end
                 end
 
-                local distChamber = (hrp.Position - chamberPos).Magnitude
-                if distChamber > 10 then
+                local waitPos = Config.IceAdmiralFallback + Vector3.new(0, 12, 0)
+                if (hrp.Position - waitPos).Magnitude > 10 then
                     setStatus("Indo ate a caverna de Frozen Village...", Color3.fromRGB(255, 215, 90))
-                    moveToCFrame(hrp, CFrame.new(chamberPos), false)
+                    tweenToCFrame(hrp, CFrame.new(waitPos), false)
                 else
                     cancelTween()
-                    hrp.CFrame = CFrame.new(chamberPos)
+                    hrp.CFrame = CFrame.new(waitPos)
                     hrp.AssemblyLinearVelocity = Vector3.zero
                     setStatus("Na caverna. Aguardando respawn do Ice Admiral...", Color3.fromRGB(255, 215, 90))
                 end
@@ -429,9 +271,7 @@ task.spawn(function()
     end
 
     _G.OmegaSea2_Missao3_Boss = false
-    if noclipConn then
-        noclipConn:Disconnect()
-    end
+    if noclipConn then noclipConn:Disconnect() end
     cancelTween()
     setPhysics(LocalPlayer.Character, false)
 end)
