@@ -13,14 +13,15 @@ local CommF = Remotes and Remotes:FindFirstChild("CommF_")
 local Config = {
     IceAdmiralPos = Vector3.new(1347.70, 37.30, -1385.00),
     TweenSpeed = 225,
-    HoverHeight = 6.5
+    HoverHeight = 7.5,
+    RetreatHeight = 26.0
 }
 
 local CurrentTween = nil
 local LastTweenTarget = nil
-local LastSkillTime = 0
+local LastSkillTap = 0
 local SkillIndex = 1
-local SkillKeys = { Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C }
+local SkillLetters = { "Z", "X", "C" }
 
 local parentGui = (gethui and gethui()) or game:GetService("CoreGui")
 if parentGui:FindFirstChild("OmegaSea2Missao3UI") then
@@ -55,28 +56,53 @@ local function ensureAura()
     if char:FindFirstChild("HasBuso") then return true end
     if CommF then
         pcall(function() CommF:InvokeServer("Buso") end)
-        task.wait(0.2)
     end
     return char:FindFirstChild("HasBuso") ~= nil
 end
 
-local function equipMelee()
+local function equipFightingStyle()
     local char = LocalPlayer.Character
     local bp = LocalPlayer:FindFirstChild("Backpack")
     local hum = char and char:FindFirstChildOfClass("Humanoid")
     if not char or not bp or not hum then return nil end
 
     local eq = char:FindFirstChildOfClass("Tool")
-    if eq and (eq.ToolTip == "Melee" or eq.ToolTip == "Sword" or eq.Name == "Combat") then
+    if eq and (eq.ToolTip == "Melee" or string.find(string.lower(eq.Name), "kung fu", 1, true) or eq.Name == "Combat") then
         return eq
     end
     for _, tool in ipairs(bp:GetChildren()) do
-        if tool:IsA("Tool") and (tool.ToolTip == "Melee" or tool.ToolTip == "Sword" or tool.Name == "Combat") then
+        if tool:IsA("Tool") and (tool.ToolTip == "Melee" or string.find(string.lower(tool.Name), "kung fu", 1, true) or tool.Name == "Combat") then
             hum:EquipTool(tool)
             return tool
         end
     end
-    return nil
+    return eq
+end
+
+-- Tenta clicar no botao de skill na HUD mobile se existir
+local function tapMobileSkill(letter)
+    local pg = LocalPlayer:FindFirstChild("PlayerGui")
+    if not pg then return false end
+    for _, guiObj in ipairs(pg:GetDescendants()) do
+        if (guiObj:IsA("TextButton") or guiObj:IsA("ImageButton")) and guiObj.Visible then
+            local txt = guiObj:IsA("TextButton") and guiObj.Text or ""
+            if string.find(txt, "[" .. letter .. "]", 1, true) or string.find(string.upper(guiObj.Name), letter, 1, true) then
+                local pos = guiObj.AbsolutePosition
+                local size = guiObj.AbsoluteSize
+                if size.X > 0 and size.Y > 0 then
+                    local x = pos.X + size.X * 0.5
+                    local y = pos.Y + size.Y * 0.5
+                    pcall(function()
+                        VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 1)
+                        task.wait(0.03)
+                        VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 1)
+                    end)
+                    return true
+                end
+            end
+        end
+    end
+    return false
 end
 
 local function cancelTween()
@@ -138,7 +164,7 @@ local function getBoss()
     local enemies = workspace:FindFirstChild("Enemies")
     if not enemies then return nil end
     for _, mob in ipairs(enemies:GetChildren()) do
-        if string.find(string.lower(mob.Name), "ice admiral", 1, true) then
+        if string.find(string.lower(mob.Name), "ice admiral", 1, true) or string.find(string.lower(mob.Name), "almirante de gelo", 1, true) then
             local hum = mob:FindFirstChildOfClass("Humanoid")
             local hrp = mob:FindFirstChild("HumanoidRootPart")
             if hum and hrp and hum.Health > 0 then
@@ -169,76 +195,88 @@ task.spawn(function()
 
         if hum.Health <= 0 then
             cancelTween()
-            task.wait(0.5)
+            task.wait(0.8)
         else
             setPhysics(char, true)
-            local hasAura = ensureAura()
+            ensureAura()
 
-            if not hasAura then
-                setStatus("COMPRE AURA ($25.000) no Ability Teacher da caverna antes de atacar!", Color3.fromRGB(255, 110, 90))
-                task.wait(1)
-            else
-                local boss = getBoss()
-                if boss and boss:FindFirstChild("HumanoidRootPart") and boss:FindFirstChildOfClass("Humanoid") then
-                    local bHrp = boss.HumanoidRootPart
-                    local bHum = boss:FindFirstChildOfClass("Humanoid")
-                    local hoverPos = bHrp.Position + Vector3.new(0, Config.HoverHeight, 0)
-                    local arrived = tweenToCFrame(hrp, CFrame.lookAt(hoverPos, bHrp.Position), true)
+            local boss = getBoss()
+            if boss and boss:FindFirstChild("HumanoidRootPart") and boss:FindFirstChildOfClass("Humanoid") then
+                local bHrp = boss.HumanoidRootPart
+                local bHum = boss:FindFirstChildOfClass("Humanoid")
 
-                    if arrived or (hrp.Position - bHrp.Position).Magnitude <= 14 then
-                        local tool = equipMelee()
-                        local cam = workspace.CurrentCamera
-                        if cam then
-                            cam.CFrame = CFrame.new(cam.CFrame.Position, bHrp.Position)
-                        end
+                -- Recua para cima se a vida do jogador estiver baixa
+                local lowHp = hum.Health < (hum.MaxHealth * 0.35)
+                local height = lowHp and Config.RetreatHeight or Config.HoverHeight
+                local hoverPos = bHrp.Position + Vector3.new(0, height, 0)
+                local arrived = tweenToCFrame(hrp, CFrame.lookAt(hoverPos, bHrp.Position), not lowHp)
 
-                        if tool then
-                            pcall(function() tool:Activate() end)
-                        end
+                if not lowHp and (arrived or (hrp.Position - bHrp.Position).Magnitude <= 14) then
+                    local tool = equipFightingStyle()
+                    local cam = workspace.CurrentCamera
+                    if cam then
+                        cam.CFrame = CFrame.new(cam.CFrame.Position, bHrp.Position)
+                    end
 
-                        pcall(function()
-                            local cx = cam and (cam.ViewportSize.X / 2) or 500
-                            local cy = cam and (cam.ViewportSize.Y / 2) or 300
-                            VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, true, game, 1)
-                            task.wait(0.02)
-                            VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, false, game, 1)
-                        end)
+                    if tool then
+                        pcall(function() tool:Activate() end)
+                    end
 
-                        if (os.clock() - LastSkillTime) >= 1.0 then
-                            LastSkillTime = os.clock()
-                            local k = SkillKeys[SkillIndex]
-                            SkillIndex = (SkillIndex % #SkillKeys) + 1
+                    pcall(function()
+                        local cx = cam and (cam.ViewportSize.X * 0.75) or 600
+                        local cy = cam and (cam.ViewportSize.Y * 0.65) or 400
+                        VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, true, game, 1)
+                        task.wait(0.02)
+                        VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, false, game, 1)
+                    end)
+
+                    if (os.clock() - LastSkillTap) >= 1.1 then
+                        LastSkillTap = os.clock()
+                        local letter = SkillLetters[SkillIndex]
+                        SkillIndex = (SkillIndex % #SkillLetters) + 1
+                        if not tapMobileSkill(letter) then
                             pcall(function()
-                                VirtualInputManager:SendKeyEvent(true, k, false, game)
+                                VirtualInputManager:SendKeyEvent(true, Enum.KeyCode[letter], false, game)
                                 task.wait(0.05)
-                                VirtualInputManager:SendKeyEvent(false, k, false, game)
+                                VirtualInputManager:SendKeyEvent(false, Enum.KeyCode[letter], false, game)
                             end)
                         end
-
-                        setStatus(string.format("Atacando Ice Admiral | HP: %d/%d", math.floor(bHum.Health), math.floor(bHum.MaxHealth)), Color3.fromRGB(120, 200, 255))
-                    end
-                else
-                    if CommF then
-                        local ok, prog = pcall(function() return CommF:InvokeServer("DressrosaQuestProgress") end)
-                        if ok and type(prog) == "table" and prog.KilledIceAdmiral then
-                            cancelTween()
-                            setStatus("SUCESSO! Ice Admiral derrotado! Me avise para a Parte 4!", Color3.fromRGB(120, 255, 160))
-                            break
-                        end
                     end
 
-                    local waitPos = Config.IceAdmiralPos + Vector3.new(0, 12, 0)
-                    if (hrp.Position - waitPos).Magnitude > 10 then
-                        setStatus("Indo ate a camara do Ice Admiral...", Color3.fromRGB(255, 215, 90))
-                        tweenToCFrame(hrp, CFrame.new(waitPos), false)
-                    else
+                    setStatus(
+                        string.format("Boss HP: %d/%d | Sua Vida: %d/%d",
+                            math.floor(bHum.Health), math.floor(bHum.MaxHealth),
+                            math.floor(hum.Health), math.floor(hum.MaxHealth)),
+                        Color3.fromRGB(120, 200, 255)
+                    )
+                elseif lowHp then
+                    setStatus(
+                        string.format("Recuando para recuperar vida (%d/%d)...", math.floor(hum.Health), math.floor(hum.MaxHealth)),
+                        Color3.fromRGB(255, 210, 90)
+                    )
+                end
+            else
+                if CommF then
+                    local ok, prog = pcall(function() return CommF:InvokeServer("DressrosaQuestProgress") end)
+                    if ok and type(prog) == "table" and prog.KilledIceAdmiral then
                         cancelTween()
-                        hrp.CFrame = CFrame.new(waitPos)
-                        hrp.AssemblyLinearVelocity = Vector3.zero
-                        setStatus("Aguardando respawn do Ice Admiral...", Color3.fromRGB(255, 215, 90))
+                        setStatus("SUCESSO! Almirante de Gelo derrotado! Avise para a Parte 4!", Color3.fromRGB(120, 255, 160))
+                        break
                     end
                 end
+
+                local waitPos = Config.IceAdmiralPos + Vector3.new(0, 12, 0)
+                if (hrp.Position - waitPos).Magnitude > 10 then
+                    setStatus("Indo ate a camara do Almirante de Gelo...", Color3.fromRGB(255, 215, 90))
+                    tweenToCFrame(hrp, CFrame.new(waitPos), false)
+                else
+                    cancelTween()
+                    hrp.CFrame = CFrame.new(waitPos)
+                    hrp.AssemblyLinearVelocity = Vector3.zero
+                    setStatus("Aguardando respawn do Almirante de Gelo...", Color3.fromRGB(255, 215, 90))
+                end
             end
+
             RunService.Heartbeat:Wait()
         end
     end
