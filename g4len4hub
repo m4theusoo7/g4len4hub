@@ -1,7 +1,6 @@
-_G.OmegaSea2_Missao3_Boss = true
+_G.OmegaSea2_Missao3_SafeDist = true
 
 local Players = game:GetService("Players")
-local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local VirtualInputManager = game:GetService("VirtualInputManager")
@@ -12,40 +11,38 @@ local CommF = Remotes and Remotes:FindFirstChild("CommF_")
 
 local Config = {
     IceAdmiralPos = Vector3.new(1347.70, 37.30, -1385.00),
-    TweenSpeed = 240,
-    AttackOffset = Vector3.new(0, 4.5, 5.5),
-    SafeHeight = 55.0,
-    RetreatAtRatio = 0.40,
-    ResumeAtRatio = 0.75,
-    SkillInterval = 1.15
+    MoveSpeed = 260,
+    SafeDistance = 18.0,
+    SafeHeight = 6.0,
+    RetreatAtRatio = 0.30,
+    ResumeAtRatio = 0.65,
+    SkillCooldown = 1.15
 }
 
-local ActiveTween = nil
-local TweenGoalPos = nil
 local LastSkillClock = 0
-local LastAttackClock = 0
+local LastHitClock = 0
 local SkillIdx = 1
-local TouchId = 900
+local TouchCounter = 2000
 local IsRetreating = false
 
 local Skills = {
     { key = Enum.KeyCode.Z, label = "Z", hold = 0.22 },
-    { key = Enum.KeyCode.X, label = "X", hold = 0.10 },
-    { key = Enum.KeyCode.C, label = "C", hold = 0.10 }
+    { key = Enum.KeyCode.X, label = "X", hold = 0.12 },
+    { key = Enum.KeyCode.C, label = "C", hold = 0.12 }
 }
 
 local parentGui = (gethui and gethui()) or game:GetService("CoreGui")
-if parentGui:FindFirstChild("OmegaSea2Missao3UI") then
-    parentGui.OmegaSea2Missao3UI:Destroy()
+if parentGui:FindFirstChild("OmegaMissao3SafeUI") then
+    parentGui.OmegaMissao3SafeUI:Destroy()
 end
 
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "OmegaSea2Missao3UI"
+ScreenGui.Name = "OmegaMissao3SafeUI"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.Parent = parentGui
 
 local StatusBox = Instance.new("TextLabel")
-StatusBox.Size = UDim2.new(0, 370, 0, 54)
+StatusBox.Size = UDim2.new(0, 370, 0, 52)
 StatusBox.Position = UDim2.new(0.5, -185, 0, 12)
 StatusBox.BackgroundColor3 = Color3.fromRGB(18, 20, 26)
 StatusBox.TextColor3 = Color3.fromRGB(120, 255, 160)
@@ -53,20 +50,12 @@ StatusBox.Font = Enum.Font.GothamBold
 StatusBox.TextSize = 11
 StatusBox.TextWrapped = true
 StatusBox.BorderSizePixel = 0
-StatusBox.Text = "[Missao 3] Iniciando..."
+StatusBox.Text = "[Distancia Segura] Iniciando..."
 StatusBox.Parent = ScreenGui
 
 local function setStatus(msg, color)
-    StatusBox.Text = "[Missao 3] " .. msg
+    StatusBox.Text = "[Distancia Segura] " .. msg
     if color then StatusBox.TextColor3 = color end
-end
-
-local function stopTween()
-    if ActiveTween then
-        ActiveTween:Cancel()
-        ActiveTween = nil
-    end
-    TweenGoalPos = nil
 end
 
 local function ensureAura(char)
@@ -95,18 +84,18 @@ local function equipMelee(char)
     return equipped
 end
 
-local function setNoClipPhysics(char, enabled)
+local function setPhysics(char, enabled)
     if not char then return end
     local hrp = char:FindFirstChild("HumanoidRootPart")
     local hum = char:FindFirstChildOfClass("Humanoid")
     if hum and enabled then hum.Sit = false end
 
     if hrp then
-        local bv = hrp:FindFirstChild("OmegaMissao3BV")
+        local bv = hrp:FindFirstChild("OmegaSafeBV")
         if enabled then
             if not bv then
                 bv = Instance.new("BodyVelocity")
-                bv.Name = "OmegaMissao3BV"
+                bv.Name = "OmegaSafeBV"
                 bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
                 bv.Velocity = Vector3.zero
                 bv.Parent = hrp
@@ -123,49 +112,44 @@ local function setNoClipPhysics(char, enabled)
     end
 end
 
-local function travelTo(hrp, targetPos)
-    local dist = (hrp.Position - targetPos).Magnitude
-    if dist <= 4.5 then
-        stopTween()
+local function stepMove(hrp, targetPos, dt)
+    local delta = targetPos - hrp.Position
+    local dist = delta.Magnitude
+    if dist <= 3.5 then
+        hrp.CFrame = CFrame.new(targetPos)
+        hrp.AssemblyLinearVelocity = Vector3.zero
         return true
     end
-
-    if ActiveTween and ActiveTween.PlaybackState == Enum.PlaybackState.Playing and TweenGoalPos and (TweenGoalPos - targetPos).Magnitude <= 4.5 then
-        return false
-    end
-
-    stopTween()
-    TweenGoalPos = targetPos
-    ActiveTween = TweenService:Create(hrp, TweenInfo.new(math.max(dist / Config.TweenSpeed, 0.08), Enum.EasingStyle.Linear), {
-        CFrame = CFrame.new(targetPos)
-    })
-    ActiveTween:Play()
+    local step = math.min(dist, Config.MoveSpeed * dt)
+    local nextPos = hrp.Position + delta.Unit * step
+    hrp.CFrame = CFrame.new(nextPos)
+    hrp.AssemblyLinearVelocity = Vector3.zero
     return false
 end
 
-local function basicAttack(tool)
+local function doBasicTap(tool)
     if tool then
         pcall(function() tool:Activate() end)
     end
     local cam = workspace.CurrentCamera
-    local x = cam and (cam.ViewportSize.X * 0.80) or 680
+    local x = cam and (cam.ViewportSize.X * 0.82) or 700
     local y = cam and (cam.ViewportSize.Y * 0.72) or 450
-    TouchId += 1
-    local id = TouchId
+    TouchCounter += 1
+    local id = TouchCounter
     pcall(function()
         VirtualInputManager:SendTouchEvent(id, Enum.UserInputState.Begin.Value, x, y)
-        task.wait(0.04)
+        task.wait(0.03)
         VirtualInputManager:SendTouchEvent(id, Enum.UserInputState.End.Value, x, y)
     end)
 end
 
-local function castSkill(skill)
+local function doSkill(skillInfo)
     pcall(function()
-        VirtualInputManager:SendKeyEvent(true, skill.key, false, game)
+        VirtualInputManager:SendKeyEvent(true, skillInfo.key, false, game)
     end)
-    task.wait(skill.hold)
+    task.wait(skillInfo.hold)
     pcall(function()
-        VirtualInputManager:SendKeyEvent(false, skill.key, false, game)
+        VirtualInputManager:SendKeyEvent(false, skillInfo.key, false, game)
     end)
 end
 
@@ -186,7 +170,7 @@ local function findIceAdmiral()
 end
 
 local noclipConn = RunService.Stepped:Connect(function()
-    if not _G.OmegaSea2_Missao3_Boss then return end
+    if not _G.OmegaSea2_Missao3_SafeDist then return end
     local char = LocalPlayer.Character
     if char then
         for _, part in ipairs(char:GetDescendants()) do
@@ -198,18 +182,18 @@ local noclipConn = RunService.Stepped:Connect(function()
 end)
 
 task.spawn(function()
-    local currentSkillName = "-"
-    while _G.OmegaSea2_Missao3_Boss do
+    local activeSkillLabel = "-"
+    while _G.OmegaSea2_Missao3_SafeDist do
+        local dt = RunService.Heartbeat:Wait()
         local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
         local hrp = char:WaitForChild("HumanoidRootPart")
         local hum = char:WaitForChild("Humanoid")
 
         if hum.Health <= 0 then
             IsRetreating = false
-            stopTween()
             task.wait(0.8)
         else
-            setNoClipPhysics(char, true)
+            setPhysics(char, true)
             ensureAura(char)
 
             local boss = findIceAdmiral()
@@ -225,8 +209,8 @@ task.spawn(function()
                 end
 
                 if IsRetreating then
-                    local safePos = bHrp.Position + Vector3.new(0, Config.SafeHeight, 0)
-                    travelTo(hrp, safePos)
+                    local safePos = bHrp.Position + Vector3.new(0, 42, Config.SafeDistance)
+                    stepMove(hrp, safePos, dt)
                     setStatus(
                         string.format("Recuando (%d/%d) | Boss: %d/%d",
                             math.floor(hum.Health), math.floor(hum.MaxHealth),
@@ -234,68 +218,58 @@ task.spawn(function()
                         Color3.fromRGB(255, 210, 90)
                     )
                 else
-                    local attackPos = bHrp.Position + Config.AttackOffset
-                    local distToBoss = (hrp.Position - bHrp.Position).Magnitude
+                    -- Mantem distancia lateral/diagonal segura do boss
+                    local angle = os.clock() * 0.65
+                    local safeSpot = bHrp.Position + Vector3.new(
+                        math.cos(angle) * Config.SafeDistance,
+                        Config.SafeHeight,
+                        math.sin(angle) * Config.SafeDistance
+                    )
+                    stepMove(hrp, safeSpot, dt)
+                    hrp.CFrame = CFrame.lookAt(hrp.Position, bHrp.Position)
 
-                    if distToBoss > 12 then
-                        travelTo(hrp, attackPos)
-                        setStatus(
-                            string.format("Aproximando do boss | HP: %d/%d",
-                                math.floor(bHum.Health), math.floor(bHum.MaxHealth)),
-                            Color3.fromRGB(255, 215, 90)
-                        )
-                    else
-                        stopTween()
-                        hrp.AssemblyLinearVelocity = Vector3.zero
-                        hrp.CFrame = CFrame.lookAt(attackPos, bHrp.Position)
-
-                        local tool = equipMelee(char)
-                        if (os.clock() - LastAttackClock) >= 0.25 then
-                            LastAttackClock = os.clock()
-                            basicAttack(tool)
-                        end
-
-                        if (os.clock() - LastSkillClock) >= Config.SkillInterval then
-                            LastSkillClock = os.clock()
-                            local chosen = Skills[SkillIdx]
-                            SkillIdx = (SkillIdx % #Skills) + 1
-                            currentSkillName = chosen.label
-                            castSkill(chosen)
-                        end
-
-                        setStatus(
-                            string.format("Boss: %d/%d | Vida: %d/%d | Skill: [%s]",
-                                math.floor(bHum.Health), math.floor(bHum.MaxHealth),
-                                math.floor(hum.Health), math.floor(hum.MaxHealth),
-                                currentSkillName),
-                            Color3.fromRGB(120, 200, 255)
-                        )
+                    local tool = equipMelee(char)
+                    if (os.clock() - LastHitClock) >= 0.25 then
+                        LastHitClock = os.clock()
+                        doBasicTap(tool)
                     end
+
+                    if (os.clock() - LastSkillClock) >= Config.SkillCooldown then
+                        LastSkillClock = os.clock()
+                        local chosen = Skills[SkillIdx]
+                        SkillIdx = (SkillIdx % #Skills) + 1
+                        activeSkillLabel = chosen.label
+                        doSkill(chosen)
+                    end
+
+                    setStatus(
+                        string.format("Boss: %d/%d | Vida: %d/%d | Dist: %d | [%s]",
+                            math.floor(bHum.Health), math.floor(bHum.MaxHealth),
+                            math.floor(hum.Health), math.floor(hum.MaxHealth),
+                            Config.SafeDistance, activeSkillLabel),
+                        Color3.fromRGB(120, 200, 255)
+                    )
                 end
             else
                 if CommF then
                     local ok, prog = pcall(function() return CommF:InvokeServer("DressrosaQuestProgress") end)
                     if ok and type(prog) == "table" and prog.KilledIceAdmiral then
-                        stopTween()
                         setStatus("SUCESSO! Almirante de Gelo derrotado! Avise para a Parte 4!", Color3.fromRGB(120, 255, 160))
                         break
                     end
                 end
 
-                local waitPos = Config.IceAdmiralPos + Vector3.new(0, 14, 0)
-                if not travelTo(hrp, waitPos) then
-                    setStatus("Indo ate a camara do Almirante de Gelo...", Color3.fromRGB(255, 215, 90))
+                local waitPos = Config.IceAdmiralPos + Vector3.new(0, 14, Config.SafeDistance)
+                if not stepMove(hrp, waitPos, dt) then
+                    setStatus("Indo ate o Almirante de Gelo...", Color3.fromRGB(255, 215, 90))
                 else
                     setStatus("Aguardando respawn do Almirante de Gelo...", Color3.fromRGB(255, 215, 90))
                 end
             end
-
-            RunService.Heartbeat:Wait()
         end
     end
 
-    _G.OmegaSea2_Missao3_Boss = false
+    _G.OmegaSea2_Missao3_SafeDist = false
     if noclipConn then noclipConn:Disconnect() end
-    stopTween()
-    setNoClipPhysics(LocalPlayer.Character, false)
+    setPhysics(LocalPlayer.Character, false)
 end)
