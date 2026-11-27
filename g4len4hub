@@ -1,4 +1,4 @@
-_G.OmegaSea2_Missao3_AutoSkill = true
+_G.OmegaSea2_Missao3_Boss = true
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
@@ -13,33 +13,34 @@ local CommF = Remotes and Remotes:FindFirstChild("CommF_")
 local Config = {
     IceAdmiralPos = Vector3.new(1347.70, 37.30, -1385.00),
     TweenSpeed = 240,
-    AttackHeight = 11.5,
-    AttackRadius = 7.5,
+    AttackOffset = Vector3.new(0, 4.5, 5.5),
     SafeHeight = 55.0,
-    RetreatAtRatio = 0.45,
+    RetreatAtRatio = 0.40,
     ResumeAtRatio = 0.75,
-    SkillCooldown = 0.85
+    SkillInterval = 1.15
 }
 
-local CurrentTween = nil
-local LastTweenTarget = nil
+local ActiveTween = nil
+local TweenGoalPos = nil
 local LastSkillClock = 0
+local LastAttackClock = 0
 local SkillIdx = 1
-local TouchCounter = 500
+local TouchId = 900
 local IsRetreating = false
-local AutoSkills = {
-    { key = Enum.KeyCode.Z, label = "Z", hold = 0.20 },
+
+local Skills = {
+    { key = Enum.KeyCode.Z, label = "Z", hold = 0.22 },
     { key = Enum.KeyCode.X, label = "X", hold = 0.10 },
     { key = Enum.KeyCode.C, label = "C", hold = 0.10 }
 }
 
 local parentGui = (gethui and gethui()) or game:GetService("CoreGui")
-if parentGui:FindFirstChild("OmegaSea2AutoSkillUI") then
-    parentGui.OmegaSea2AutoSkillUI:Destroy()
+if parentGui:FindFirstChild("OmegaSea2Missao3UI") then
+    parentGui.OmegaSea2Missao3UI:Destroy()
 end
 
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "OmegaSea2AutoSkillUI"
+ScreenGui.Name = "OmegaSea2Missao3UI"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.Parent = parentGui
 
@@ -52,84 +53,60 @@ StatusBox.Font = Enum.Font.GothamBold
 StatusBox.TextSize = 11
 StatusBox.TextWrapped = true
 StatusBox.BorderSizePixel = 0
-StatusBox.Text = "[Auto Skill] Iniciando..."
+StatusBox.Text = "[Missao 3] Iniciando..."
 StatusBox.Parent = ScreenGui
 
 local function setStatus(msg, color)
-    StatusBox.Text = "[Auto Skill] " .. msg
+    StatusBox.Text = "[Missao 3] " .. msg
     if color then StatusBox.TextColor3 = color end
 end
 
-local function ensureAura()
-    local char = LocalPlayer.Character
-    if not char then return end
-    if not char:FindFirstChild("HasBuso") and CommF then
+local function stopTween()
+    if ActiveTween then
+        ActiveTween:Cancel()
+        ActiveTween = nil
+    end
+    TweenGoalPos = nil
+end
+
+local function ensureAura(char)
+    if char and not char:FindFirstChild("HasBuso") and CommF then
         pcall(function() CommF:InvokeServer("Buso") end)
     end
 end
 
-local function equipMelee()
-    local char = LocalPlayer.Character
+local function equipMelee(char)
     local bp = LocalPlayer:FindFirstChild("Backpack")
     local hum = char and char:FindFirstChildOfClass("Humanoid")
     if not char or not bp or not hum then return nil end
 
-    local eq = char:FindFirstChildOfClass("Tool")
-    if eq and (eq.ToolTip == "Melee" or eq.Name == "Combat") then
-        return eq
+    local equipped = char:FindFirstChildOfClass("Tool")
+    if equipped and (equipped.ToolTip == "Melee" or equipped.Name == "Combat") then
+        return equipped
     end
+
     for _, tool in ipairs(bp:GetChildren()) do
         if tool:IsA("Tool") and (tool.ToolTip == "Melee" or tool.Name == "Combat") then
             hum:EquipTool(tool)
             return tool
         end
     end
-    return eq
+
+    return equipped
 end
 
-local function autoCastSkill(skillInfo)
-    pcall(function()
-        VirtualInputManager:SendKeyEvent(true, skillInfo.key, false, game)
-    end)
-
-    local cam = workspace.CurrentCamera
-    local tx = cam and (cam.ViewportSize.X * 0.82) or 700
-    local ty = cam and (cam.ViewportSize.Y * 0.72) or 450
-    TouchCounter += 1
-    local tid = TouchCounter
-
-    pcall(function()
-        VirtualInputManager:SendTouchEvent(tid, Enum.UserInputState.Begin.Value, tx, ty)
-    end)
-
-    task.wait(skillInfo.hold)
-
-    pcall(function()
-        VirtualInputManager:SendTouchEvent(tid, Enum.UserInputState.End.Value, tx, ty)
-        VirtualInputManager:SendKeyEvent(false, skillInfo.key, false, game)
-    end)
-end
-
-local function cancelTween()
-    if CurrentTween then
-        CurrentTween:Cancel()
-        CurrentTween = nil
-    end
-    LastTweenTarget = nil
-end
-
-local function setPhysics(char, enabled)
+local function setNoClipPhysics(char, enabled)
     if not char then return end
     local hrp = char:FindFirstChild("HumanoidRootPart")
     local hum = char:FindFirstChildOfClass("Humanoid")
     if hum and enabled then hum.Sit = false end
 
     if hrp then
-        local bv = hrp:FindFirstChild("OmegaAutoSkillBV")
+        local bv = hrp:FindFirstChild("OmegaMissao3BV")
         if enabled then
             if not bv then
                 bv = Instance.new("BodyVelocity")
-                bv.Name = "OmegaAutoSkillBV"
+                bv.Name = "OmegaMissao3BV"
                 bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
                 bv.Velocity = Vector3.zero
                 bv.Parent = hrp
@@ -139,32 +116,60 @@ local function setPhysics(char, enabled)
         end
     end
 
-    for _, p in ipairs(char:GetDescendants()) do
-        if p:IsA("BasePart") then
-            p.CanCollide = not enabled
+    for _, part in ipairs(char:GetDescendants()) do
+        if part:IsA("BasePart") then
+            part.CanCollide = not enabled
         end
     end
 end
 
-local function moveToPos(hrp, targetPos)
+local function travelTo(hrp, targetPos)
     local dist = (hrp.Position - targetPos).Magnitude
-    if dist <= 4 then
-        cancelTween()
+    if dist <= 4.5 then
+        stopTween()
         return true
     end
-    if CurrentTween and CurrentTween.PlaybackState == Enum.PlaybackState.Playing and LastTweenTarget and (LastTweenTarget - targetPos).Magnitude <= 4 then
+
+    if ActiveTween and ActiveTween.PlaybackState == Enum.PlaybackState.Playing and TweenGoalPos and (TweenGoalPos - targetPos).Magnitude <= 4.5 then
         return false
     end
-    cancelTween()
-    LastTweenTarget = targetPos
-    CurrentTween = TweenService:Create(hrp, TweenInfo.new(math.max(dist / Config.TweenSpeed, 0.08), Enum.EasingStyle.Linear), {
+
+    stopTween()
+    TweenGoalPos = targetPos
+    ActiveTween = TweenService:Create(hrp, TweenInfo.new(math.max(dist / Config.TweenSpeed, 0.08), Enum.EasingStyle.Linear), {
         CFrame = CFrame.new(targetPos)
     })
-    CurrentTween:Play()
+    ActiveTween:Play()
     return false
 end
 
-local function getBoss()
+local function basicAttack(tool)
+    if tool then
+        pcall(function() tool:Activate() end)
+    end
+    local cam = workspace.CurrentCamera
+    local x = cam and (cam.ViewportSize.X * 0.80) or 680
+    local y = cam and (cam.ViewportSize.Y * 0.72) or 450
+    TouchId += 1
+    local id = TouchId
+    pcall(function()
+        VirtualInputManager:SendTouchEvent(id, Enum.UserInputState.Begin.Value, x, y)
+        task.wait(0.04)
+        VirtualInputManager:SendTouchEvent(id, Enum.UserInputState.End.Value, x, y)
+    end)
+end
+
+local function castSkill(skill)
+    pcall(function()
+        VirtualInputManager:SendKeyEvent(true, skill.key, false, game)
+    end)
+    task.wait(skill.hold)
+    pcall(function()
+        VirtualInputManager:SendKeyEvent(false, skill.key, false, game)
+    end)
+end
+
+local function findIceAdmiral()
     local enemies = workspace:FindFirstChild("Enemies")
     if not enemies then return nil end
     for _, mob in ipairs(enemies:GetChildren()) do
@@ -181,33 +186,33 @@ local function getBoss()
 end
 
 local noclipConn = RunService.Stepped:Connect(function()
-    if not _G.OmegaSea2_Missao3_AutoSkill then return end
+    if not _G.OmegaSea2_Missao3_Boss then return end
     local char = LocalPlayer.Character
     if char then
-        for _, p in ipairs(char:GetDescendants()) do
-            if p:IsA("BasePart") and p.CanCollide then
-                p.CanCollide = false
+        for _, part in ipairs(char:GetDescendants()) do
+            if part:IsA("BasePart") and part.CanCollide then
+                part.CanCollide = false
             end
         end
     end
 end)
 
 task.spawn(function()
-    local activeSkillLabel = "-"
-    while _G.OmegaSea2_Missao3_AutoSkill do
+    local currentSkillName = "-"
+    while _G.OmegaSea2_Missao3_Boss do
         local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
         local hrp = char:WaitForChild("HumanoidRootPart")
         local hum = char:WaitForChild("Humanoid")
 
         if hum.Health <= 0 then
             IsRetreating = false
-            cancelTween()
+            stopTween()
             task.wait(0.8)
         else
-            setPhysics(char, true)
-            ensureAura()
+            setNoClipPhysics(char, true)
+            ensureAura(char)
 
-            local boss = getBoss()
+            local boss = findIceAdmiral()
             if boss and boss:FindFirstChild("HumanoidRootPart") and boss:FindFirstChildOfClass("Humanoid") then
                 local bHrp = boss.HumanoidRootPart
                 local bHum = boss:FindFirstChildOfClass("Humanoid")
@@ -221,43 +226,48 @@ task.spawn(function()
 
                 if IsRetreating then
                     local safePos = bHrp.Position + Vector3.new(0, Config.SafeHeight, 0)
-                    moveToPos(hrp, safePos)
+                    travelTo(hrp, safePos)
                     setStatus(
-                        string.format("Escudo alto (%d/%d) | Boss: %d/%d",
+                        string.format("Recuando (%d/%d) | Boss: %d/%d",
                             math.floor(hum.Health), math.floor(hum.MaxHealth),
                             math.floor(bHum.Health), math.floor(bHum.MaxHealth)),
                         Color3.fromRGB(255, 210, 90)
                     )
                 else
-                    local angle = os.clock() * 1.4
-                    local orbitOffset = Vector3.new(
-                        math.cos(angle) * Config.AttackRadius,
-                        Config.AttackHeight,
-                        math.sin(angle) * Config.AttackRadius
-                    )
-                    local targetPos = bHrp.Position + orbitOffset
-                    local near = moveToPos(hrp, targetPos)
+                    local attackPos = bHrp.Position + Config.AttackOffset
+                    local distToBoss = (hrp.Position - bHrp.Position).Magnitude
 
-                    if near or (hrp.Position - bHrp.Position).Magnitude <= 18 then
-                        hrp.CFrame = CFrame.lookAt(hrp.Position, Vector3.new(bHrp.Position.X, hrp.Position.Y, bHrp.Position.Z))
-                        local tool = equipMelee()
-                        if tool then
-                            pcall(function() tool:Activate() end)
+                    if distToBoss > 12 then
+                        travelTo(hrp, attackPos)
+                        setStatus(
+                            string.format("Aproximando do boss | HP: %d/%d",
+                                math.floor(bHum.Health), math.floor(bHum.MaxHealth)),
+                            Color3.fromRGB(255, 215, 90)
+                        )
+                    else
+                        stopTween()
+                        hrp.AssemblyLinearVelocity = Vector3.zero
+                        hrp.CFrame = CFrame.lookAt(attackPos, bHrp.Position)
+
+                        local tool = equipMelee(char)
+                        if (os.clock() - LastAttackClock) >= 0.25 then
+                            LastAttackClock = os.clock()
+                            basicAttack(tool)
                         end
 
-                        if (os.clock() - LastSkillClock) >= Config.SkillCooldown then
+                        if (os.clock() - LastSkillClock) >= Config.SkillInterval then
                             LastSkillClock = os.clock()
-                            local chosen = AutoSkills[SkillIdx]
-                            SkillIdx = (SkillIdx % #AutoSkills) + 1
-                            activeSkillLabel = chosen.label
-                            autoCastSkill(chosen)
+                            local chosen = Skills[SkillIdx]
+                            SkillIdx = (SkillIdx % #Skills) + 1
+                            currentSkillName = chosen.label
+                            castSkill(chosen)
                         end
 
                         setStatus(
                             string.format("Boss: %d/%d | Vida: %d/%d | Skill: [%s]",
                                 math.floor(bHum.Health), math.floor(bHum.MaxHealth),
                                 math.floor(hum.Health), math.floor(hum.MaxHealth),
-                                activeSkillLabel),
+                                currentSkillName),
                             Color3.fromRGB(120, 200, 255)
                         )
                     end
@@ -266,15 +276,15 @@ task.spawn(function()
                 if CommF then
                     local ok, prog = pcall(function() return CommF:InvokeServer("DressrosaQuestProgress") end)
                     if ok and type(prog) == "table" and prog.KilledIceAdmiral then
-                        cancelTween()
+                        stopTween()
                         setStatus("SUCESSO! Almirante de Gelo derrotado! Avise para a Parte 4!", Color3.fromRGB(120, 255, 160))
                         break
                     end
                 end
 
                 local waitPos = Config.IceAdmiralPos + Vector3.new(0, 14, 0)
-                if not moveToPos(hrp, waitPos) then
-                    setStatus("Indo ate o Almirante de Gelo...", Color3.fromRGB(255, 215, 90))
+                if not travelTo(hrp, waitPos) then
+                    setStatus("Indo ate a camara do Almirante de Gelo...", Color3.fromRGB(255, 215, 90))
                 else
                     setStatus("Aguardando respawn do Almirante de Gelo...", Color3.fromRGB(255, 215, 90))
                 end
@@ -284,8 +294,8 @@ task.spawn(function()
         end
     end
 
-    _G.OmegaSea2_Missao3_AutoSkill = false
+    _G.OmegaSea2_Missao3_Boss = false
     if noclipConn then noclipConn:Disconnect() end
-    cancelTween()
-    setPhysics(LocalPlayer.Character, false)
+    stopTween()
+    setNoClipPhysics(LocalPlayer.Character, false)
 end)
