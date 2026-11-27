@@ -1,295 +1,146 @@
---!nocheck
--- Ice Admiral [Lv. 700] Auto-Defeat (Frozen Village Cave - Sea 1 -> Sea 2)
--- Estrutura modular interna: Config, Mover, Combat, HUD, Controller
+_G.OmegaSea2_Travel = true
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local VirtualInputManager = game:GetService("VirtualInputManager")
-local CoreGui = game:GetService("CoreGui")
 
 local LocalPlayer = Players.LocalPlayer
+local Remotes = ReplicatedStorage:FindFirstChild("Remotes")
+local CommF = Remotes and Remotes:FindFirstChild("CommF_")
 
--- ============================================================================
--- 1. CONFIGURAÇÃO
--- ============================================================================
 local Config = {
-	BossNames = { "Ice Admiral [Lv. 700]", "Ice Admiral" },
-	FallbackCavePos = Vector3.new(1347, 32, -1325), -- Interior da caverna em Frozen Village
-	OrbitDistance = 12,        -- Distância horizontal segura do boss
-	HeightOffset = 7.5,        -- Altura relativa ao boss (acima para desviar de ataques)
-	SafeRetreatHeight = 28,    -- Altura de recuo quando o HP fica baixo
-	RetreatHpRatio = 0.35,     -- Recua abaixo de 35% de vida
-	RecoverHpRatio = 0.72,     -- Retorna ao combate ao recuperar 72% de vida
-	MaxMoveSpeed = 95,         -- Velocidade estável para BodyVelocity
-	PreferredTools = { "Water Kung Fu", "Dark Step", "Electric", "Combat" },
-	Skills = { "Z", "X", "C" },
-	SkillCooldown = 1.35,
-	AuraCooldown = 3.0,
-	LoopInterval = 0.08,
+    -- Coordenada aproximada do Experienced Captain em Middle Town (Sea 1)
+    MiddleTownCaptainPos = Vector3.new(-778.00, 8.00, 1192.00),
+    MoveSpeed = 260
 }
 
--- ============================================================================
--- 2. MÓDULO DE MOVIMENTO (Noclip + BodyVelocity estável)
--- ============================================================================
-local Mover = {
-	Active = false,
-	VelocityObj = nil,
-	ConnStepped = nil,
-}
-
-function Mover:GetRoot(character)
-	return character and character:FindFirstChild("HumanoidRootPart")
+local parentGui = (gethui and gethui()) or game:GetService("CoreGui")
+if parentGui:FindFirstChild("OmegaSea2TravelUI") then
+    parentGui.OmegaSea2TravelUI:Destroy()
 end
 
-function Mover:EnsureBodyVelocity(root)
-	if not root or not root.Parent then return nil end
-	local bv = self.VelocityObj
-	if not bv or not bv.Parent or bv.Parent ~= root then
-		if bv then pcall(function() bv:Destroy() end) end
-		bv = Instance.new("BodyVelocity")
-		bv.Name = "IceAdmiral_BV"
-		bv.MaxForce = Vector3.new(1e5, 1e5, 1e5)
-		bv.P = 1250
-		bv.Velocity = Vector3.zero
-		bv.Parent = root
-		self.VelocityObj = bv
-	end
-	return bv
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "OmegaSea2TravelUI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = parentGui
+
+local StatusBox = Instance.new("TextLabel")
+StatusBox.Size = UDim2.new(0, 370, 0, 52)
+StatusBox.Position = UDim2.new(0.5, -185, 0, 12)
+StatusBox.BackgroundColor3 = Color3.fromRGB(18, 20, 26)
+StatusBox.TextColor3 = Color3.fromRGB(120, 255, 160)
+StatusBox.Font = Enum.Font.GothamBold
+StatusBox.TextSize = 11
+StatusBox.TextWrapped = true
+StatusBox.BorderSizePixel = 0
+StatusBox.Text = "[Sea 2 Travel] Iniciando..."
+StatusBox.Parent = ScreenGui
+
+local function setStatus(msg, color)
+    StatusBox.Text = "[Sea 2 Travel] " .. msg
+    if color then StatusBox.TextColor3 = color end
 end
 
-function Mover:StopVelocity()
-	if self.VelocityObj then
-		pcall(function() self.VelocityObj:Destroy() end)
-		self.VelocityObj = nil
-	end
+local function setPhysics(char, enabled)
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if hum and enabled then hum.Sit = false end
+
+    if hrp then
+        local bv = hrp:FindFirstChild("OmegaTravelBV")
+        if enabled then
+            if not bv then
+                bv = Instance.new("BodyVelocity")
+                bv.Name = "OmegaTravelBV"
+                bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+                bv.Velocity = Vector3.zero
+                bv.Parent = hrp
+            end
+        elseif bv then
+            bv:Destroy()
+        end
+    end
+
+    for _, part in ipairs(char:GetDescendants()) do
+        if part:IsA("BasePart") then
+            part.CanCollide = not enabled
+        end
+    end
 end
 
-function Mover:SetNoclip(character, enabled)
-	if not character then return end
-	for _, part in ipairs(character:GetDescendants()) do
-		if part:IsA("BasePart") then
-			part.CanCollide = not enabled
-		end
-	end
+local function stepMove(hrp, targetPos, dt)
+    local delta = targetPos - hrp.Position
+    local dist = delta.Magnitude
+    if dist <= 3.5 then
+        hrp.CFrame = CFrame.new(targetPos)
+        hrp.AssemblyLinearVelocity = Vector3.zero
+        return true
+    end
+    local step = math.min(dist, Config.MoveSpeed * dt)
+    local nextPos = hrp.Position + delta.Unit * step
+    hrp.CFrame = CFrame.new(nextPos)
+    hrp.AssemblyLinearVelocity = Vector3.zero
+    return false
 end
 
-function Mover:Start(getCharacterFn)
-	if self.ConnStepped then return end
-	self.Active = true
-	self.ConnStepped = RunService.Stepped:Connect(function()
-		if not self.Active then return end
-		local char = getCharacterFn()
-		if char then
-			self:SetNoclip(char, true)
-		end
-	end)
+local function findCaptainPos()
+    local npcs = workspace:FindFirstChild("NPCs")
+    if not npcs then return nil end
+
+    for _, npc in ipairs(npcs:GetChildren()) do
+        local low = string.lower(npc.Name)
+        if string.find(low, "experienced captain", 1, true) or string.find(low, "capitao", 1, true) then
+            local hrp = npc:FindFirstChild("HumanoidRootPart") or npc:FindFirstChildWhichIsA("BasePart")
+            if hrp then
+                return hrp.Position + Vector3.new(0, 2, 3.5)
+            end
+        end
+    end
+
+    return nil
 end
 
-function Mover:MoveTo(character, targetPos, maxSpeed)
-	local root = self:GetRoot(character)
-	local hum = character and character:FindFirstChildOfClass("Humanoid")
-	if not root or not hum or hum.Health <= 0 then return end
+local noclipConn = RunService.Stepped:Connect(function()
+    if not _G.OmegaSea2_Travel then return end
+    local char = LocalPlayer.Character
+    if char then
+        for _, part in ipairs(char:GetDescendants()) do
+            if part:IsA("BasePart") and part.CanCollide then
+                part.CanCollide = false
+            end
+        end
+    end
+end)
 
-	if hum.Sit then
-		hum.Sit = false
-	end
+task.spawn(function()
+    while _G.OmegaSea2_Travel do
+        local dt = RunService.Heartbeat:Wait()
+        local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+        local hrp = char:WaitForChild("HumanoidRootPart")
+        local hum = char:WaitForChild("Humanoid")
 
-	local bv = self:EnsureBodyVelocity(root)
-	if not bv then return end
+        if hum.Health > 0 then
+            setPhysics(char, true)
 
-	local delta = targetPos - root.Position
-	local dist = delta.Magnitude
-	if dist < 1.5 then
-		bv.Velocity = Vector3.zero
-		return
-	end
+            local targetPos = findCaptainPos() or Config.MiddleTownCaptainPos
+            local arrived = stepMove(hrp, targetPos, dt)
 
-	local speed = math.min(maxSpeed or Config.MaxMoveSpeed, math.max(24, dist * 4.5))
-	bv.Velocity = delta.Unit * speed
-end
+            if not arrived then
+                setStatus("Indo ate o Capitao em Middle Town...", Color3.fromRGB(255, 215, 90))
+            else
+                setStatus("Acionando viagem para o Second Sea...", Color3.fromRGB(120, 200, 255))
+                if CommF then
+                    pcall(function()
+                        CommF:InvokeServer("TravelDressrosa")
+                    end)
+                end
+                task.wait(1.2)
+            end
+        end
+    end
 
-function Mover:FacePosition(character, lookPos)
-	local root = self:GetRoot(character)
-	if not root then return end
-	local flatLook = Vector3.new(lookPos.X, root.Position.Y, lookPos.Z)
-	if (flatLook - root.Position).Magnitude > 0.2 then
-		root.CFrame = CFrame.lookAt(root.Position, flatLook)
-	end
-end
-
-function Mover:Cleanup(character)
-	self.Active = false
-	if self.ConnStepped then
-		self.ConnStepped:Disconnect()
-		self.ConnStepped = nil
-	end
-	self:StopVelocity()
-	if character then
-		self:SetNoclip(character, false)
-	end
-end
-
--- ============================================================================
--- 3. MÓDULO DE COMBATE (Aura/Buso Haki, Arma/Estilo, Básico + Z/X/C)
--- ============================================================================
-local Combat = {
-	LastAuraTime = 0,
-	LastSkillTime = 0,
-	SkillIndex = 1,
-	OrbitAngle = 0,
-}
-
-function Combat:IsAuraActive(character)
-	if not character then return false end
-	if character:FindFirstChild("HasBuso") or character:FindFirstChild("Buso") then
-		return true
-	end
-	for _, d in ipairs(character:GetDescendants()) do
-		if d:IsA("BasePart") and d.Material == Enum.Material.Neon then
-			return true
-		end
-	end
-	return false
-end
-
-function Combat:EnsureAura(character)
-	if not character or self:IsAuraActive(character) then return end
-	local now = os.clock()
-	if now - self.LastAuraTime < Config.AuraCooldown then return end
-	self.LastAuraTime = now
-
-	-- Tenta ativar via Remotes comuns do jogo sem travar caso o nome varie
-	pcall(function()
-		local remotes = ReplicatedStorage:FindFirstChild("Remotes")
-		local commF = remotes and remotes:FindFirstChild("CommF_")
-		if commF and commF:IsA("RemoteFunction") then
-			commF:InvokeServer("Buso")
-		end
-	end)
-
-	-- Fallback por input de tecla (compatível com alguns setups de emulador/executor)
-	pcall(function()
-		VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.J, false, game)
-		task.wait(0.05)
-		VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.J, false, game)
-	end)
-end
-
-function Combat:FindBestTool()
-	local backpack = LocalPlayer:FindFirstChildOfClass("Backpack")
-	local char = LocalPlayer.Character
-
-	if char then
-		for _, item in ipairs(char:GetChildren()) do
-			if item:IsA("Tool") then
-				return item
-			end
-		end
-	end
-
-	if backpack then
-		for _, preferred in ipairs(Config.PreferredTools) do
-			local found = backpack:FindFirstChild(preferred)
-			if found and found:IsA("Tool") then
-				return found
-			end
-		end
-		for _, item in ipairs(backpack:GetChildren()) do
-			if item:IsA("Tool") then
-				return item
-			end
-		end
-	end
-
-	return nil
-end
-
-function Combat:EquipBestTool(character)
-	local hum = character and character:FindFirstChildOfClass("Humanoid")
-	if not hum or hum.Health <= 0 then return nil end
-
-	local tool = self:FindBestTool()
-	if tool and tool.Parent ~= character then
-		pcall(function()
-			hum:EquipTool(tool)
-		end)
-	end
-	return tool
-end
-
-function Combat:TriggerBasicAttack(character)
-	local tool = self:EquipBestTool(character)
-	if tool then
-		pcall(function()
-			tool:Activate()
-		end)
-	end
-
-	-- Reforço para ambiente mobile / virtual click
-	pcall(function()
-		local cam = workspace.CurrentCamera
-		local pos = cam and Vector2.new(cam.ViewportSize.X * 0.75, cam.ViewportSize.Y * 0.5) or Vector2.new(500, 300)
-		VirtualInputManager:SendMouseButtonEvent(pos.X, pos.Y, 0, true, game, 1)
-		task.wait(0.03)
-		VirtualInputManager:SendMouseButtonEvent(pos.X, pos.Y, 0, false, game, 1)
-	end)
-end
-
-function Combat:TriggerNextSkill(character, dt)
-	self.OrbitAngle = (self.OrbitAngle + dt * 1.35) % (math.pi * 2)
-
-	local now = os.clock()
-	if now - self.LastSkillTime < Config.SkillCooldown then
-		return nil
-	end
-
-	self:EquipBestTool(character)
-	local keyName = Config.Skills[self.SkillIndex]
-	self.SkillIndex = (self.SkillIndex % #Config.Skills) + 1
-	self.LastSkillTime = now
-
-	local keyCode = Enum.KeyCode[keyName]
-	if keyCode then
-		pcall(function()
-			VirtualInputManager:SendKeyEvent(true, keyCode, false, game)
-			task.wait(0.06)
-			VirtualInputManager:SendKeyEvent(false, keyCode, false, game)
-		end)
-	end
-
-	return keyName
-end
-
--- ============================================================================
--- 4. MÓDULO DE HUD COMPACTO (Topo da tela)
--- ============================================================================
-local HUD = {
-	Gui = nil,
-	BossLabel = nil,
-	BossBarFill = nil,
-	PlayerLabel = nil,
-	PlayerBarFill = nil,
-	ActionLabel = nil,
-}
-
-function HUD:Create()
-	self:Destroy()
-
-	local parentTarget = nil
-	pcall(function() parentTarget = CoreGui end)
-	if not parentTarget then
-		parentTarget = LocalPlayer:WaitForChild("PlayerGui")
-	end
-
-	local gui = Instance.new("ScreenGui")
-	gui.Name = "IceAdmiralCompactHUD"
-	gui.ResetOnSpawn = false
-	gui.DisplayOrder = 999
-	gui.Parent = parentTarget
-
-	local frame = Instance.new("Frame")
-	frame.Name = "Container"
-	frame.Size = UDim2.fromOffset(310, 74)
-	frame.Position = UDim2.new(0.5, -155, 0, 8)
-	frame.BackgroundColor3 = Color3.fromRGB(16, 20, 28)
+    _G.OmegaSea2_Travel = false
+    if noclipConn then noclipConn:Disconnect() end
+    setPhysics(LocalPlayer.Character, false)
+end)
